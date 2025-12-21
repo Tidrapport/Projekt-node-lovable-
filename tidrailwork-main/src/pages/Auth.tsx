@@ -149,20 +149,10 @@ const Auth = () => {
 
     setLoading(true);
     try {
-      // Use Auth context to login (stores token)
-      await login(email.trim(), password);
+      const companyId = verifiedCompany?.id ? Number(verifiedCompany.id) : undefined;
 
-      // After login, fetch /auth/me to get user and verify company membership
-      if (requireCompanyCheck) {
-        const me = await getMe();
-        const loggedUser = me.user as any;
-        if (String(loggedUser.company_id) !== String(verifiedCompany?.id)) {
-          // Not a member of selected company
-          logout();
-          toast.error("Du tillhör inte detta företag. Kontrollera ditt företags-ID.");
-          return;
-        }
-      }
+      // Use Auth context to login (stores token)
+      await login(email.trim(), password, companyId);
 
       toast.success("Inloggad!");
       navigate("/");

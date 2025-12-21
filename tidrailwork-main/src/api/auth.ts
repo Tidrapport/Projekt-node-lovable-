@@ -1,33 +1,37 @@
-import { apiFetch } from "./client";
+import { api, clearToken } from "./client";
+
+export type AuthUser = {
+  id: number;
+  email: string;
+  role: "user" | "admin" | "super_admin";
+  company_id: number;
+  full_name?: string;
+};
+
+export type LoginResponse = {
+  access_token: string;
+  user: AuthUser;
+};
 
 export type MeResponse = {
-  user: {
-    id: number | string;
-    email: string;
-    role: string;
-    company_id: number | string | null;
-    full_name?: string;
-  };
-  role: string;
-  company_id: number | string | null;
+  user: AuthUser;
+  role: AuthUser["role"];
+  company_id: number;
   is_admin: boolean;
   is_super_admin: boolean;
   impersonated: boolean;
 };
 
-export async function login(email: string, password: string) {
-  const data = await apiFetch<{ access_token: string }>("/auth/login", {
-    json: { email, password },
-  });
-
-  localStorage.setItem("access_token", data.access_token);
-  return data;
+export async function login(email: string, password: string, company_id?: number) {
+  return api.post<LoginResponse>("/auth/login", { email, password, company_id });
 }
 
-export async function getMe() {
-  return apiFetch<MeResponse>("/auth/me");
+export async function me() {
+  return api.get<MeResponse>("/auth/me");
 }
+
+export const getMe = me; // backward compatibility
 
 export function logout() {
-  localStorage.removeItem("access_token");
+  clearToken();
 }

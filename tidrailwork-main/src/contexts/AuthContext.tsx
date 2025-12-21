@@ -1,67 +1,102 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { clearToken, getToken, setToken } from "@/api/client";
 import * as authApi from "@/api/auth";
 
-type User = authApi.MeResponse["user"];
-
-type AuthContextValue = {
-  user: User | null;
+type AuthContextType = {
+  user: authApi.AuthUser | null;
   loading: boolean;
-  isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  refreshMe: () => Promise<void>;
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  companyId: number | null;
+  company: { id: number; name?: string } | null;
+  login: (email: string, password: string, company_id?: number) => Promise<void>;
   logout: () => void;
+  refresh: () => Promise<void>;
+  signOut: () => void;
 };
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<authApi.AuthUser | null>(null);
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [company, setCompany] = useState<{ id: number; name?: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-  const isAuthenticated = !!user;
-
-  async function refreshMe() {
-    const token = localStorage.getItem("access_token");
+  const refresh = useCallback(async () => {
+    const token = getToken();
     if (!token) {
       setUser(null);
+      setCompanyId(null);
+      setCompany(null);
+      setIsAdmin(false);
+      setIsSuperAdmin(false);
       return;
     }
-    const me = await authApi.getMe();
+    const me = await authApi.me();
     setUser(me.user);
-  }
-
-  async function login(email: string, password: string) {
-    setLoading(true);
-    try {
-      await authApi.login(email, password);
-      await refreshMe();
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function logout() {
-    authApi.logout();
-    setUser(null);
-  }
+    setCompanyId(me.company_id ?? null);
+    setCompany(me.company_id ? { id: me.company_id } : null);
+    setIsAdmin(me.is_admin);
+    setIsSuperAdmin(me.is_super_admin);
+  }, []);
 
   useEffect(() => {
     (async () => {
       try {
-        await refreshMe();
+        await refresh();
       } catch {
-        // token kan vara invalid -> rensa
-        authApi.logout();
+        clearToken();
         setUser(null);
+        setCompanyId(null);
+        setCompany(null);
+        setIsAdmin(false);
+        setIsSuperAdmin(false);
       } finally {
         setLoading(false);
       }
     })();
+  }, [refresh]);
+
+  const login = useCallback(
+    async (email: string, password: string, company_id?: number) => {
+      setLoading(true);
+      try {
+        const res = await authApi.login(email, password, company_id);
+        setToken(res.access_token);
+        await refresh();
+      } finally {
+        setLoading(false);
+      }
+    },
+    [refresh]
+  );
+
+  const logout = useCallback(() => {
+    clearToken();
+    setUser(null);
+    setCompanyId(null);
+    setCompany(null);
+    setIsAdmin(false);
+    setIsSuperAdmin(false);
   }, []);
 
-  const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, isAuthenticated, login, refreshMe, logout }),
-    [user, loading, isAuthenticated]
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      isAdmin,
+      isSuperAdmin,
+      companyId,
+      company,
+      login,
+      logout,
+      refresh,
+      signOut: logout,
+    }),
+    [user, loading, isAdmin, isSuperAdmin, companyId, company, login, logout, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
