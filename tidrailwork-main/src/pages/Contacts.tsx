@@ -3,7 +3,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Users, Phone, Mail, Search, Crown } from "lucide-react";
 
@@ -12,6 +11,7 @@ interface Contact {
   full_name: string;
   phone: string | null;
   email: string | null;
+  role?: string | null;
   employee_type: 'anställd' | 'platschef' | 'inhyrd' | null;
   isAdmin: boolean;
 }
@@ -29,26 +29,20 @@ const Contacts = () => {
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    if (companyId) {
-      fetchContacts();
-    }
-  }, [companyId]);
+    if (!companyId) return;
+    fetchContacts();
+  }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchContacts = async () => {
+    setLoading(true);
     try {
-      const profiles = await apiFetch(`/admin/users?company_id=${companyId}`);
-
-      // Fetch admin roles for these users
-      const adminRoles = await apiFetch(`/admin/user-roles?role=admin`);
-
-      const adminUserIds = new Set((adminRoles || []).map((r: any) => r.user_id));
-
-      const contactsWithRoles = (profiles || []).map((profile: any) => ({
-        ...profile,
-        isAdmin: adminUserIds.has(profile.id),
-      }));
-
-      setContacts(contactsWithRoles);
+      const profiles = await apiFetch(`/contacts${companyId ? `?company_id=${companyId}` : ""}`);
+      const contactsWithRoles = (profiles || []).map((profile: any) => {
+        const role = (profile.role || "").toLowerCase();
+        const isAdmin = role === "admin" || role === "super_admin";
+        return { ...profile, isAdmin };
+      });
+      setContacts(contactsWithRoles || []);
     } catch (error) {
       console.error("Error fetching contacts:", error);
     } finally {

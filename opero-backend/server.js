@@ -645,7 +645,24 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
   if (!companyId) return res.status(400).json({ error: "Company not found" });
 
   db.all(
-    "SELECT id, email, role, company_id, (first_name || ' ' || last_name) as full_name, hourly_wage FROM users WHERE company_id = ? ORDER BY id DESC",
+    `SELECT
+      id,
+      email,
+      role,
+      company_id,
+      (first_name || ' ' || last_name) as full_name,
+      first_name,
+      last_name,
+      phone,
+      hourly_wage,
+      emergency_contact,
+      employee_type,
+      employee_number,
+      tax_table,
+      created_at
+     FROM users
+     WHERE company_id = ?
+     ORDER BY id DESC`,
     [companyId],
     (err, rows) => {
       if (err) {
@@ -667,7 +684,11 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
     role = "user",
     password,
     company_id,
-    hourly_wage = null
+    hourly_wage = null,
+    emergency_contact = null,
+    employee_type = null,
+    employee_number = null,
+    tax_table = null
   } = req.body;
 
   if (!first_name || !last_name || !email || !password) {
@@ -688,8 +709,8 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
 
   db.run(
     `INSERT INTO users
-      (username, email, password, role, company_id, first_name, last_name, phone, hourly_wage)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (username, email, password, role, company_id, first_name, last_name, phone, hourly_wage, emergency_contact, employee_type, employee_number, tax_table)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       username,
       cleanEmail,
@@ -699,7 +720,11 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
       first_name.trim(),
       last_name.trim(),
       String(phone || "").trim(),
-      hourly_wage !== undefined && hourly_wage !== null && hourly_wage !== "" ? Number(hourly_wage) : null
+      hourly_wage !== undefined && hourly_wage !== null && hourly_wage !== "" ? Number(hourly_wage) : null,
+      emergency_contact ? String(emergency_contact).trim() : null,
+      employee_type ? String(employee_type).trim() : null,
+      employee_number ? String(employee_number).trim() : null,
+      tax_table !== undefined && tax_table !== null && tax_table !== "" ? Number(tax_table) : null
     ],
     function (err) {
       if (err) {
@@ -722,7 +747,11 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
         hourly_wage:
           hourly_wage !== undefined && hourly_wage !== null && hourly_wage !== ""
             ? Number(hourly_wage)
-            : null
+            : null,
+        emergency_contact: emergency_contact ? String(emergency_contact).trim() : null,
+        employee_type: employee_type ? String(employee_type).trim() : null,
+        employee_number: employee_number ? String(employee_number).trim() : null,
+        tax_table: tax_table !== undefined && tax_table !== null && tax_table !== "" ? Number(tax_table) : null
       });
     }
   );
@@ -736,7 +765,12 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     last_name,
     phone,
     role,
-    hourly_wage
+    hourly_wage,
+    emergency_contact,
+    employee_type,
+    employee_number,
+    tax_table,
+    password
   } = req.body;
 
   const fields = [];
@@ -763,6 +797,26 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     params.push(
       hourly_wage !== null && hourly_wage !== "" ? Number(hourly_wage) : null
     );
+  }
+  if (emergency_contact !== undefined) {
+    fields.push("emergency_contact = ?");
+    params.push(emergency_contact ? String(emergency_contact).trim() : null);
+  }
+  if (employee_type !== undefined) {
+    fields.push("employee_type = ?");
+    params.push(employee_type ? String(employee_type).trim() : null);
+  }
+  if (employee_number !== undefined) {
+    fields.push("employee_number = ?");
+    params.push(employee_number ? String(employee_number).trim() : null);
+  }
+  if (tax_table !== undefined) {
+    fields.push("tax_table = ?");
+    params.push(tax_table !== null && tax_table !== "" ? Number(tax_table) : null);
+  }
+  if (password !== undefined) {
+    fields.push("password = ?");
+    params.push(password ? bcrypt.hashSync(password, 10) : null);
   }
 
   if (!fields.length) {
@@ -833,6 +887,70 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
       }
     );
   });
+});
+
+// Återställ lösenord (admin)
+app.post("/admin/users/:id/reset-password", requireAuth, requireAdmin, (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: "password required" });
+
+  db.get(`SELECT company_id FROM users WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT user for reset:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row) return res.status(404).json({ error: "Not found" });
+
+    const actorRole = (req.user.role || "").toLowerCase();
+    const scopedCompany = getScopedCompanyId(req);
+    if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const hash = bcrypt.hashSync(password, 10);
+    db.run(`UPDATE users SET password = ? WHERE id = ?`, [hash, id], function (uErr) {
+      if (uErr) {
+        console.error("DB-fel vid reset password:", uErr);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.json({ success: true });
+    });
+  });
+});
+
+// Kontaktlista: alla användare i företag (ingen admin-krav, bara auth och tenant-scope)
+app.get("/contacts", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  db.all(
+    `SELECT
+      id,
+      email,
+      role,
+      company_id,
+      (first_name || ' ' || last_name) AS full_name,
+      first_name,
+      last_name,
+      phone,
+      emergency_contact,
+      employee_type,
+      employee_number,
+      tax_table,
+      created_at
+     FROM users
+     WHERE company_id = ?
+     ORDER BY first_name, last_name`,
+    [companyId],
+    (err, rows) => {
+      if (err) {
+        console.error("DB-fel vid GET /contacts:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.json(rows || []);
+    }
+  );
 });
 
 // Hämta inloggad användare (token)

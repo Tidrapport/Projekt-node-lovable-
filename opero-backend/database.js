@@ -30,6 +30,10 @@ db.serialize(() => {
       last_name  TEXT,
       phone      TEXT,
       hourly_wage REAL,
+      emergency_contact TEXT,
+      employee_type TEXT,
+      employee_number TEXT,
+      tax_table INTEGER,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (company_id) REFERENCES companies(id)
     );
@@ -49,6 +53,34 @@ db.serialize(() => {
         } else {
           console.log('Kolumnen "hourly_wage" har lagts till i users.');
         }
+      });
+    }
+    const hasEmergency = columns.some((col) => col.name === "emergency_contact");
+    if (!hasEmergency) {
+      db.run(`ALTER TABLE users ADD COLUMN emergency_contact TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till emergency_contact:", alterErr);
+        else console.log('Kolumnen "emergency_contact" har lagts till i users.');
+      });
+    }
+    const hasEmployeeType = columns.some((col) => col.name === "employee_type");
+    if (!hasEmployeeType) {
+      db.run(`ALTER TABLE users ADD COLUMN employee_type TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till employee_type:", alterErr);
+        else console.log('Kolumnen "employee_type" har lagts till i users.');
+      });
+    }
+    const hasEmployeeNumber = columns.some((col) => col.name === "employee_number");
+    if (!hasEmployeeNumber) {
+      db.run(`ALTER TABLE users ADD COLUMN employee_number TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till employee_number:", alterErr);
+        else console.log('Kolumnen "employee_number" har lagts till i users.');
+      });
+    }
+    const hasTaxTable = columns.some((col) => col.name === "tax_table");
+    if (!hasTaxTable) {
+      db.run(`ALTER TABLE users ADD COLUMN tax_table INTEGER;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till tax_table:", alterErr);
+        else console.log('Kolumnen "tax_table" har lagts till i users.');
       });
     }
   });

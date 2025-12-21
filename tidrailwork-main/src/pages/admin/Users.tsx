@@ -1,389 +1,239 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Users as UsersIcon, Shield, User, DollarSign, Phone, UserPlus, Copy, Key, Eye, EyeOff, Pencil } from "lucide-react";
+import { Users as UsersIcon, Shield, User, Phone, UserPlus, Pencil, Trash2, Key } from "lucide-react";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
-import { COMMON_TAX_TABLES } from "@/lib/taxCalculations";
 
-interface UserProfile {
-  id: string;
-  full_name: string;
-  email: string | null;
-  created_at: string;
-  hourly_wage: number;
-  tax_table: number;
-  phone: string | null;
-  emergency_contact: string | null;
-  employee_type: 'anställd' | 'platschef' | 'inhyrd' | null;
-  employee_number: string | null;
-  user_roles: Array<{ role: string }>;
-}
+type UserRow = {
+  id: string | number;
+  email: string;
+  role: string;
+  company_id: string | number | null;
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  hourly_wage?: number | null;
+  tax_table?: number | null;
+  created_at?: string | null;
+  phone?: string | null;
+  emergency_contact?: string | null;
+  employee_type?: string | null;
+  employee_number?: string | null;
+};
 
-const EMPLOYEE_TYPES = [
-  { value: 'anställd', label: 'Anställd' },
-  { value: 'platschef', label: 'Platschef' },
-  { value: 'inhyrd', label: 'Inhyrd' },
+const roleOptions = [
+  { value: "user", label: "Användare" },
+  { value: "admin", label: "Admin" },
+];
+
+const employeeTypes = [
+  { value: "anställd", label: "Anställd" },
+  { value: "inhyrd", label: "Inhyrd" },
+  { value: "platschef", label: "Platschef" },
 ];
 
 const AdminUsers = () => {
-  const { companyId } = useAuth();
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [hourlyWage, setHourlyWage] = useState<string>("");
-  const [taxTable, setTaxTable] = useState<string>("30");
-  
-  // New user form state
+  const { companyId, isSuperAdmin } = useAuth();
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [loading, setLoading] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newUserName, setNewUserName] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPhone, setNewUserPhone] = useState("");
-  const [newUserEmergencyContact, setNewUserEmergencyContact] = useState("");
-  const [newUserEmployeeType, setNewUserEmployeeType] = useState<string>("anställd");
-  const [newUserEmployeeNumber, setNewUserEmployeeNumber] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
-  
-  // Generated password display state
-  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-  const [generatedPassword, setGeneratedPassword] = useState("");
-  const [createdUserName, setCreatedUserName] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  
-  // Reset password state
-  const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
-  const [resetPasswordUserName, setResetPasswordUserName] = useState("");
-  const [newGeneratedPassword, setNewGeneratedPassword] = useState("");
-  const [isResetting, setIsResetting] = useState(false);
-  
-  // Edit profile state
-  const [editProfileUserId, setEditProfileUserId] = useState<string | null>(null);
-  const [editProfileName, setEditProfileName] = useState("");
-  const [editProfileEmail, setEditProfileEmail] = useState("");
-  const [editProfilePhone, setEditProfilePhone] = useState("");
-  const [editProfileEmergency, setEditProfileEmergency] = useState("");
-  const [editProfileEmployeeType, setEditProfileEmployeeType] = useState<string>("anställd");
-  const [editProfileEmployeeNumber, setEditProfileEmployeeNumber] = useState("");
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [resetUser, setResetUser] = useState<UserRow | null>(null);
 
-  useEffect(() => {
-    if (companyId) {
-      fetchUsers();
-    }
-  }, [companyId]);
+  // New user form state
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newEmergency, setNewEmergency] = useState("");
+  const [newEmployeeType, setNewEmployeeType] = useState<string>("anställd");
+  const [newEmployeeNumber, setNewEmployeeNumber] = useState("");
+  const [newRole, setNewRole] = useState<string>("user");
+  const [newHourlyWage, setNewHourlyWage] = useState("");
+  const [newTaxTable, setNewTaxTable] = useState("");
+  const [newCompanyId, setNewCompanyId] = useState<string>("");
+  const [generatedPassword, setGeneratedPassword] = useState<string>("");
+
+  // Edit form state
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmergency, setEditEmergency] = useState("");
+  const [editEmployeeType, setEditEmployeeType] = useState<string>("anställd");
+  const [editEmployeeNumber, setEditEmployeeNumber] = useState("");
+  const [editRole, setEditRole] = useState<string>("user");
+  const [editHourlyWage, setEditHourlyWage] = useState("");
+  const [editTaxTable, setEditTaxTable] = useState("");
+
+  const targetCompanyId = useMemo(() => {
+    if (!isSuperAdmin) return companyId ? String(companyId) : "";
+    return newCompanyId || (companyId ? String(companyId) : "");
+  }, [companyId, isSuperAdmin, newCompanyId]);
 
   const fetchUsers = async () => {
-    let query = supabase
-      .from("profiles")
-      .select(`
-        *,
-        user_roles(role)
-      `)
-      .order("created_at", { ascending: false });
-
-    if (companyId) {
-      query = query.eq("company_id", companyId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      toast.error(error.message);
-    } else if (data) {
-      setUsers(data as UserProfile[]);
+    setLoading(true);
+    try {
+      const data = await apiFetch<UserRow[]>(`/admin/users${companyId ? `?company_id=${companyId}` : ""}`);
+      setUsers(data || []);
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte hämta användare");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const toggleAdminRole = async (userId: string, isCurrentlyAdmin: boolean) => {
-    if (isCurrentlyAdmin) {
-      const { error } = await supabase
-        .from("user_roles")
-        .delete()
-        .eq("user_id", userId)
-        .eq("role", "admin");
+  useEffect(() => {
+    fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
 
-      if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success("Admin-rättigheter borttagna");
-        fetchUsers();
-      }
-    } else {
-      const { error } = await supabase
-        .from("user_roles")
-        .insert({
-          user_id: userId,
-          role: "admin",
-        });
-
-      if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success("Admin-rättigheter tillagda");
-        fetchUsers();
-      }
-    }
+  const generatePassword = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let pwd = "";
+    for (let i = 0; i < 8; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
+    return pwd + "Aa1";
   };
 
-  const updateHourlyWage = async (userId: string) => {
-    const wage = parseFloat(hourlyWage);
-    const tax = parseInt(taxTable);
-    
-    if (isNaN(wage) || wage < 0) {
-      toast.error("Ange en giltig timlön");
-      return;
-    }
-
-    if (isNaN(tax) || tax < 0 || tax > 100) {
-      toast.error("Ange en giltig skattetabell");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({ 
-        hourly_wage: wage,
-        tax_table: tax
-      })
-      .eq("id", userId);
-
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Timlön och skattetabell uppdaterad");
-      setEditingUserId(null);
-      fetchUsers();
-    }
+  const splitName = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return { first: parts[0], last: "-" };
+    return { first: parts[0], last: parts.slice(1).join(" ") };
   };
 
-  const openEditDialog = (user: UserProfile) => {
-    setEditingUserId(user.id);
-    setHourlyWage(user.hourly_wage?.toString() || "0");
-    setTaxTable(user.tax_table?.toString() || "30");
-  };
-
-  const resetNewUserForm = () => {
-    setNewUserName("");
-    setNewUserEmail("");
-    setNewUserPhone("");
-    setNewUserEmergencyContact("");
-    setNewUserEmployeeType("anställd");
-    setNewUserEmployeeNumber("");
-  };
-
-  const generateSecurePassword = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let password = '';
-    for (let i = 0; i < 8; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    // Ensure at least one uppercase, one lowercase, one number
-    password += 'Aa1';
-    return password;
-  };
-
-  const createNewUser = async () => {
-    if (!newUserName.trim() || !newUserEmail.trim()) {
+  const handleCreate = async () => {
+    if (!newName.trim() || !newEmail.trim()) {
       toast.error("Namn och e-post är obligatoriska");
       return;
     }
-
-    if (!companyId) {
-      toast.error("Inget företag kopplat");
+    if (!targetCompanyId) {
+      toast.error("Ingen company_id satt");
       return;
     }
-
-    setIsCreating(true);
-
+    const password = generatePassword();
+    const { first, last } = splitName(newName);
+    setLoading(true);
     try {
-      // Generate a secure password
-      const tempPassword = generateSecurePassword();
-      
-      const redirectUrl = `${window.location.origin}/`;
-      
-      // Create the user via backend API
-      try {
-        const authResp = await apiFetch("/admin/users", {
-          method: "POST",
-          json: {
-            email: newUserEmail.trim(),
-            password: tempPassword,
-            full_name: newUserName.trim(),
-            company_id: companyId,
-            phone: newUserPhone.trim() || null,
-            emergency_contact: newUserEmergencyContact.trim() || null,
-            employee_type: newUserEmployeeType,
-            employee_number: newUserEmployeeNumber.trim() || null,
-            redirectTo: redirectUrl,
-          },
-        });
-
-        // Show the generated password to admin
-        setGeneratedPassword(tempPassword);
-        setCreatedUserName(newUserName.trim());
-        setShowPasswordDialog(true);
-
-        resetNewUserForm();
-        setIsAddDialogOpen(false);
-        fetchUsers();
-      } catch (err: any) {
-        throw err;
-      }
-    } catch (error: any) {
-      console.error("Create user error:", error);
-      if (error.message?.includes("already registered")) {
-        toast.error("E-postadressen är redan registrerad");
-      } else {
-        toast.error(error.message || "Kunde inte skapa användare");
-      }
+      await apiFetch("/admin/users", {
+        method: "POST",
+        json: {
+          first_name: first,
+          last_name: last,
+          email: newEmail.trim(),
+          phone: newPhone.trim() || null,
+          emergency_contact: newEmergency.trim() || null,
+          employee_type: newEmployeeType,
+          employee_number: newEmployeeNumber.trim() || null,
+          role: newRole,
+          password,
+          company_id: Number(targetCompanyId),
+          hourly_wage: newHourlyWage ? Number(newHourlyWage) : null,
+          tax_table: newTaxTable ? Number(newTaxTable) : null,
+        },
+      });
+      setGeneratedPassword(password);
+      toast.success(`Användare skapad. Tillfälligt lösenord: ${password}`);
+      setIsAddDialogOpen(false);
+      setNewName("");
+      setNewEmail("");
+      setNewPhone("");
+      setNewEmergency("");
+      setNewEmployeeType("anställd");
+      setNewEmployeeNumber("");
+      setNewRole("user");
+      setNewHourlyWage("");
+      setNewTaxTable("");
+      fetchUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte skapa användare");
     } finally {
-      setIsCreating(false);
+      setLoading(false);
     }
   };
 
-  const copyPassword = () => {
-    navigator.clipboard.writeText(generatedPassword || newGeneratedPassword);
-    toast.success("Lösenord kopierat!");
+  const openEdit = (user: UserRow) => {
+    setEditingUser(user);
+    setEditName(user.full_name || `${user.first_name || ""} ${user.last_name || ""}`.trim());
+    setEditEmail(user.email || "");
+    setEditPhone(user.phone || "");
+    setEditEmergency(user.emergency_contact || "");
+    setEditEmployeeType(user.employee_type || "anställd");
+    setEditEmployeeNumber(user.employee_number || "");
+    setEditRole((user.role || "user").toLowerCase());
+    setEditHourlyWage(user.hourly_wage != null ? String(user.hourly_wage) : "");
+    setEditTaxTable(user.tax_table != null ? String(user.tax_table) : "");
+    setIsEditDialogOpen(true);
   };
 
-  const openResetPasswordDialog = (userId: string, userName: string) => {
-    setResetPasswordUserId(userId);
-    setResetPasswordUserName(userName);
-    setNewGeneratedPassword("");
-    setShowPassword(false);
-  };
-
-  const resetUserPassword = async () => {
-    if (!resetPasswordUserId) return;
-    
-    setIsResetting(true);
-    try {
-      const newPassword = generateSecurePassword();
-      
-      // Call edge function to reset password
-      const session = { access_token: localStorage.getItem("access_token") };
-      
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/reset-user-password`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({
-            userId: resetPasswordUserId,
-            newPassword: newPassword,
-          }),
-        }
-      );
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to reset password');
-      }
-      
-      setNewGeneratedPassword(newPassword);
-      toast.success("Lösenord återställt!");
-    } catch (error: any) {
-      console.error("Reset password error:", error);
-      toast.error(error.message || "Kunde inte återställa lösenord");
-    } finally {
-      setIsResetting(false);
-    }
-  };
-
-  const getEmployeeTypeLabel = (type: string | null) => {
-    const found = EMPLOYEE_TYPES.find(t => t.value === type);
-    return found?.label || 'Anställd';
-  };
-
-  const getEmployeeTypeBadgeVariant = (type: string | null) => {
-    switch (type) {
-      case 'platschef':
-        return 'default';
-      case 'inhyrd':
-        return 'secondary';
-      default:
-        return 'outline';
-    }
-  };
-
-  const openEditProfileDialog = (user: UserProfile) => {
-    setEditProfileUserId(user.id);
-    setEditProfileName(user.full_name || "");
-    setEditProfileEmail(user.email || "");
-    setEditProfilePhone(user.phone || "");
-    setEditProfileEmergency(user.emergency_contact || "");
-    setEditProfileEmployeeType(user.employee_type || "anställd");
-    setEditProfileEmployeeNumber(user.employee_number || "");
-  };
-
-  const saveProfile = async () => {
-    if (!editProfileUserId || !editProfileName.trim()) {
+  const handleUpdate = async () => {
+    if (!editingUser) return;
+    if (!editName.trim()) {
       toast.error("Namn är obligatoriskt");
       return;
     }
-
-    setIsSavingProfile(true);
+    const { first, last } = splitName(editName);
+    setLoading(true);
     try {
-      // Update profile in profiles table
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: editProfileName.trim(),
-          email: editProfileEmail.trim() || null,
-          phone: editProfilePhone.trim() || null,
-          emergency_contact: editProfileEmergency.trim() || null,
-          employee_type: editProfileEmployeeType as 'anställd' | 'platschef' | 'inhyrd',
-          employee_number: editProfileEmployeeNumber.trim() || null,
-        })
-        .eq("id", editProfileUserId);
-
-      if (error) throw error;
-
-      // Also update auth email if changed
-      if (editProfileEmail.trim()) {
-        const session = { access_token: localStorage.getItem("access_token") };
-        
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-user-email`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session?.access_token}`,
-            },
-            body: JSON.stringify({
-              userId: editProfileUserId,
-              newEmail: editProfileEmail.trim(),
-            }),
-          }
-        );
-        
-        if (!response.ok) {
-          const result = await response.json();
-          console.error("Email update warning:", result.error);
-          // Don't fail the whole operation if email update fails
-        }
-      }
-
-      toast.success("Profil uppdaterad");
-      setEditProfileUserId(null);
+      await apiFetch(`/admin/users/${editingUser.id}`, {
+        method: "PUT",
+        json: {
+          first_name: first,
+          last_name: last,
+          phone: editPhone.trim() || null,
+          role: editRole,
+          hourly_wage: editHourlyWage ? Number(editHourlyWage) : null,
+          emergency_contact: editEmergency.trim() || null,
+          employee_type: editEmployeeType,
+          employee_number: editEmployeeNumber.trim() || null,
+          tax_table: editTaxTable ? Number(editTaxTable) : null,
+        },
+      });
+      toast.success("Användare uppdaterad");
+      setIsEditDialogOpen(false);
+      setEditingUser(null);
       fetchUsers();
-    } catch (error: any) {
-      toast.error(error.message || "Kunde inte spara profil");
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte uppdatera användare");
     } finally {
-      setIsSavingProfile(false);
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (userId: string | number) => {
+    try {
+      await apiFetch(`/admin/users/${userId}`, { method: "DELETE" });
+      toast.success("Användare borttagen");
+      fetchUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte ta bort användare");
+    }
+  };
+
+  const handleResetPassword = async (user: UserRow) => {
+    const pwd = generatePassword();
+    setLoading(true);
+    try {
+      await apiFetch(`/admin/users/${user.id}/reset-password`, {
+        method: "POST",
+        json: { password: pwd },
+      });
+      toast.success(`Nytt lösenord: ${pwd}`);
+      setGeneratedPassword(pwd);
+      setResetUser(null);
+      setIsResetDialogOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte återställa lösenord");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -394,7 +244,6 @@ const AdminUsers = () => {
           <h2 className="text-3xl font-bold font-heading">Användare</h2>
           <p className="text-muted-foreground">Hantera användare och roller</p>
         </div>
-        
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2">
@@ -404,84 +253,81 @@ const AdminUsers = () => {
           </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Lägg till ny användare</DialogTitle>
+              <DialogTitle>Ny användare</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div className="space-y-2">
-                <Label htmlFor="new-name">Namn *</Label>
-                <Input
-                  id="new-name"
-                  value={newUserName}
-                  onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="Förnamn Efternamn"
-                />
+                <Label>Namn *</Label>
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Förnamn Efternamn" />
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="new-email">E-post *</Label>
-                <Input
-                  id="new-email"
-                  type="email"
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="exempel@foretag.se"
-                />
+                <Label>E-post *</Label>
+                <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="exempel@foretag.se" />
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="new-phone">Telefonnummer</Label>
-                <Input
-                  id="new-phone"
-                  type="tel"
-                  value={newUserPhone}
-                  onChange={(e) => setNewUserPhone(e.target.value)}
-                  placeholder="070-123 45 67"
-                />
+                <Label>Telefon</Label>
+                <Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="070-123 45 67" />
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="new-emergency">Närmast anhörig</Label>
-                <Input
-                  id="new-emergency"
-                  value={newUserEmergencyContact}
-                  onChange={(e) => setNewUserEmergencyContact(e.target.value)}
-                  placeholder="Namn, telefon"
-                />
+                <Label>Närmast anhörig</Label>
+                <Input value={newEmergency} onChange={(e) => setNewEmergency(e.target.value)} placeholder="Namn, telefon" />
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="new-type">Typ av anställning</Label>
-                <Select value={newUserEmployeeType} onValueChange={setNewUserEmployeeType}>
-                  <SelectTrigger id="new-type">
+                <Label>Typ av anställning</Label>
+                <Select value={newEmployeeType} onValueChange={setNewEmployeeType}>
+                  <SelectTrigger>
                     <SelectValue placeholder="Välj typ" />
                   </SelectTrigger>
                   <SelectContent>
-                    {EMPLOYEE_TYPES.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
+                    {employeeTypes.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              
               <div className="space-y-2">
-                <Label htmlFor="new-employee-number">Anställningsnummer</Label>
-                <Input
-                  id="new-employee-number"
-                  value={newUserEmployeeNumber}
-                  onChange={(e) => setNewUserEmployeeNumber(e.target.value)}
-                  placeholder="T.ex. 1001"
-                />
+                <Label>Anställningsnummer</Label>
+                <Input value={newEmployeeNumber} onChange={(e) => setNewEmployeeNumber(e.target.value)} placeholder="T.ex. 1001" />
               </div>
-              
-              <Button 
-                onClick={createNewUser} 
-                className="w-full" 
-                disabled={isCreating}
-              >
-                {isCreating ? "Skapar..." : "Skapa användare"}
+              <div className="space-y-2">
+                <Label>Timlön (kr/h)</Label>
+                <Input type="number" value={newHourlyWage} onChange={(e) => setNewHourlyWage(e.target.value)} placeholder="0.00" />
+              </div>
+              <div className="space-y-2">
+                <Label>Skattetabell</Label>
+                <Input type="number" value={newTaxTable} onChange={(e) => setNewTaxTable(e.target.value)} placeholder="t.ex. 30" />
+              </div>
+              <div className="space-y-2">
+                <Label>Roll</Label>
+                <Select value={newRole} onValueChange={setNewRole}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Välj roll" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roleOptions.map((r) => (
+                      <SelectItem key={r.value} value={r.value}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {isSuperAdmin && (
+                <div className="space-y-2">
+                  <Label>Company ID</Label>
+                  <Input value={targetCompanyId} onChange={(e) => setNewCompanyId(e.target.value)} placeholder="t.ex. 1" />
+                </div>
+              )}
+              <Button onClick={handleCreate} className="w-full" disabled={loading}>
+                {loading ? "Skapar..." : "Skapa användare"}
               </Button>
+              {generatedPassword && (
+                <p className="text-xs text-muted-foreground">
+                  Senast genererat lösenord: <span className="font-mono">{generatedPassword}</span>
+                </p>
+              )}
             </div>
           </DialogContent>
         </Dialog>
@@ -497,116 +343,57 @@ const AdminUsers = () => {
           </Card>
         ) : (
           users.map((user) => {
-            const isAdmin = user.user_roles.some(r => r.role === "admin");
-            
+            const isAdmin = (user.role || "").toLowerCase() === "admin" || (user.role || "").toLowerCase() === "super_admin";
             return (
               <Card key={user.id} className="shadow-card">
                 <CardContent className="pt-6">
                   <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4">
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        {isAdmin ? (
-                          <Shield className="h-6 w-6 text-primary" />
-                        ) : (
-                          <User className="h-6 w-6 text-muted-foreground" />
-                        )}
+                        {isAdmin ? <Shield className="h-6 w-6 text-primary" /> : <User className="h-6 w-6 text-muted-foreground" />}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-lg">{user.full_name}</h3>
-                          <Badge variant={getEmployeeTypeBadgeVariant(user.employee_type)}>
-                            {getEmployeeTypeLabel(user.employee_type)}
-                          </Badge>
-                          {isAdmin && (
-                            <Badge className="bg-primary">Admin</Badge>
-                          )}
+                          <h3 className="font-semibold text-lg">{user.full_name || user.email}</h3>
+                          <Badge variant={isAdmin ? "default" : "outline"}>{isAdmin ? "Admin" : "User"}</Badge>
+                          {user.employee_type && <Badge variant="secondary">{user.employee_type}</Badge>}
+                          {user.employee_number && <Badge variant="outline">#{user.employee_number}</Badge>}
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          Registrerad {format(new Date(user.created_at), "d MMMM yyyy", { locale: sv })}
-                          {user.employee_number && (
-                            <span className="ml-2">• Anst.nr: {user.employee_number}</span>
-                          )}
+                          {user.created_at ? `Registrerad ${format(new Date(user.created_at), "d MMMM yyyy", { locale: sv })}` : "Registrerad"}
                         </p>
-                        {user.phone && (
-                          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                            <Phone className="h-3 w-3" />
-                            {user.phone}
-                          </p>
-                        )}
+                        <div className="text-sm text-muted-foreground flex flex-col gap-1 mt-1">
+                          {user.phone && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {user.phone}
+                            </span>
+                          )}
+                          {user.emergency_contact && <span>Närmast anhörig: {user.emergency_contact}</span>}
+                          {user.hourly_wage != null && <span>Timlön: {user.hourly_wage} kr/h</span>}
+                          {user.tax_table != null && <span>Skattetabell: {user.tax_table}</span>}
+                        </div>
                       </div>
                     </div>
-                    
-                      <div className="flex flex-wrap items-center gap-3">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <DollarSign className="h-4 w-4" />
-                        <span>{user.hourly_wage || 0} kr/h (Tabell {user.tax_table || 30})</span>
-                      </div>
-                      
-                      <Button variant="outline" size="sm" onClick={() => openEditProfileDialog(user)}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEdit(user)}>
                         <Pencil className="h-4 w-4 mr-1" />
                         Redigera
                       </Button>
-                      
-                      <Dialog open={editingUserId === user.id} onOpenChange={(open) => !open && setEditingUserId(null)}>
-                        <DialogTrigger asChild>
-                          <Button variant="outline" size="sm" onClick={() => openEditDialog(user)}>
-                            Ändra lön & skatt
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Ändra timlön och skattetabell för {user.full_name}</DialogTitle>
-                          </DialogHeader>
-                          <div className="space-y-4 pt-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="hourly-wage">Timlön (kr/h före skatt)</Label>
-                              <Input
-                                id="hourly-wage"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={hourlyWage}
-                                onChange={(e) => setHourlyWage(e.target.value)}
-                                placeholder="0.00"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="tax-table">Skattetabell</Label>
-                              <Select value={taxTable} onValueChange={setTaxTable}>
-                                <SelectTrigger id="tax-table">
-                                  <SelectValue placeholder="Välj skattetabell" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {COMMON_TAX_TABLES.map((table) => (
-                                    <SelectItem key={table.value} value={table.value.toString()}>
-                                      {table.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <Button onClick={() => updateHourlyWage(user.id)} className="w-full">
-                              Spara
-                            </Button>
-                          </div>
-                        </DialogContent>
-                      </Dialog>
-                      
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openResetPasswordDialog(user.id, user.full_name)}
+                        onClick={() => {
+                          setResetUser(user);
+                          setIsResetDialogOpen(true);
+                        }}
                       >
                         <Key className="h-4 w-4 mr-1" />
                         Återställ lösenord
                       </Button>
-                      
-                      <Button
-                        variant={isAdmin ? "outline" : "default"}
-                        size="sm"
-                        onClick={() => toggleAdminRole(user.id, isAdmin)}
-                      >
-                        {isAdmin ? "Ta bort admin" : "Gör till admin"}
+                      <Button variant="outline" size="sm" className="text-destructive" onClick={() => handleDelete(user.id)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Ta bort
                       </Button>
                     </div>
                   </div>
@@ -616,207 +403,86 @@ const AdminUsers = () => {
           })
         )}
       </div>
-      
-      {/* Generated Password Dialog - shown after creating user */}
-      <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Användare skapad!</DialogTitle>
-            <DialogDescription>
-              Ge detta lösenord till {createdUserName}. Användaren kan sedan byta till ett eget lösenord.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>Genererat lösenord</Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={generatedPassword}
-                    readOnly
-                    className="font-mono pr-10"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <Button onClick={copyPassword} variant="outline">
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="bg-muted p-3 rounded-lg text-sm">
-              <p className="font-medium mb-1">Instruktioner till användaren:</p>
-              <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-                <li>Logga in med e-post och detta lösenord</li>
-                <li>Gå till profil och byt lösenord</li>
-                <li>Använd ditt nya lösenord framöver</li>
-              </ol>
-            </div>
-            <Button onClick={() => setShowPasswordDialog(false)} className="w-full">
-              Jag har sparat lösenordet
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Reset Password Dialog */}
-      <Dialog open={!!resetPasswordUserId} onOpenChange={(open) => !open && setResetPasswordUserId(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Återställ lösenord</DialogTitle>
-            <DialogDescription>
-              Generera ett nytt lösenord för {resetPasswordUserName}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            {!newGeneratedPassword ? (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Detta genererar ett nytt tillfälligt lösenord som du kan ge till användaren.
-                  Användaren kan sedan byta till ett eget lösenord.
-                </p>
-                <Button 
-                  onClick={resetUserPassword} 
-                  className="w-full"
-                  disabled={isResetting}
-                >
-                  {isResetting ? "Genererar..." : "Generera nytt lösenord"}
-                </Button>
-              </>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <Label>Nytt lösenord</Label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Input
-                        type={showPassword ? "text" : "password"}
-                        value={newGeneratedPassword}
-                        readOnly
-                        className="font-mono pr-10"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="absolute right-0 top-0 h-full"
-                        onClick={() => setShowPassword(!showPassword)}
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                    <Button onClick={copyPassword} variant="outline">
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg text-sm border border-yellow-200 dark:border-yellow-800">
-                  <p className="font-medium text-yellow-800 dark:text-yellow-200">OBS!</p>
-                  <p className="text-yellow-700 dark:text-yellow-300">
-                    Användaren måste logga ut och logga in igen med detta nya lösenord.
-                  </p>
-                </div>
-                <Button onClick={() => setResetPasswordUserId(null)} className="w-full">
-                  Klar
-                </Button>
-              </>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Edit Profile Dialog */}
-      <Dialog open={!!editProfileUserId} onOpenChange={(open) => !open && setEditProfileUserId(null)}>
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Redigera användare</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name">Namn *</Label>
-              <Input
-                id="edit-name"
-                value={editProfileName}
-                onChange={(e) => setEditProfileName(e.target.value)}
-                placeholder="Förnamn Efternamn"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="edit-email">E-post</Label>
-              <Input
-                id="edit-email"
-                type="email"
-                value={editProfileEmail}
-                onChange={(e) => setEditProfileEmail(e.target.value)}
-                placeholder="exempel@foretag.se"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="edit-phone">Telefonnummer</Label>
-              <Input
-                id="edit-phone"
-                type="tel"
-                value={editProfilePhone}
-                onChange={(e) => setEditProfilePhone(e.target.value)}
-                placeholder="070-123 45 67"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="edit-emergency">Närmast anhörig</Label>
-              <Input
-                id="edit-emergency"
-                value={editProfileEmergency}
-                onChange={(e) => setEditProfileEmergency(e.target.value)}
-                placeholder="Namn, telefon"
-              />
-            </div>
-            
-              <div className="space-y-2">
-                <Label htmlFor="edit-type">Typ av anställning</Label>
-                <Select value={editProfileEmployeeType} onValueChange={setEditProfileEmployeeType}>
-                  <SelectTrigger id="edit-type">
-                    <SelectValue placeholder="Välj typ" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {EMPLOYEE_TYPES.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-employee-number">Anställningsnummer</Label>
-                <Input
-                  id="edit-employee-number"
-                  value={editProfileEmployeeNumber}
-                  onChange={(e) => setEditProfileEmployeeNumber(e.target.value)}
-                  placeholder="T.ex. 1001"
-                />
-              </div>
-              
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setEditProfileUserId(null)}>
-                  Avbryt
-                </Button>
-                <Button onClick={saveProfile} disabled={isSavingProfile}>
-                  {isSavingProfile ? "Sparar..." : "Spara ändringar"}
-                </Button>
-              </DialogFooter>
+          <div className="space-y-3 pt-2">
+            <Label>Namn *</Label>
+            <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+            <Label>E-post</Label>
+            <Input value={editEmail} disabled />
+            <Label>Telefon</Label>
+            <Input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+            <Label>Närmast anhörig</Label>
+            <Input value={editEmergency} onChange={(e) => setEditEmergency(e.target.value)} />
+            <Label>Typ av anställning</Label>
+            <Select value={editEmployeeType} onValueChange={setEditEmployeeType}>
+              <SelectTrigger>
+                <SelectValue placeholder="Välj typ" />
+              </SelectTrigger>
+              <SelectContent>
+                {employeeTypes.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Label>Anställningsnummer</Label>
+            <Input value={editEmployeeNumber} onChange={(e) => setEditEmployeeNumber(e.target.value)} />
+            <Label>Timlön (kr/h)</Label>
+            <Input type="number" value={editHourlyWage} onChange={(e) => setEditHourlyWage(e.target.value)} />
+            <Label>Skattetabell</Label>
+            <Input type="number" value={editTaxTable} onChange={(e) => setEditTaxTable(e.target.value)} />
+            <Label>Roll</Label>
+            <Select value={editRole} onValueChange={setEditRole}>
+              <SelectTrigger>
+                <SelectValue placeholder="Välj roll" />
+              </SelectTrigger>
+              <SelectContent>
+                {roleOptions.map((r) => (
+                  <SelectItem key={r.value} value={r.value}>
+                    {r.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Avbryt
+            </Button>
+            <Button onClick={handleUpdate} disabled={loading}>
+              {loading ? "Sparar..." : "Spara ändringar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Återställ lösenord</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Generera ett nytt lösenord för {resetUser?.full_name || resetUser?.email}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsResetDialogOpen(false)}>
+              Avbryt
+            </Button>
+            <Button onClick={() => resetUser && handleResetPassword(resetUser)} disabled={loading}>
+              {loading ? "Genererar..." : "Generera nytt lösenord"}
+            </Button>
+          </DialogFooter>
+          {generatedPassword && (
+            <p className="text-xs text-muted-foreground">
+              Senast genererat lösenord: <span className="font-mono">{generatedPassword}</span>
+            </p>
+          )}
         </DialogContent>
       </Dialog>
     </div>
