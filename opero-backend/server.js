@@ -22,6 +22,15 @@ app.use(express.static(__dirname));
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("Missing JWT_SECRET in .env");
 
+function generateCompanyCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
@@ -88,7 +97,7 @@ app.get("/login.html", (req, res) => {
 app.get("/companies", requireAuth, (req, res) => {
   const role = (req.user.role || "").toLowerCase();
   if (role === "super_admin") {
-    db.all("SELECT id, name FROM companies ORDER BY name", [], (err, rows) => {
+    db.all("SELECT id, name, code, billing_email, created_at FROM companies ORDER BY name", [], (err, rows) => {
       if (err) {
         console.error("DB-fel vid /companies:", err);
         return res.status(500).json({ error: "DB error" });
@@ -97,7 +106,7 @@ app.get("/companies", requireAuth, (req, res) => {
     });
   } else {
     db.all(
-      "SELECT id, name FROM companies WHERE id = ?",
+      "SELECT id, name, code, billing_email, created_at FROM companies WHERE id = ?",
       [req.user.company_id],
       (err, rows) => {
         if (err) {
@@ -108,6 +117,105 @@ app.get("/companies", requireAuth, (req, res) => {
       }
     );
   }
+});
+
+// Skapa företag (superadmin) + valfri admin-användare
+app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
+  const { name, billing_email = null, code, admin_first_name, admin_last_name, admin_email, admin_password } = req.body || {};
+  if (!name) return res.status(400).json({ error: "name required" });
+  const companyCode = code || generateCompanyCode();
+
+  db.run(
+    `INSERT INTO companies (name, code, billing_email) VALUES (?, ?, ?)`,
+    [name.trim(), companyCode.trim(), billing_email ? String(billing_email).trim() : null],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid POST /companies:", err);
+        return res.status(500).json({ error: "Kunde inte skapa företag" });
+      }
+
+      const companyId = this.lastID;
+      const result = { id: companyId, name: name.trim(), code: companyCode.trim(), billing_email: billing_email || null };
+
+      // Skapa admin-user om data finns
+      if (admin_first_name && admin_last_name && admin_email && admin_password) {
+        const hash = bcrypt.hashSync(admin_password, 10);
+        db.run(
+          `INSERT INTO users (username, email, password, role, company_id, first_name, last_name)
+           VALUES (?, ?, ?, 'admin', ?, ?, ?)`,
+          [
+            String(admin_email).toLowerCase(),
+            String(admin_email).toLowerCase(),
+            hash,
+            companyId,
+            String(admin_first_name).trim(),
+            String(admin_last_name).trim()
+          ],
+          function (userErr) {
+            if (userErr) {
+              console.error("Kunde inte skapa admin för företag:", userErr);
+              // returnera företag ändå
+              return res.status(201).json(result);
+            }
+            return res.status(201).json({ ...result, admin_user_id: this.lastID });
+          }
+        );
+      } else {
+        return res.status(201).json(result);
+      }
+    }
+  );
+});
+
+// Uppdatera företag (superadmin)
+app.put("/companies/:id", requireAuth, requireSuperAdmin, (req, res) => {
+  const { id } = req.params;
+  const { name, billing_email, code } = req.body || {};
+  const fields = [];
+  const params = [];
+  if (name !== undefined) {
+    fields.push("name = ?");
+    params.push(String(name).trim());
+  }
+  if (billing_email !== undefined) {
+    fields.push("billing_email = ?");
+    params.push(billing_email ? String(billing_email).trim() : null);
+  }
+  if (code !== undefined) {
+    fields.push("code = ?");
+    params.push(String(code).trim());
+  }
+  if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
+  params.push(id);
+
+  db.run(`UPDATE companies SET ${fields.join(", ")} WHERE id = ?`, params, function (err) {
+    if (err) {
+      console.error("DB-fel vid PUT /companies/:id:", err);
+      return res.status(500).json({ error: "Kunde inte uppdatera företag" });
+    }
+    if (this.changes === 0) return res.status(404).json({ error: "Företag hittades inte" });
+    res.json({ success: true });
+  });
+});
+
+// Ta bort företag (superadmin)
+app.delete("/companies/:id", requireAuth, requireSuperAdmin, (req, res) => {
+  const { id } = req.params;
+  // Ta bort users först (enkelt), därefter company
+  db.run(`DELETE FROM users WHERE company_id = ?`, [id], function (userErr) {
+    if (userErr) {
+      console.error("DB-fel vid DELETE users for company:", userErr);
+      return res.status(500).json({ error: "Kunde inte ta bort användare" });
+    }
+    db.run(`DELETE FROM companies WHERE id = ?`, [id], function (err) {
+      if (err) {
+        console.error("DB-fel vid DELETE /companies/:id:", err);
+        return res.status(500).json({ error: "Kunde inte ta bort företag" });
+      }
+      if (this.changes === 0) return res.status(404).json({ error: "Företag hittades inte" });
+      res.json({ success: true });
+    });
+  });
 });
 
 // ======================

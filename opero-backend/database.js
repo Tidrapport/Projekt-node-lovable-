@@ -13,9 +13,37 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS companies (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      code TEXT UNIQUE
+      code TEXT UNIQUE,
+      billing_email TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // Lägg till ev. saknade kolumner i companies
+  db.all(`PRAGMA table_info(companies);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för companies:", err);
+      return;
+    }
+    const hasBilling = columns.some((col) => col.name === "billing_email");
+    if (!hasBilling) {
+      db.run(`ALTER TABLE companies ADD COLUMN billing_email TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till billing_email:", alterErr);
+        else console.log('Kolumnen "billing_email" har lagts till i companies.');
+      });
+    }
+    const hasCreatedAt = columns.some((col) => col.name === "created_at");
+    if (!hasCreatedAt) {
+      db.run(`ALTER TABLE companies ADD COLUMN created_at TEXT;`, (alterErr) => {
+        if (alterErr) {
+          console.error("Kunde inte lägga till created_at:", alterErr);
+        } else {
+          db.run(`UPDATE companies SET created_at = COALESCE(created_at, datetime('now')) WHERE created_at IS NULL;`);
+          console.log('Kolumnen "created_at" har lagts till i companies.');
+        }
+      });
+    }
+  });
 
   // --- Users ---
   db.run(`
