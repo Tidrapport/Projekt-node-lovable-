@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin – Materialtyper</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 {
+      font-size: 18px;
+      margin: 0 0 16px;
+    }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .topbar h1 { margin: 0; font-size: 22px; }
+    .topbar small { color: #6b7280; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr);
+      gap: 20px;
+      align-items: flex-start;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    .badge-empty {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 8px;
+    }
+
+    .field-group {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 16px;
+      margin-top: 8px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+    }
+
+    .field label {
+      color: #374151;
+    }
+
+    .field input {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+    }
+
+    .field input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
+    .btn-primary {
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: none;
+      background: #1d4ed8;
+      color: #fff;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover { background: #1e40af; }
+
+    .btn-small {
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-small.delete {
+      border-color: #f87171;
+      color: #b91c1c;
+    }
+  </style>
+</head>
+<body>
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only active">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Rail Work AB</h1>
+        <small>Materialtyper – förbrukningsmaterial som kan väljas i tidrapport</small>
+      </div>
+      <div class="welcome" id="welcomeText">Välkommen</div>
+    </div>
+
+    <div class="page-layout">
+      <!-- Lista materialtyper -->
+      <section class="card">
+        <h2>Befintliga materialtyper</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Namn</th>
+              <th>Enhet</th>
+              <th>Åtgärder</th>
+            </tr>
+          </thead>
+          <tbody id="materialsBody"></tbody>
+        </table>
+        <div id="noMaterials" class="badge-empty" style="display:none;">
+          Inga materialtyper ännu. Lägg till en ny i formuläret till höger.
+        </div>
+      </section>
+
+      <!-- Ny materialtyp -->
+      <section class="card">
+        <h2>Lägg till ny materialtyp</h2>
+        <form id="materialForm">
+          <div class="field-group">
+            <div class="field">
+              <label for="materialName">Namn</label>
+              <input id="materialName" type="text" required placeholder="Ex. Spik, Kabel, Slipmaterial" />
+            </div>
+            <div class="field">
+              <label for="materialUnit">Enhet (valfritt)</label>
+              <input id="materialUnit" type="text" placeholder="Ex. st, m, kg" />
+            </div>
+          </div>
+
+          <p style="font-size:12px; color:#6b7280; margin-top:8px;">
+            Dessa materialtyper visas i en rullista i tidrapporteringen. Användare kan <b>inte</b> lägga till egna typer,
+            utan endast välja härifrån. Endast admin kan lägga till / ta bort.
+          </p>
+
+          <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+            <button type="submit" class="btn-primary">Spara materialtyp</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <script src="auth.js"></script>
+  <script>
+    const currentUser = requireLogin();
+    if (!isAdmin(currentUser)) {
+      alert("Endast admin har åtkomst till denna sida.");
+      window.location.href = "dashboard.html";
+    }
+    setupSidebarForUser(currentUser);
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.clear();
+      window.location.href = "login.html";
+    });
+
+    const materialsBody = document.getElementById("materialsBody");
+    const noMaterials = document.getElementById("noMaterials");
+    const materialForm = document.getElementById("materialForm");
+    const materialNameInput = document.getElementById("materialName");
+    const materialUnitInput = document.getElementById("materialUnit");
+
+    async function loadMaterials() {
+      materialsBody.innerHTML = "";
+      try {
+        const res = await fetch("/material-types");
+        const materials = await res.json();
+
+        if (!materials.length) {
+          noMaterials.style.display = "block";
+          return;
+        } else {
+          noMaterials.style.display = "none";
+        }
+
+        materials.forEach(mat => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${mat.name}</td>
+            <td>${mat.unit || "-"}</td>
+            <td>
+              <button type="button" class="btn-small delete" data-id="${mat.id}">
+                Ta bort
+              </button>
+            </td>
+          `;
+          materialsBody.appendChild(tr);
+        });
+
+        materialsBody.querySelectorAll(".btn-small.delete").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            const id = btn.getAttribute("data-id");
+            if (!confirm("Ta bort materialtypen?")) return;
+            try {
+              const res = await fetch("/material-types/" + id, { method: "DELETE" });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                alert(data.error || "Kunde inte ta bort materialtyp.");
+                return;
+              }
+              await loadMaterials();
+            } catch (err) {
+              console.error(err);
+              alert("Tekniskt fel vid borttagning.");
+            }
+          });
+        });
+      } catch (err) {
+        console.error(err);
+        alert("Kunde inte hämta materialtyper.");
+      }
+    }
+
+    materialForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = materialNameInput.value.trim();
+      const unit = materialUnitInput.value.trim();
+
+      if (!name) {
+        alert("Ange ett namn.");
+        return;
+      }
+
+      try {
+        const res = await fetch("/material-types", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, unit })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || "Kunde inte spara materialtyp.");
+          return;
+        }
+
+        materialNameInput.value = "";
+        materialUnitInput.value = "";
+        await loadMaterials();
+      } catch (err) {
+        console.error(err);
+        alert("Tekniskt fel vid sparande.");
+      }
+    });
+
+    loadMaterials();
+  </script>
+</body>
+</html>

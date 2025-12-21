@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Planering</title>
+  <style>
+    * { box-sizing: border-box; font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: flex; background: #f5f7fb; color: #0f172a; }
+    .sidebar { width: 240px; background: #0f172a; color: #e5e7eb; padding: 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+    .nav-section-title { font-size: 11px; text-transform: uppercase; opacity: 0.6; margin-top: 12px; }
+    .nav-item { padding: 8px 10px; border-radius: 8px; font-size: 14px; cursor: pointer; text-decoration: none; color: inherit; display: block; }
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+    .logout { margin-top: auto; font-size: 13px; color: #f97373; cursor: pointer; }
+
+    .main { flex: 1; padding: 28px 36px; }
+    .hero { background: linear-gradient(180deg, #fff, #f5f7fb); padding: 18px 20px 12px; border-radius: 16px; box-shadow: 0 10px 30px rgba(15,23,42,0.05); margin-bottom: 14px; }
+    .hero h1 { margin: 0; font-size: 28px; display: flex; align-items: center; gap: 10px; }
+    .hero p { margin: 4px 0 0; color: #64748b; font-size: 15px; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .layout { display: flex; flex-direction: column; gap: 18px; align-items: stretch; }
+    .card { background: #fff; border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 12px 28px rgba(15,23,42,0.06); border: 1px solid #e5e7eb; }
+    .card h2 { margin: 0 0 6px; font-size: 20px; }
+    .card p { margin: 0 0 10px; color: #64748b; }
+
+    .timeline-header { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .btn-icon, .btn-ghost { background: #fff; border: 1px solid #dce3f0; color: #0f172a; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; display: inline-flex; gap: 8px; align-items: center; }
+    .btn-icon:hover, .btn-ghost:hover { border-color: #cbd5e1; }
+    .btn-primary { background: #0b60e6; color: #fff; border: none; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 700; }
+    .btn-primary:hover { background: #094ec2; }
+    .btn-primary.small { padding: 8px 12px; font-size: 14px; }
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .badge.gray { background: #e2e8f0; color: #475569; }
+    .badge.yellow { background: #fef3c7; color: #b45309; }
+    .view-switch { display: flex; gap: 6px; align-items: center; }
+    .view-switch .pill-btn { padding: 8px 12px; border-radius: 10px; border: 1px solid #dce3f0; background: #fff; cursor: pointer; font-weight: 600; color: #0f172a; }
+    .view-switch .pill-btn.active { background: #0b60e6; color: #fff; border-color: #0b60e6; }
+
+    .timeline-shell { margin-top: 6px; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; background: #f8fafc; }
+    .timeline-scroll { overflow-x: auto; }
+    .week-labels { display: grid; border-bottom: 1px solid #e2e8f0; background: #f1f5f9; font-weight: 700; color: #475569; }
+    .week-label { padding: 10px; border-right: 1px solid #e2e8f0; text-align: center; }
+    .week-label:last-child { border-right: none; }
+
+    .day-grid { display: grid; background: #fff; }
+    .day-cell { min-height: 140px; padding: 12px; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; position: relative; background: #fff; }
+    .day-cell.today { background: #e9f1ff; }
+    .day-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+    .day-name { font-weight: 700; font-size: 13px; color: #0f172a; text-transform: lowercase; }
+    .day-date { color: #475569; font-size: 12px; }
+
+    .assignments { display: flex; flex-direction: column; gap: 6px; }
+    .assign-card { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 8px 10px; font-size: 13px; color: #0f172a; }
+    .assign-card .sub { color: #64748b; font-size: 12px; margin-top: 2px; }
+
+    .empty { padding: 16px; text-align: center; color: #94a3b8; font-weight: 600; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; font-size: 13px; }
+    .field label { color: #0f172a; font-weight: 600; }
+    input, select { padding: 10px 12px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 14px; }
+    input:focus, select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb20; }
+
+    .list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+    .assign-card header { font-weight: 700; margin-bottom: 4px; }
+    .assign-card small { color: #6b7280; }
+    .assignment-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; font-size: 13px; gap: 10px; }
+    .pill { padding: 3px 8px; border-radius: 999px; background: #e0f2fe; color: #0ea5e9; font-size: 11px; }
+    .actions { display: flex; gap: 6px; }
+    .hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: none; align-items: center; justify-content: center; padding: 18px; z-index: 20; }
+    .modal-backdrop.show { display: flex; }
+    .modal { background: #fff; border-radius: 16px; width: min(900px, 100%); max-height: 90vh; overflow: auto; padding: 18px; box-shadow: 0 25px 70px rgba(15,23,42,0.25); border: 1px solid #e2e8f0; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .modal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 800px) { .modal-grid { grid-template-columns: 1fr; } }
+
+    .non-admin .admin-only { display: none !important; }
+    /* Döljer administratörsnavet på användarsidan helt */
+    .non-admin .sidebar .admin-only { display: none !important; }
+
+    .mini-cal { margin-top: 6px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+    .mini-cal-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #f8fafc; }
+    .mini-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+    .mini-cal-day, .mini-cal-weekday { padding: 10px; text-align: center; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
+    .mini-cal-weekday { background: #f1f5f9; font-weight: 700; color: #475569; }
+    .mini-cal-day:last-child, .mini-cal-weekday:last-child { border-right: none; }
+    .mini-cal-day.disabled { color: #cbd5e1; background: #f8fafc; cursor: not-allowed; }
+    .mini-cal-day { cursor: pointer; background: #fff; }
+    .mini-cal-day.selected { background: #dbeafe; color: #0b60e6; font-weight: 700; }
+    .mini-cal-day.in-range { background: #e5edff; }
+
+    @media (max-width: 1100px) { .layout { flex-direction: column; } }
+    @media (max-width: 700px) {
+      .main { padding: 18px; }
+      .hero h1 { font-size: 24px; }
+      .week-labels, .day-grid { min-width: 720px; }
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item active">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-top">
+        <div>
+          <h1>📅 Planering</h1>
+          <p>Se och lägg arbetsplaneringar</p>
+        </div>
+        <!-- Endast admin kan skapa i admin-sidan -->
+      </div>
+    </div>
+
+    <div class="layout">
+      <section class="card">
+        <div class="timeline-header">
+          <div>
+            <h2>Min planering</h2>
+            <p>Klicka på ett projekt för att se mer information</p>
+          </div>
+          <div class="view-switch">
+            <span style="color:#64748b;">Visa:</span>
+            <button class="pill-btn" data-weeks="1">1v</button>
+            <button class="pill-btn active" data-weeks="2">2v</button>
+            <button class="pill-btn" data-weeks="3">3v</button>
+            <button class="pill-btn" data-weeks="4">4v</button>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn-ghost" id="prevRange">‹</button>
+          <button class="btn-ghost" id="todayBtn">📅 Idag</button>
+          <button class="btn-ghost" id="nextRange">›</button>
+        </div>
+
+        <div class="timeline-shell">
+          <div class="timeline-scroll">
+            <div class="week-labels" id="weekLabels"></div>
+            <div class="day-grid" id="dayGrid"></div>
+          </div>
+          <div class="empty" id="emptyPlanning" style="display:none;">Ingen planering för denna period</div>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Planeringar</h2>
+        <p id="planListSubtitle" style="margin-top:2px; color:#64748b;">Dina planeringar</p>
+        <div class="list" id="planList"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="auth.js"></script>
+  <script>
+    const currentUser = requireLogin();
+    setupSidebarForUser(currentUser);
+    const token = localStorage.getItem("token") || "";
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.clear();
+      window.location.href = "login.html";
+    });
+
+    const isAdminUser = isAdmin(currentUser);
+    if (!isAdminUser) {
+      document.body.classList.add("non-admin");
+      document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
+    }
+    const weekLabels = document.getElementById("weekLabels");
+    const dayGrid = document.getElementById("dayGrid");
+    const emptyPlanning = document.getElementById("emptyPlanning");
+    const prevRangeBtn = document.getElementById("prevRange");
+    const nextRangeBtn = document.getElementById("nextRange");
+    const todayBtn = document.getElementById("todayBtn");
+    const viewButtons = document.querySelectorAll(".pill-btn[data-weeks]");
+    const planList = document.getElementById("planList");
+    const planListSubtitle = document.getElementById("planListSubtitle");
+
+    const planList = document.getElementById("planList");
+    const planListSubtitle = document.getElementById("planListSubtitle");
+
+    let plans = [];
+    let rangeStart = startOfWeek(new Date());
+    let viewWeeks = 2;
+    const todayIso = toISO(new Date());
+
+    function startOfWeek(date) {
+      const d = new Date(date);
+      const day = d.getDay() || 7;
+      if (day !== 1) d.setDate(d.getDate() - (day - 1));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    function addDays(date, days) {
+      const d = new Date(date);
+      d.setDate(d.getDate() + days);
+      return d;
+    }
+
+    function toISO(date) {
+      return date.toISOString().split("T")[0];
+    }
+
+    function weekdayLabel(date) {
+      const labels = ["mån", "tis", "ons", "tors", "fre", "lör", "sön"];
+      return labels[(date.getDay() + 6) % 7];
+    }
+
+    function dateLabel(date) {
+      return date.toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
+    }
+
+    function getISOWeek(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    }
+
+    function between(isoDate, start, end) {
+      return isoDate >= start && isoDate <= end;
+    }
+
+    function plansForDate(dateStr) {
+      return plans.filter(p => {
+        const mine = String(p.user_id) === String(currentUser.id) || p.email === currentUser.email;
+        return between(dateStr, p.start_date, p.end_date) && (isAdminUser || mine);
+      });
+    }
+
+    async function fetchPlans() {
+      try {
+        const res = await fetch("/plans", {
+          headers: { Authorization: "Bearer " + token },
+        });
+        if (!res.ok) throw new Error("kunde inte hämta planeringar");
+        plans = (await res.json()) || [];
+      } catch (err) {
+        console.error(err);
+        plans = [];
+      }
+    }
+
+    function renderTimeline() {
+      const totalDays = viewWeeks * 7;
+      weekLabels.style.gridTemplateColumns = `repeat(${totalDays}, minmax(120px, 1fr))`;
+      dayGrid.style.gridTemplateColumns = `repeat(${totalDays}, minmax(120px, 1fr))`;
+
+      weekLabels.innerHTML = "";
+      for (let w = 0; w < viewWeeks; w++) {
+        const weekStart = addDays(rangeStart, w * 7);
+        const lbl = document.createElement("div");
+        lbl.className = "week-label";
+        lbl.style.gridColumn = "span 7";
+        lbl.textContent = `Vecka ${getISOWeek(weekStart)}`;
+        weekLabels.appendChild(lbl);
+      }
+
+      dayGrid.innerHTML = "";
+      let hasAssignments = false;
+      for (let i = 0; i < totalDays; i++) {
+        const dayDate = addDays(rangeStart, i);
+        const iso = toISO(dayDate);
+        const dailyPlans = plansForDate(iso);
+        if (dailyPlans.length) hasAssignments = true;
+
+        const cell = document.createElement("div");
+        cell.className = "day-cell" + (iso === todayIso ? " today" : "");
+        const head = document.createElement("div");
+        head.className = "day-head";
+        head.innerHTML = `<div class="day-name">${weekdayLabel(dayDate)}</div><div class="day-date">${dateLabel(dayDate)}</div>`;
+        cell.appendChild(head);
+
+        const list = document.createElement("div");
+        list.className = "assignments";
+        dailyPlans.forEach(p => {
+          const item = document.createElement("div");
+          item.className = "assign-card";
+          const userName = userNameFor(p);
+          const dest = p.destination ? ` • ${p.destination}` : "";
+          const tentative = Number(p.tentative) === 1;
+          item.innerHTML = `
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <strong>${p.project || "Projekt"}</strong>
+              ${tentative ? '<span class="badge yellow">Eventuellt</span>' : ""}
+            </div>
+            <div class="sub">${userName}${p.subproject ? " • " + p.subproject : ""}${dest}</div>
+          `;
+          list.appendChild(item);
+        });
+
+        cell.appendChild(list);
+        dayGrid.appendChild(cell);
+      }
+
+      emptyPlanning.style.display = hasAssignments ? "none" : "block";
+    }
+
+    function renderCalWeekdays() {
+      if (!calWeekdays) return;
+      calWeekdays.innerHTML = "";
+      const labels = ["Mån", "Tis", "Ons", "Tors", "Fre", "Lör", "Sön"];
+      labels.forEach(lbl => {
+        const el = document.createElement("div");
+        el.className = "mini-cal-weekday";
+        el.textContent = lbl;
+        calWeekdays.appendChild(el);
+      });
+    }
+
+    function applyDragSelection(currentIso) {
+      if (!dragStart) return;
+      const start = dragStart <= currentIso ? dragStart : currentIso;
+      const end = dragStart <= currentIso ? currentIso : dragStart;
+      planStart.value = start;
+      planEnd.value = end;
+      renderMiniCalendar();
+    }
+
+    function renderMiniCalendar() {
+      if (!calDays || !calTitle) return;
+      const year = calCursor.getFullYear();
+      const month = calCursor.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const startWeekday = (firstDay.getDay() + 6) % 7; // Monday=0
+      const total = daysInMonth(calCursor);
+
+      calTitle.textContent = calCursor.toLocaleDateString("sv-SE", { month: "long", year: "numeric" });
+      calDays.innerHTML = "";
+      const startVal = planStart.value;
+      const endVal = planEnd.value;
+
+      for (let i = 0; i < startWeekday; i++) {
+        const cell = document.createElement("div");
+        cell.className = "mini-cal-day disabled";
+        calDays.appendChild(cell);
+      }
+
+      for (let d = 1; d <= total; d++) {
+        const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        const cell = document.createElement("div");
+        cell.className = "mini-cal-day";
+        if ((startVal && iso === startVal) || (endVal && iso === endVal)) {
+          cell.classList.add("selected");
+        }
+        if (startVal && endVal && between(iso, startVal, endVal)) {
+          cell.classList.add("in-range");
+        }
+        cell.textContent = d;
+
+        cell.addEventListener("mousedown", () => {
+          dragActive = true;
+          dragStart = iso;
+          planStart.value = iso;
+          planEnd.value = iso;
+          renderMiniCalendar();
+        });
+        cell.addEventListener("mouseenter", () => {
+          if (!dragActive || !dragStart) return;
+          applyDragSelection(iso);
+        });
+        cell.addEventListener("mouseup", () => {
+          if (!dragActive) return;
+          applyDragSelection(iso);
+          dragActive = false;
+          dragStart = null;
+        });
+        cell.addEventListener("click", () => {
+          if (dragActive) return;
+          planStart.value = iso;
+          planEnd.value = iso;
+          renderMiniCalendar();
+        });
+
+        calDays.appendChild(cell);
+      }
+    }
+
+    function renderPlanList() {
+      planList.innerHTML = "";
+      if (!plans.length) {
+        planList.innerHTML = '<div class="empty">Ingen planering ännu</div>';
+        return;
+      }
+      planListSubtitle.textContent = "Dina planeringar";
+      const sorted = plans
+        .filter(p => String(p.user_id) === String(currentUser.id) || p.email === currentUser.email)
+        .sort((a, b) => (a.start_date || "").localeCompare(b.start_date || ""));
+      sorted.forEach(p => {
+        const card = document.createElement("div");
+        card.className = "assign-card";
+        const tentative = Number(p.tentative) === 1;
+        card.innerHTML = `
+          <header style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span>${p.project || "Projekt"}</span>
+            ${tentative ? '<span class="badge yellow">Eventuellt jobb</span>' : ""}
+          </header>
+          <small>${p.subproject ? "Underprojekt: " + p.subproject : "Ingen underprojekt"}</small>
+          <div class="sub" style="margin-top:4px;">${p.start_date || ""} – ${p.end_date || ""}</div>
+          ${p.destination ? `<div class="sub">Plats: ${p.destination}</div>` : ""}
+          ${p.vehicle ? `<div class="sub">Fordon: ${p.vehicle}</div>` : ""}
+          ${p.contact_person || p.contact_phone ? `<div class="sub">Kontakt: ${[p.contact_person, p.contact_phone].filter(Boolean).join(" • ")}</div>` : ""}
+          ${p.notes ? `<div class="sub">${p.notes}</div>` : ""}
+        `;
+        planList.appendChild(card);
+      });
+    }
+
+    prevRangeBtn.addEventListener("click", () => {
+      rangeStart = addDays(rangeStart, -viewWeeks * 7);
+      renderTimeline();
+    });
+    nextRangeBtn.addEventListener("click", () => {
+      rangeStart = addDays(rangeStart, viewWeeks * 7);
+      renderTimeline();
+    });
+    todayBtn.addEventListener("click", () => {
+      rangeStart = startOfWeek(new Date());
+      renderTimeline();
+    });
+
+    viewButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        viewWeeks = Number(btn.dataset.weeks) || 2;
+        viewButtons.forEach(b => b.classList.toggle("active", b === btn));
+        renderTimeline();
+      });
+    });
+
+    if (calPrev) calPrev.addEventListener("click", () => { calCursor.setMonth(calCursor.getMonth() - 1); renderMiniCalendar(); });
+    if (calNext) calNext.addEventListener("click", () => { calCursor.setMonth(calCursor.getMonth() + 1); renderMiniCalendar(); });
+    if (planStart) planStart.addEventListener("change", renderMiniCalendar);
+    if (planEnd) planEnd.addEventListener("change", renderMiniCalendar);
+    document.addEventListener("mouseup", () => { dragActive = false; dragStart = null; });
+
+    // Init
+    (async function init() {
+      await fetchPlans();
+      renderPlanList();
+      renderTimeline();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rail Work AB – Lönöversikt</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 {
+      font-size: 18px;
+      margin: 0 0 16px;
+    }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .topbar h1 { margin: 0; font-size: 22px; }
+    .topbar small { color: #6b7280; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+      align-items: flex-start;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    .card.underlag {
+      padding: 12px 14px;
+      background: #f9fafb;
+      box-shadow: 0 4px 12px rgba(15,23,42,0.05);
+    }
+
+    .card.summary {
+      padding: 20px 22px;
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .card p {
+      margin: 0 0 12px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 16px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+    }
+
+    .field label {
+      color: #374151;
+    }
+
+    .field input {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+    }
+
+    .field input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
+    .readonly {
+      background: #f9fafb;
+      color: #6b7280;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      margin-top: 14px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: none;
+      background: #1d4ed8;
+      color: #fff;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover { background: #1e40af; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .summary-item {
+      padding: 12px;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid #e6edf7;
+      font-size: 13px;
+      min-height: 64px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .summary-item .label {
+      font-size: 11px;
+      color: #6b7280;
+      text-transform: uppercase;
+    }
+
+    .summary-item .value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .big-blue {
+      background: linear-gradient(90deg,#0f57c8,#1146a8);
+      color: white;
+      padding: 18px;
+      border-radius: 12px;
+      min-height: 86px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .big-blue .label { opacity: 0.9; font-size: 13px; }
+    .big-blue .value { font-size: 22px; font-weight: 700; }
+
+    .big-orange {
+      background: linear-gradient(90deg,#f97316,#fb923c);
+      color: white;
+      padding: 18px;
+      border-radius: 12px;
+      min-height: 86px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .big-white {
+      background: #ffffff;
+      color: #0f172a;
+      padding: 18px;
+      border-radius: 12px;
+      min-height: 86px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      border: 1px solid #e6edf7;
+    }
+
+    .big-white .label { opacity: 0.9; font-size: 13px; }
+    .big-white .value { font-size: 22px; font-weight: 700; }
+
+    .ob-section {
+      margin-top: 18px;
+    }
+
+    .muted {
+      color: #9ca3af;
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    .note {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 8px;
+    }
+
+    ul {
+      margin: 4px 0 0;
+      padding-left: 18px;
+      font-size: 13px;
+      color: #4b5563;
+    }
+
+    .non-admin .admin-only { display: none !important; }
+    /* Dölj adminlänkar i sidomenyn för användarvy */
+    .non-admin .sidebar .admin-only { display: none !important; }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item active">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Rail Work AB</h1>
+        <small>Lönöversikt – uppskattad lön baserat på rapporterade timmar</small>
+      </div>
+      <div class="welcome" id="welcomeText">Välkommen</div>
+    </div>
+
+    <div class="layout">
+      <section class="card summary">
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
+          <div style="grid-column: 1 / -1;">
+            <!-- Removed small summary cards (visual) per request. Keep hidden inputs so calculations still work -->
+            <input id="hourlyWage" type="hidden" value="0" />
+            <input id="monthHours" type="hidden" value="0" />
+            <input id="traktamente_amount" type="hidden" value="0" />
+
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+              <!-- kommunalskatt and semester inputs removed per request -->
+              <button id="recalcBtn" class="btn-primary">Uppdatera</button>
+              <button id="downloadPdfBtn" class="btn-primary" style="background:#10b981; margin-left:6px;">Ladda ner lönespecifikation (PDF)</button>
+            </div>
+          </div>
+
+          <div class="big-white">
+            <div class="label">Timlön</div>
+            <div class="value" id="hourlyLarge">0 kr</div>
+          </div>
+
+            <div class="big-blue">
+              <div class="label">Total bruttolön</div>
+              <div class="value" id="grossPay">0 kr</div>
+              <div class="muted">Före skatt (Tabell 30)</div>
+            </div>
+            <div class="big-orange">
+              <div class="label">Nettolön (efter skatt)</div>
+              <div class="value" id="netPay">0 kr</div>
+            </div>
+
+          </div>
+
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin-top:12px;">
+            <div class="big-white">
+              <div class="label">Totala timmar</div>
+              <div class="value" id="monthHoursLarge">0.0 h</div>
+            </div>
+            <div class="big-white">
+              <div class="label">Sparad restidsersättning</div>
+              <div class="value" id="savedRestLarge">0 kr</div>
+            </div>
+            <div class="big-white">
+              <div class="label">Traktamente</div>
+              <div class="value" id="traktLarge">0 kr</div>
+            </div>
+            <div class="big-white">
+              <div class="label">OB-tillägg</div>
+              <div class="value" id="obLarge">0 kr</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ob-section card" style="margin-top:16px; padding:14px;">
+          <h3 style="margin:0 0 8px;">OB-fördelning</h3>
+          <div style="display:flex; gap:18px; margin-top:12px;">
+            <div style="flex:1; text-align:center;">
+              <div class="label">Dag (0%)</div>
+              <div class="value">0.0 h</div>
+              <div class="muted">0.00 kr</div>
+            </div>
+            <div style="flex:1; text-align:center;">
+              <div class="label">Kväll (29%)</div>
+              <div class="value">0.0 h</div>
+              <div class="muted">+0.00 kr</div>
+            </div>
+            <div style="flex:1; text-align:center;">
+              <div class="label">Natt (63%)</div>
+              <div class="value">0.0 h</div>
+              <div class="muted">+0.00 kr</div>
+            </div>
+            <div style="flex:1; text-align:center;">
+              <div class="label">Helg (113%)</div>
+              <div class="value">0.0 h</div>
+              <div class="muted">+0.00 kr</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <script src="auth.js"></script>
+  <script>
+    const currentUser = requireLogin();
+    setupSidebarForUser(currentUser);
+    if (!isAdmin(currentUser)) {
+      document.body.classList.add("non-admin");
+      document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
+    }
+    const isAdminUser = isAdmin(currentUser);
+    const token = localStorage.getItem("token") || "";
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("currentUser");
+      window.location.href = "login.html";
+    });
+
+    const STORAGE_KEY = "timeReports";
+
+    function parseDate(dateStr) {
+      const [y, m, d] = (dateStr || "").split("-").map(Number);
+      if (!y || !m || !d) return new Date();
+      return new Date(y, m - 1, d);
+    }
+
+    function calcHours(report) {
+      const fallback = parseFloat(report.timmar || report.hours || "0");
+      if (!Number.isNaN(fallback) && fallback > 0) return fallback;
+
+      const dateStr = report.datum || report.date;
+      const startStr = report.starttid || report.start;
+      const endStr = report.sluttid || report.end;
+      if (!dateStr || !startStr || !endStr) return 0;
+
+      const [sh, sm] = startStr.split(":").map(Number);
+      const [eh, em] = endStr.split(":").map(Number);
+
+      const startDate = new Date(dateStr);
+      startDate.setHours(sh || 0, sm || 0, 0, 0);
+
+      const endDate = new Date(dateStr);
+      endDate.setHours(eh || 0, em || 0, 0, 0);
+
+      if (endDate <= startDate) {
+        endDate.setDate(endDate.getDate() + 1);
+      }
+
+      const diffMinutes = (endDate - startDate) / 60000;
+      const roundedMinutes = Math.round(diffMinutes / 10) * 10; // 10-minuterssteg
+      const roundedHours = roundedMinutes / 60;
+
+      return roundedHours > 0 ? parseFloat(roundedHours.toFixed(2)) : 0;
+    }
+
+    function calcMonthHours() {
+      const reports = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      const today = new Date();
+      let sum = 0;
+
+      reports.forEach(r => {
+        if (!r.datum) return;
+        const d = parseDate(r.datum);
+        if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth()) {
+          sum += calcHours(r);
+        }
+      });
+
+      return sum;
+    }
+
+      function calcMonthTraktamente() {
+        const reports = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+        const today = new Date();
+        let sum = 0;
+        reports.forEach(r => {
+          if (!r.datum) return;
+          const d = parseDate(r.datum);
+          if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth()) {
+            const amt = Number(r.traktamente_amount || r.traktAmount || 0) || 0;
+            sum += amt;
+          }
+        });
+        return sum;
+      }
+
+      function calcMonthRestPay() {
+        const reports = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+        const today = new Date();
+        let sum = 0;
+        reports.forEach(r => {
+          if (!r.datum) return;
+          const d = parseDate(r.datum);
+          if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth()) {
+            const hours = Number(r.restid || r.restId || 0) || 0;
+            sum += hours * 170; // 170 kr per restimme
+          }
+        });
+        return sum;
+      }
+
+    function formatKr(value) {
+      return Math.round(value).toLocaleString("sv-SE") + " kr";
+    }
+
+    function recalc() {
+      const hourlyWage = Number((document.getElementById("hourlyWage") && document.getElementById("hourlyWage").value) || 0);
+      const taxEl = document.getElementById("taxPercent");
+      const taxPercent = taxEl ? Number(taxEl.value || 0) / 100 : 0;
+      const perDiemEl = document.getElementById("perDiemPercent");
+      const perDiemPercent = perDiemEl ? Number(perDiemEl.value || 0) / 100 : 0;
+      const monthHoursEl = document.getElementById("monthHours");
+      const hours = Number((monthHoursEl && monthHoursEl.value) || 0);
+
+      const grossBase = hourlyWage * hours; // timlön * arbetade timmar
+      const restPay = calcMonthRestPay(); // restidsersättning (170 kr/h)
+      const gross = grossBase + restPay; // brutto inkluderar restidsersättning
+      const kommunal = gross * taxPercent;
+      const semester = grossBase * perDiemPercent; // semesterersättning räknas endast på arbetslön (ej restidsersättning)
+      const aga = gross * 0.3142;
+      const traktSum = calcMonthTraktamente();
+      // Traktamente är skattefritt och läggs på nettolön
+      const net = gross - kommunal + traktSum;
+
+      const grossEl = document.getElementById("grossPay");
+      if (grossEl) grossEl.textContent = formatKr(gross);
+
+      const kommunEl = document.getElementById("kommunalskatt");
+      if (kommunEl) kommunEl.textContent = formatKr(kommunal);
+
+      const semEl = document.getElementById("semesterersattning");
+      if (semEl) semEl.textContent = formatKr(semester);
+
+      const agaEl = document.getElementById("aga");
+      if (agaEl) agaEl.textContent = formatKr(aga);
+
+      const netEl = document.getElementById("netPay");
+      if (netEl) netEl.textContent = formatKr(net);
+
+      const hourlyLargeEl = document.getElementById("hourlyLarge");
+      if (hourlyLargeEl) hourlyLargeEl.textContent = formatKr(hourlyWage);
+
+      const traktEl = document.getElementById("traktamenteSum");
+      if (traktEl) traktEl.textContent = formatKr(traktSum);
+
+      const restEl = document.getElementById("restPaySum");
+      if (restEl) restEl.textContent = formatKr(restPay);
+
+      const semSummaryEl = document.getElementById("semesterSummary");
+      if (semSummaryEl) semSummaryEl.textContent = formatKr(semester);
+
+      const grundEl = document.getElementById("grundlon");
+      if (grundEl) grundEl.textContent = formatKr(grossBase);
+
+      const obEl = document.getElementById("obAllowance");
+      if (obEl) obEl.textContent = formatKr(0);
+
+      const savedEl = document.getElementById("savedRestPay");
+      if (savedEl) savedEl.textContent = formatKr(0);
+
+      // Update large white cards
+      const hourlyLargeEl = document.getElementById("hourlyLarge");
+      if (hourlyLargeEl) hourlyLargeEl.textContent = formatKr(hourlyWage);
+
+      const monthHoursLargeEl = document.getElementById("monthHoursLarge");
+      if (monthHoursLargeEl) monthHoursLargeEl.textContent = (hours || 0).toFixed(1) + " h";
+
+      const semesterLargeEl = document.getElementById("semesterLarge");
+      if (semesterLargeEl) semesterLargeEl.textContent = formatKr(semester);
+
+      const savedRestLargeEl = document.getElementById("savedRestLarge");
+      if (savedRestLargeEl) savedRestLargeEl.textContent = formatKr(0);
+
+      const traktLargeEl = document.getElementById("traktLarge");
+      if (traktLargeEl) traktLargeEl.textContent = formatKr(traktSum);
+
+      const obLargeEl = document.getElementById("obLarge");
+      if (obLargeEl) obLargeEl.textContent = formatKr(0);
+
+      return { hourlyWage, taxPercent, perDiemPercent, hours, gross, kommunal, semester, aga, net, traktSum, restPay };
+    }
+
+    function lockForNonAdmin() {
+      if (isAdminUser) return;
+      const inputs = [
+        "hourlyWage",
+        "taxPercent",
+        "monthHours",
+        "perDiemPercent",
+      ].map((id) => document.getElementById(id));
+      inputs.forEach((el) => {
+        if (el) {
+          el.readOnly = true;
+          el.disabled = true;
+          el.classList.add("readonly");
+        }
+      });
+      const btn = document.getElementById("recalcBtn");
+      if (btn) btn.style.display = "none";
+      const note = document.getElementById("userNote");
+      const adminNote = document.getElementById("adminOnlyNote");
+      const lockedNote = document.getElementById("lockedNote");
+      if (note) note.style.display = "none";
+      if (adminNote) adminNote.style.display = "block";
+      if (lockedNote) lockedNote.style.display = "block";
+      const intro = document.getElementById("underlagIntro");
+      if (intro) intro.textContent = "Endast admin kan uppdatera underlaget.";
+      const fields = document.getElementById("underlagFields");
+      if (fields) fields.style.opacity = "0.6";
+      // Dölj semesterruta helt för användare
+      const semBox = document.getElementById("summarySem");
+      if (semBox) semBox.style.display = "none";
+    }
+
+    function applyUserHourly(user) {
+      if (!user) return;
+      if (user.hourly_wage !== undefined && user.hourly_wage !== null) {
+        const el = document.getElementById("hourlyWage");
+        if (el) {
+          el.value = Number(user.hourly_wage);
+        }
+      }
+    }
+
+    async function refreshCurrentUserFromBackend() {
+      if (!token) return;
+      try {
+        const res = await fetch("/me", {
+          headers: { Authorization: "Bearer " + token }
+        });
+        if (!res.ok) return;
+        const user = await res.json();
+        applyUserHourly(user);
+        // spara i localStorage för andra sidor
+        localStorage.setItem("currentUser", JSON.stringify(user));
+      } catch (err) {
+        console.warn("Kunde inte hämta /me:", err);
+      }
+    }
+
+    // Init
+    applyUserHourly(currentUser);
+    const autoHours = calcMonthHours();
+    document.getElementById("monthHours").value = autoHours.toFixed(1);
+    recalc();
+
+    document.getElementById("recalcBtn").addEventListener("click", recalc);
+    lockForNonAdmin();
+    refreshCurrentUserFromBackend().then(() => recalc());
+
+    function formatDateRangeForMonth(dateObj) {
+      const year = dateObj.getFullYear();
+      const month = dateObj.getMonth();
+      const start = new Date(year, month, 1);
+      const end = new Date(year, month + 1, 0);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())} till ${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+    }
+
+    document.getElementById("downloadPdfBtn").addEventListener("click", async () => {
+      // Generate a printable HTML block and render it to PDF using html2canvas + jsPDF
+      const calc = recalc();
+      const now = new Date();
+      const periodText = formatDateRangeForMonth(now);
+
+      const html = `
+        <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding:20px; color:#111827;">
+          <h1 style="margin:0 0 8px;">Lönespecifikation</h1>
+          <p style="margin:4px 0 12px; color:#4b5563;">Period: ${periodText}</p>
+          <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:13px;">
+            <tbody>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Timlön</th><td style="padding:8px; border:1px solid #e5e7eb;">${calc.hourlyWage.toFixed(2)} kr</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Timmar</th><td style="padding:8px; border:1px solid #e5e7eb;">${calc.hours.toFixed(1)} h</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Bruttolön</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.gross)}</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Kommunalskatt</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.kommunal)}</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Semesterersättning (sparas)</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.semester)}</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Traktamente (skattefritt)</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.traktSum || 0)}</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Restidsersättning</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.restPay || 0)}</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Arbetsgivaravgifter</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.aga)}</td></tr>
+              <tr><th style="text-align:left; padding:8px; border:1px solid #e5e7eb; background:#f9fafb;">Nettolön</th><td style="padding:8px; border:1px solid #e5e7eb;">${formatKr(calc.net)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      // Create offscreen container
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.left = '-10000px';
+      container.innerHTML = html;
+      document.body.appendChild(container);
+
+      try {
+        // Wait for html2canvas and jspdf to be available
+        if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+          alert('PDF-bibliotek saknas. Försök ladda om sidan.');
+          document.body.removeChild(container);
+          return;
+        }
+
+        // Render container to canvas (higher scale for better quality)
+        const canvas = await html2canvas(container, { scale: 2 });
+        const imgData = canvas.toDataURL('image/jpeg', 1.0);
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+
+        const filename = `lonespecifikation-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}.pdf`;
+        pdf.save(filename);
+      } catch (err) {
+        console.error('Kunde inte skapa PDF:', err);
+        alert('Kunde inte skapa PDF. Se konsolen för detaljer.');
+      } finally {
+        document.body.removeChild(container);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kontakter – Användare</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f5f7fb;
+    }
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+    .hero { background: linear-gradient(180deg, #fff, #f5f7fb); padding: 18px 20px 12px; border-radius: 16px; box-shadow: 0 10px 30px rgba(15,23,42,0.05); margin-bottom: 14px; }
+    .hero h1 { margin: 0; font-size: 26px; display: flex; align-items: center; gap: 10px; }
+    .hero p { margin: 4px 0 0; color: #64748b; font-size: 15px; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+    .badge-empty {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 8px;
+    }
+    .role-badge {
+      display: inline-flex;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      font-size: 11px;
+      text-transform: capitalize;
+      background: #f9fafb;
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item active">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <h1>👥︎ Kontakter</h1>
+      <p>Alla användare och kontaktuppgifter.</p>
+    </div>
+
+    <section class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Namn</th>
+            <th>Roll</th>
+            <th>Telefon</th>
+            <th>E-post</th>
+          </tr>
+        </thead>
+        <tbody id="contactsBody"></tbody>
+      </table>
+      <div id="noContacts" class="badge-empty" style="display:none;">
+        Inga användare hittades. Be admin lägga till användare.
+      </div>
+    </section>
+  </main>
+
+  <script src="auth.js"></script>
+  <script>
+    const token = localStorage.getItem("token");
+    if (!token) {
+      window.location.href = "login.html";
+    }
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("currentUser");
+      window.location.href = "login.html";
+    });
+
+    const currentUser = requireLogin();
+    setupSidebarForUser(currentUser);
+
+    const contactsBody = document.getElementById("contactsBody");
+    const noContacts = document.getElementById("noContacts");
+
+    async function loadContacts() {
+      contactsBody.innerHTML = "";
+      try {
+        const res = await fetch("/contacts", {
+          headers: token ? { Authorization: "Bearer " + token } : {}
+        });
+        if (!res.ok) throw new Error("Fel vid hämtning av kontakter");
+        const users = await res.json();
+
+        if (!users.length) {
+          noContacts.style.display = "block";
+          return;
+        }
+        noContacts.style.display = "none";
+
+        users.forEach((user) => {
+          const fullName =
+            (user.first_name || "") +
+            (user.last_name ? " " + user.last_name : "");
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${fullName || "-"}</td>
+            <td><span class="role-badge">${user.role || "-"}</span></td>
+            <td>${user.phone || "-"}</td>
+            <td>${user.email || "-"}</td>
+          `;
+          contactsBody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+        noContacts.textContent = "Kunde inte hämta kontakter.";
+        noContacts.style.display = "block";
+      }
+    }
+
+    loadContacts();
+  </script>
+</body>
+</html>

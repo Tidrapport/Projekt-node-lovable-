@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admina Bas – Logga in</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #020617;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 24px;
+      padding: 32px 36px 26px;
+      width: 420px;
+      box-shadow: 0 25px 80px rgba(15,23,42,0.6);
+      text-align: left;
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    .subtitle { margin: 0 0 18px; color: #6b7280; font-size: 14px; }
+    .company-line { margin-bottom: 18px; font-size: 13px; color: #4b5563; }
+    .company-name { font-weight: 600; }
+    .change-company {
+      font-size: 12px;
+      color: #2563eb;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-left: 6px;
+    }
+    label {
+      font-size: 13px;
+      margin-bottom: 6px;
+      display: block;
+    }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      font-size: 14px;
+      margin-bottom: 14px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px rgba(37,99,235,0.2);
+    }
+    button {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: none;
+      background: #2563eb;
+      color: white;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    button:hover { background: #1d4ed8; }
+    .error {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #b91c1c;
+      min-height: 18px;
+    }
+    .footer {
+      margin-top: 18px;
+      font-size: 11px;
+      text-align: center;
+      color: #9ca3af;
+    }
+  </style>
+  <script src="auth.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h1>Admina Bas</h1>
+    <p class="subtitle">Logga in med din e‑postadress och lösenord.</p>
+
+    <div class="company-line">
+      Inloggning till
+      <span id="companyName" class="company-name"></span>
+      <span id="changeCompany" class="change-company">Byt företag</span>
+    </div>
+
+    <form id="loginForm">
+      <label for="email">E‑post</label>
+      <input type="email" id="email" placeholder="din@epost.se" required />
+
+      <label for="password">Lösenord</label>
+      <input type="password" id="password" required />
+
+      <button type="submit" id="loginBtn">Logga in</button>
+    </form>
+
+    <div id="error" class="error"></div>
+
+    <div class="footer">
+      Rail Work AB – intern plattform
+    </div>
+  </div>
+
+  <script>
+    // Hämta valt företag, annars tillbaka till company-select
+    const company = JSON.parse(localStorage.getItem("selectedCompany") || "null");
+    if (!company) {
+      window.location.href = "company-select.html";
+    } else {
+      document.getElementById("companyName").textContent = company.name;
+    }
+
+    document.getElementById("changeCompany").addEventListener("click", () => {
+      localStorage.removeItem("selectedCompany");
+      window.location.href = "company-select.html";
+    });
+
+    const form = document.getElementById("loginForm");
+    const errorEl = document.getElementById("error");
+    const btn = document.getElementById("loginBtn");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (!email || !password) {
+        errorEl.textContent = "Fyll i både e‑post och lösenord.";
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Loggar in...";
+
+      try {
+        const apiBase = window.location.origin || "http://localhost:3000";
+        const res = await fetch(`${apiBase}/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          errorEl.textContent = data.error || "Tekniskt fel. Försök igen.";
+          btn.disabled = false;
+          btn.textContent = "Logga in";
+          return;
+        }
+
+        // data.user förväntas komma från backend (SQLite)
+        const user = data.user || {};
+        // Spara token från backend (JWT t.ex.)
+        if (data.token) {
+          localStorage.setItem("token", data.token);
+        }
+
+        // Koppla ihop med auth.js
+        setCurrentUser(user);
+
+        // Spara lite extra för sidor som använder company_* och user_*
+        localStorage.setItem("company_id", user.company_id || company.code);
+        localStorage.setItem("company_name", company.name);
+        localStorage.setItem("user_id", user.id);
+        const fullName =
+          (user.first_name || user.firstName || "") +
+          ((user.last_name || user.lastName) ? " " + (user.last_name || user.lastName) : "");
+        localStorage.setItem("user_name", fullName.trim() || user.email || "");
+        localStorage.setItem("user_role", user.role || "user");
+
+        // Admin -> admin.html, annars dashboard
+        if ((user.role || "").toLowerCase() === "admin") {
+          window.location.href = "admin.html";
+        } else {
+          window.location.href = "dashboard.html";
+        }
+      } catch (err) {
+        console.error(err);
+        errorEl.textContent = "Tekniskt fel. Försök igen.";
+        btn.disabled = false;
+        btn.textContent = "Logga in";
+      }
+    });
+  </script>
+</body>
+</html>

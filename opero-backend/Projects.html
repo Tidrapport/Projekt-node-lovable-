@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Projekt – Rail Work</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .topbar h1 { margin: 0; font-size: 22px; }
+    .topbar small { color: #6b7280; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .page-header h2 { margin: 0; font-size: 20px; }
+    .page-header p { margin: 4px 0 0; font-size: 13px; color: #6b7280; }
+
+    .btn-primary,
+    .btn-secondary {
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: #1d4ed8;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #1e40af; }
+
+    .btn-secondary {
+      background: #fff;
+      border: 1px solid #d1d5db;
+      color: #111827;
+    }
+    .btn-secondary:hover { background: #f3f4f6; }
+
+    .layout-grid {
+      display: grid;
+      grid-template-columns: 2fr 3fr;
+      gap: 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .field label { color: #374151; }
+
+    .field input,
+    .field textarea,
+    .field select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    .field textarea { min-height: 60px; }
+
+    .field input:focus,
+    .field textarea:focus,
+    .field select:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+
+    .badge-active {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .badge-inactive {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .table-actions {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .btn-small {
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-small.edit {
+      border-color: #3b82f6;
+      color: #1d4ed8;
+    }
+
+    .btn-small.delete {
+      border-color: #f87171;
+      color: #b91c1c;
+    }
+
+    .helper {
+      font-size: 11px;
+      color: #6b7280;
+    }
+
+    @media (max-width: 1000px) {
+      .layout-grid {
+        grid-template-columns: 1fr;
+      }
+      .main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <h2 id="sidebarCompanyName">Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="#" class="nav-item">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only active">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="companyTitle">Rail Work AB</h1>
+        <small>Projekt & underprojekt – används i tidrapportering</small>
+      </div>
+      <div class="welcome" id="welcomeText">Välkommen</div>
+    </div>
+
+    <div class="page-header">
+      <div>
+        <h2>Projekt & underprojekt</h2>
+        <p>Här lägger du upp projekt och kopplade underprojekt som användarna väljer vid tidrapportering.</p>
+      </div>
+    </div>
+
+    <div class="layout-grid">
+      <!-- Vänster: formulär -->
+      <div class="card">
+        <div class="card-title" id="formTitle">Nytt projekt</div>
+
+        <form id="projectForm">
+          <input type="hidden" id="editProjectId" />
+
+          <div class="field">
+            <label for="projectName">Projektnamn</label>
+            <input id="projectName" required />
+          </div>
+
+          <div class="field">
+            <label for="projectCustomer">Kund</label>
+            <input id="projectCustomer" placeholder="Kundnamn (valfritt)" />
+          </div>
+
+          <div class="field">
+            <label for="projectLocation">Plats</label>
+            <input id="projectLocation" placeholder="Ort / arbetsplats" />
+          </div>
+
+          <div class="field">
+            <label for="projectDescription">Beskrivning</label>
+            <textarea id="projectDescription" placeholder="Kort beskrivning av projektet"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="projectInternal">Intern märkning (visas på PDF)</label>
+            <input id="projectInternal" placeholder="Intern kod, t.ex. RW-2301" />
+          </div>
+
+          <div class="field">
+            <label for="projectStatus">Status</label>
+            <select id="projectStatus">
+              <option value="aktiv">Aktiv</option>
+              <option value="inaktiv">Inaktiv</option>
+            </select>
+            <div class="helper">
+              Endast <strong>aktiva</strong> projekt visas i tidrapporteringen.
+            </div>
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="submit" class="btn-primary" id="saveProjectBtn">Spara projekt</button>
+            <button type="button" class="btn-secondary" id="resetFormBtn">Rensa</button>
+          </div>
+        </form>
+
+        <hr style="margin:18px 0; border:none; border-top:1px solid #e5e7eb;" />
+
+        <!-- Underprojekt-formulär -->
+        <div class="card-title" style="margin-bottom:8px;">Underprojekt</div>
+        <form id="subProjectForm">
+          <input type="hidden" id="editSubId" />
+
+          <div class="field">
+            <label for="subProjectParent">Projekt</label>
+            <select id="subProjectParent"></select>
+          </div>
+
+          <div class="field">
+            <label for="subProjectName">Namn på underprojekt</label>
+            <input id="subProjectName" required placeholder="Ex: Spår 3, Etapp 2" />
+          </div>
+
+          <div class="field">
+            <label for="subProjectDescription">Beskrivning</label>
+            <textarea id="subProjectDescription" placeholder="Valfri beskrivning"></textarea>
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="submit" class="btn-primary">Spara underprojekt</button>
+            <button type="button" class="btn-secondary" id="resetSubFormBtn">Rensa</button>
+          </div>
+        </form>
+        <div class="helper" style="margin-top:8px;">
+          Underprojekt kopplas mot <strong>projectId</strong> och används i graderare/export.
+        </div>
+      </div>
+
+      <!-- Höger: listor -->
+      <div class="card">
+        <div class="card-title">Alla projekt</div>
+        <table>
+          <thead>
+          <tr>
+            <th>Projekt</th>
+            <th>Kund</th>
+            <th>Plats</th>
+            <th>Status</th>
+            <th>Underprojekt</th>
+            <th>Åtgärder</th>
+          </tr>
+          </thead>
+          <tbody id="projectsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const PROJECTS_KEY = "projects";
+    const SUBPROJECTS_KEY = "subProjects";
+
+    // Auth
+    const token = localStorage.getItem("token");
+    const companyId = localStorage.getItem("company_id");
+    const companyName = localStorage.getItem("company_name") || "Rail Work AB";
+    const userName = localStorage.getItem("user_name") || "admin";
+
+    if (!companyId) {
+      window.location.href = "company-select.html";
+    } else if (!token) {
+      window.location.href = "login.html";
+    }
+
+    document.getElementById("companyTitle").textContent = companyName;
+    document.getElementById("sidebarCompanyName").textContent = companyName;
+    document.getElementById("welcomeText").textContent = "Välkommen, " + userName;
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user_id");
+      localStorage.removeItem("user_name");
+      localStorage.removeItem("user_role");
+      window.location.href = "login.html";
+    });
+
+    let projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
+    let subProjects = JSON.parse(localStorage.getItem(SUBPROJECTS_KEY) || "[]");
+
+    const projectForm = document.getElementById("projectForm");
+    const subProjectForm = document.getElementById("subProjectForm");
+    const projectsTableBody = document.getElementById("projectsTableBody");
+    const subProjectParent = document.getElementById("subProjectParent");
+    const formTitle = document.getElementById("formTitle");
+    const resetFormBtn = document.getElementById("resetFormBtn");
+    const resetSubFormBtn = document.getElementById("resetSubFormBtn");
+
+    function saveAll() {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+      localStorage.setItem(SUBPROJECTS_KEY, JSON.stringify(subProjects));
+    }
+
+    function uuid() {
+      return "proj_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+
+    function renderProjectSelect() {
+      subProjectParent.innerHTML = "";
+      const noneOpt = document.createElement("option");
+      noneOpt.value = "";
+      noneOpt.textContent = "Välj projekt…";
+      subProjectParent.appendChild(noneOpt);
+
+      projects.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name;
+        subProjectParent.appendChild(opt);
+      });
+    }
+
+    function countSubProjectsFor(projectId) {
+      return subProjects.filter(sp => sp.projectId === projectId).length;
+    }
+
+    function renderProjectsTable() {
+      projectsTableBody.innerHTML = "";
+
+      projects.forEach((p) => {
+        const tr = document.createElement("tr");
+        const count = countSubProjectsFor(p.id);
+
+        tr.innerHTML = `
+          <td>${p.name}</td>
+          <td>${p.customer || "-"}</td>
+          <td>${p.location || "-"}</td>
+          <td>
+            <span class="badge ${p.status === "aktiv" ? "badge-active" : "badge-inactive"}">
+              ${p.status === "aktiv" ? "Aktiv" : "Inaktiv"}
+            </span>
+          </td>
+          <td>${count}</td>
+          <td>
+            <div class="table-actions">
+              <button class="btn-small edit">Redigera</button>
+              <button class="btn-small delete">Ta bort</button>
+            </div>
+          </td>
+        `;
+
+        const editBtn = tr.querySelector(".btn-small.edit");
+        const deleteBtn = tr.querySelector(".btn-small.delete");
+
+        editBtn.addEventListener("click", () => {
+          document.getElementById("editProjectId").value = p.id;
+          document.getElementById("projectName").value = p.name;
+          document.getElementById("projectCustomer").value = p.customer || "";
+          document.getElementById("projectLocation").value = p.location || "";
+          document.getElementById("projectDescription").value = p.description || "";
+          document.getElementById("projectInternal").value = p.internal_marking || "";
+          document.getElementById("projectStatus").value = p.status || "aktiv";
+          formTitle.textContent = "Redigera projekt";
+        });
+
+        deleteBtn.addEventListener("click", () => {
+          if (!confirm("Ta bort projektet? Eventuella underprojekt tas också bort.")) return;
+          projects = projects.filter(pr => pr.id !== p.id);
+          subProjects = subProjects.filter(sp => sp.projectId !== p.id);
+          saveAll();
+          renderProjectSelect();
+          renderProjectsTable();
+        });
+
+        projectsTableBody.appendChild(tr);
+      });
+    }
+
+    projectForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const editId = document.getElementById("editProjectId").value;
+
+      const data = {
+        name: document.getElementById("projectName").value.trim(),
+        customer: document.getElementById("projectCustomer").value.trim(),
+        location: document.getElementById("projectLocation").value.trim(),
+        description: document.getElementById("projectDescription").value.trim(),
+        internal_marking: document.getElementById("projectInternal").value.trim(),
+        status: document.getElementById("projectStatus").value,
+      };
+
+      if (!data.name) {
+        alert("Projektnamn krävs.");
+        return;
+      }
+
+      if (editId) {
+        const idx = projects.findIndex(p => p.id === editId);
+        if (idx !== -1) {
+          projects[idx] = {
+            ...projects[idx],
+            ...data,
+          };
+        }
+      } else {
+        projects.push({
+          id: uuid(),
+          company_id: companyId,
+          customer_id: null,
+          customer_name: data.customer,
+          work_task: "",
+          active: data.status === "aktiv",
+          ...data,
+        });
+      }
+
+      saveAll();
+      renderProjectSelect();
+      renderProjectsTable();
+      projectForm.reset();
+      document.getElementById("editProjectId").value = "";
+      formTitle.textContent = "Nytt projekt";
+    });
+
+    resetFormBtn.addEventListener("click", () => {
+      projectForm.reset();
+      document.getElementById("editProjectId").value = "";
+      formTitle.textContent = "Nytt projekt";
+    });
+
+    subProjectForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const parentId = subProjectParent.value;
+      const name = document.getElementById("subProjectName").value.trim();
+      const desc = document.getElementById("subProjectDescription").value.trim();
+      const editId = document.getElementById("editSubId").value;
+
+      if (!parentId) {
+        alert("Välj ett projekt för underprojektet.");
+        return;
+      }
+      if (!name) {
+        alert("Underprojektsnamn krävs.");
+        return;
+      }
+
+      if (editId) {
+        const idx = subProjects.findIndex(sp => sp.id === editId);
+        if (idx !== -1) {
+          subProjects[idx] = {
+            ...subProjects[idx],
+            projectId: parentId,
+            name,
+            description: desc,
+          };
+        }
+      } else {
+        subProjects.push({
+          id: "sub_" + Math.random().toString(36).slice(2),
+          projectId: parentId,
+          company_id: companyId,
+          name,
+          description: desc,
+          active: true,
+        });
+      }
+
+      saveAll();
+      subProjectForm.reset();
+      document.getElementById("editSubId").value = "";
+      alert("Underprojekt sparat.");
+      renderProjectsTable();
+    });
+
+    resetSubFormBtn.addEventListener("click", () => {
+      subProjectForm.reset();
+      document.getElementById("editSubId").value = "";
+    });
+
+    // init
+    renderProjectSelect();
+    renderProjectsTable();
+  </script>
+</body>
+</html>

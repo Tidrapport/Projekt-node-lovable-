@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rail Work AB – Användare</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 {
+      font-size: 18px;
+      margin: 0 0 16px;
+    }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .topbar h1 { margin: 0; font-size: 22px; }
+    .topbar small { color: #6b7280; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .page-layout {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 20px;
+      align-items: flex-start;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .card p {
+      margin: 0 0 16px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .field label {
+      color: #374151;
+    }
+
+    .field input,
+    .field select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
+    .field-inline {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .btn-primary {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: none;
+      background: #1d4ed8;
+      color: #fff;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: #1e40af; }
+
+    .btn-secondary {
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-secondary:hover { background: #f3f4f6; }
+
+    .btn-small {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-small.delete {
+      border-color: #f87171;
+      color: #b91c1c;
+    }
+
+    .error {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #b91c1c;
+      min-height: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    .badge-role {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+
+    .badge-role.admin {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .badge-empty {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item" id="navDashboard">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item" id="navTimes">Tidrapporter</a>
+      <a href="planning.html" class="nav-item" id="navPlanning">Planering</a>
+      <a href="deviations.html" class="nav-item" id="navDeviations">Avvikelser</a>
+      <a href="salary-overview.html" class="nav-item" id="navSalary">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item" id="navContacts">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only" id="navAttest">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only" id="navProjects">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only" id="navJobRoles">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only" id="navMaterialTypes">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only" id="navObSettings">OB-inställningar</a>
+    <a href="users.html" class="nav-item admin-only active" id="navUsers">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Rail Work AB</h1>
+        <small>Användare – lägg till, ge roller och hantera inloggningar</small>
+      </div>
+      <div class="welcome" id="welcomeText">Välkommen</div>
+    </div>
+
+    <div class="page-layout">
+      <div class="card">
+        <h2>Ny användare</h2>
+        <p>Admin kan skapa användare, ge roll och generera ett engångslösenord.</p>
+
+        <form id="userForm">
+          <div class="field">
+            <label for="firstName">Förnamn</label>
+            <input type="text" id="firstName" required />
+          </div>
+          <div class="field">
+            <label for="lastName">Efternamn</label>
+            <input type="text" id="lastName" required />
+          </div>
+          <div class="field">
+            <label for="email">E‑post (används som inloggning)</label>
+            <input type="email" id="email" required />
+          </div>
+          <div class="field">
+            <label for="phone">Telefon</label>
+            <input type="tel" id="phone" placeholder="+46..." />
+          </div>
+          <div class="field">
+            <label for="role">Roll</label>
+            <select id="role" required>
+              <option value="Anställd">Anställd</option>
+              <option value="Platschef">Platschef</option>
+              <option value="Inhyrd">Inhyrd</option>
+              <option value="Admin">Admin</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="password">Lösenord</label>
+            <div class="field-inline">
+              <input type="text" id="password" required />
+              <button type="button" class="btn-secondary" id="genPasswordBtn">Generera</button>
+            </div>
+          </div>
+
+          <div class="error" id="formError"></div>
+
+          <button type="submit" class="btn-primary">Skapa användare</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Befintliga användare</h2>
+        <p>Lista över alla användare i systemet (lagras lokalt i webbläsaren + backend för inloggning).</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Namn</th>
+              <th>E‑post</th>
+              <th>Telefon</th>
+              <th>Roll</th>
+              <th>Skapad</th>
+              <th>Åtgärder</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+        <div id="emptyState" class="badge-empty">
+          Inga användare tillagda än.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = "http://localhost:3000";
+
+    const logoutBtn = document.getElementById("logoutBtn");
+    const welcomeText = document.getElementById("welcomeText");
+
+    const currentUserRaw = localStorage.getItem("currentUser");
+    if (!currentUserRaw) {
+      window.location.href = "login.html";
+    }
+    const currentUser = JSON.parse(currentUserRaw);
+    const isAdmin = currentUser.role === "Admin";
+
+    if (!isAdmin) {
+      // Om inte admin → skicka bort
+      window.location.href = "dashboard.html";
+    }
+
+    // Visa namn/e‑post uppe till höger
+    welcomeText.textContent =
+      currentUser.firstName
+        ? `Välkommen, ${currentUser.firstName}`
+        : `Välkommen, ${currentUser.email}`;
+
+    // Dölj admin-delar för icke-admin (ifall man manipulerar DOM)
+    document.querySelectorAll(".admin-only").forEach(el => {
+      if (!isAdmin) el.style.display = "none";
+    });
+
+    logoutBtn.addEventListener("click", () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("currentUser");
+      window.location.href = "login.html";
+    });
+
+    const usersKey = "appUsers";
+    const usersBody = document.getElementById("usersBody");
+    const emptyState = document.getElementById("emptyState");
+    const userForm = document.getElementById("userForm");
+    const genPasswordBtn = document.getElementById("genPasswordBtn");
+    const formError = document.getElementById("formError");
+
+    function loadUsers() {
+      return JSON.parse(localStorage.getItem(usersKey) || "[]");
+    }
+
+    function saveUsers(users) {
+      localStorage.setItem(usersKey, JSON.stringify(users));
+    }
+
+    function renderUsers() {
+      const users = loadUsers();
+      usersBody.innerHTML = "";
+
+      if (!users.length) {
+        emptyState.style.display = "block";
+        return;
+      }
+
+      emptyState.style.display = "none";
+
+      users.forEach((u, index) => {
+        const tr = document.createElement("tr");
+
+        const fullName = [u.firstName, u.lastName].filter(Boolean).join(" ");
+
+        tr.innerHTML = `
+          <td>${fullName || "-"}</td>
+          <td>${u.email || "-"}</td>
+          <td>${u.phone || "-"}</td>
+          <td>
+            <span class="badge-role ${u.role === "Admin" ? "admin" : ""}">
+              ${u.role || "-"}
+            </span>
+          </td>
+          <td>${u.createdAt || "-"}</td>
+          <td>
+            <button class="btn-small delete">Ta bort</button>
+          </td>
+        `;
+
+        const deleteBtn = tr.querySelector(".btn-small.delete");
+        deleteBtn.addEventListener("click", () => {
+          if (!confirm("Ta bort användaren? Detta tar inte bort från databasen om den redan är registrerad där.")) return;
+          const arr = loadUsers();
+          arr.splice(index, 1);
+          saveUsers(arr);
+          renderUsers();
+        });
+
+        usersBody.appendChild(tr);
+      });
+    }
+
+    function generatePassword(length = 10) {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+      let pwd = "";
+      for (let i = 0; i < length; i++) {
+        pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return pwd;
+    }
+
+    genPasswordBtn.addEventListener("click", () => {
+      const pwdInput = document.getElementById("password");
+      const pwd = generatePassword(10);
+      pwdInput.value = pwd;
+      pwdInput.focus();
+      pwdInput.select();
+      try {
+        document.execCommand("copy");
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    userForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      formError.textContent = "";
+
+      const firstName = document.getElementById("firstName").value.trim();
+      const lastName = document.getElementById("lastName").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const phone = document.getElementById("phone").value.trim();
+      const role = document.getElementById("role").value;
+      const password = document.getElementById("password").value.trim();
+
+      if (!firstName || !lastName || !email || !password) {
+        formError.textContent = "Fyll i alla obligatoriska fält.";
+        return;
+      }
+
+      try {
+        // Skapa användare i backend (för inloggning)
+        const res = await fetch(API_BASE + "/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: email,
+            password,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          formError.textContent = data.error || "Kunde inte skapa användare i backend.";
+          return;
+        }
+
+        // Spara användare lokalt för roller + kontakter
+        const users = loadUsers();
+        const existing = users.find(u => u.email === email);
+        if (existing) {
+          formError.textContent = "En användare med den e‑posten finns redan lokalt.";
+          return;
+        }
+
+        users.push({
+          firstName,
+          lastName,
+          email,
+          phone,
+          role,
+          createdAt: new Date().toISOString().slice(0, 10),
+        });
+
+        saveUsers(users);
+        renderUsers();
+
+        userForm.reset();
+      } catch (err) {
+        console.error(err);
+        formError.textContent = "Tekniskt fel. Försök igen.";
+      }
+    });
+
+    // Init
+    renderUsers();
+  </script>
+</body>
+</html>

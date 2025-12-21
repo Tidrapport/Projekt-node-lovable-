@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>OB-inställningar – Rail Work</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .topbar h1 { margin: 0; font-size: 22px; }
+    .topbar small { color: #6b7280; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .page-header h2 { margin: 0; font-size: 20px; }
+    .page-header p { margin: 4px 0 0; font-size: 13px; color: #6b7280; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .helper {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    input[type="number"],
+    input[type="text"],
+    select {
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+      width: 100%;
+    }
+
+    input:focus,
+    select:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
+    .btn-primary,
+    .btn-secondary {
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: #1d4ed8;
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: #1e40af; }
+
+    .btn-secondary {
+      background: #fff;
+      border: 1px solid #d1d5db;
+      color: #111827;
+    }
+
+    .btn-secondary:hover { background: #f3f4f6; }
+
+    .btn-small {
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-small.delete {
+      border-color: #f87171;
+      color: #b91c1c;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <h2>Admina Bas</h2>
+
+  <div class="nav-section">
+    <a href="dashboard.html" class="nav-item">Översikt</a>
+    <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+    <a href="planning.html" class="nav-item">Planering</a>
+    <a href="deviations.html" class="nav-item">Avvikelser</a>
+    <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+    <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+    <a href="contacts.html" class="nav-item">Kontakter</a>
+  </div>
+
+  <div class="nav-section-title admin-only">Administration</div>
+  <a href="admin.html" class="nav-item admin-only">Attestering</a>
+  <a href="projects.html" class="nav-item admin-only">Projekt</a>
+  <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+  <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+  <a href="ob_settings.html" class="nav-item admin-only active">OB-inställningar</a>
+  <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+  <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+  <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="topbar">
+    <div>
+      <h1>Rail Work AB</h1>
+      <small>OB-inställningar – multiplikatorer för dag/kväll/natt/helg</small>
+    </div>
+    <div class="welcome" id="welcomeText">Välkommen</div>
+  </div>
+
+  <div class="page-header">
+    <div>
+      <h2>OB-inställningar</h2>
+      <p>Styr hur timmar fördelas på dag, kväll, natt och helg samt OB‑påslag.</p>
+    </div>
+    <button class="btn-secondary" id="resetDefaultsBtn">Återställ standard</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Skifttyper</div>
+    <div class="helper">
+      Detta motsvarar tabellen <span class="badge">shift_types_config</span> i din Supabase databas.
+      I denna demo sparas allt lokalt i webbläsaren.
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Skifttyp</th>
+          <th>Beskrivning</th>
+          <th>Start (timme)</th>
+          <th>Slut (timme)</th>
+          <th>Multiplikator</th>
+          <th>Åtgärder</th>
+        </tr>
+      </thead>
+      <tbody id="obTableBody"></tbody>
+    </table>
+
+    <h4 style="margin-top:16px; margin-bottom:6px;">Lägg till skifttyp</h4>
+    <div style="overflow-x:auto;">
+      <table>
+        <tbody>
+          <tr>
+            <td style="width:140px;">
+              <select id="newType">
+                <option value="day">Dag</option>
+                <option value="evening">Kväll</option>
+                <option value="night">Natt</option>
+                <option value="weekend">Helg</option>
+              </select>
+            </td>
+            <td>
+              <input type="text" id="newDescription" placeholder="Beskrivning (valfri)" />
+            </td>
+            <td style="width:120px;">
+              <input type="number" id="newStart" min="0" max="23" />
+            </td>
+            <td style="width:120px;">
+              <input type="number" id="newEnd" min="0" max="23" />
+            </td>
+            <td style="width:140px;">
+              <input type="number" id="newMultiplier" step="0.01" />
+            </td>
+            <td style="width:120px;">
+              <button class="btn-primary" id="addRowBtn">Lägg till</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script src="auth.js"></script>
+<script>
+  (function syncUser() {
+    const raw = localStorage.getItem("user");
+    if (raw && !localStorage.getItem("currentUser")) {
+      try {
+        const u = JSON.parse(raw);
+        const mapped = {
+          ...u,
+          firstName: u.firstName || u.first_name || "",
+          lastName: u.lastName || u.last_name || ""
+        };
+        setCurrentUser(mapped);
+      } catch (e) {}
+    }
+  })();
+
+  const currentUser = requireLogin();
+  setupSidebarForUser(currentUser);
+
+  document.getElementById("logoutBtn").addEventListener("click", () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("currentUser");
+    localStorage.removeItem("user");
+    window.location.href = "login.html";
+  });
+
+  if (!isAdmin(currentUser)) {
+    alert("Endast admin har åtkomst till denna sida.");
+    window.location.href = "dashboard.html";
+  }
+
+  const OB_KEY = "obSettings";
+
+  function defaultObSettings() {
+    return [
+      {
+        id: "day",
+        shift_type: "day",
+        description: "Dag",
+        start_hour: 6,
+        end_hour: 18,
+        multiplier: 1.0
+      },
+      {
+        id: "evening",
+        shift_type: "evening",
+        description: "Kväll",
+        start_hour: 18,
+        end_hour: 21,
+        multiplier: 1.29
+      },
+      {
+        id: "night",
+        shift_type: "night",
+        description: "Natt",
+        start_hour: 21,
+        end_hour: 6,
+        multiplier: 1.63
+      },
+      {
+        id: "weekend",
+        shift_type: "weekend",
+        description: "Helg",
+        start_hour: 0,
+        end_hour: 0,
+        multiplier: 2.13
+      }
+    ];
+  }
+
+  let settings = JSON.parse(localStorage.getItem(OB_KEY) || "null");
+  if (!settings || !Array.isArray(settings) || !settings.length) {
+    settings = defaultObSettings();
+    localStorage.setItem(OB_KEY, JSON.stringify(settings));
+  }
+
+  const obTableBody = document.getElementById("obTableBody");
+  const resetDefaultsBtn = document.getElementById("resetDefaultsBtn");
+  const addRowBtn = document.getElementById("addRowBtn");
+
+  function saveSettings() {
+    localStorage.setItem(OB_KEY, JSON.stringify(settings));
+  }
+
+  function renderTable() {
+    obTableBody.innerHTML = "";
+    settings.forEach((row, idx) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${row.shift_type}</td>
+        <td><input type="text" value="${row.description || ""}" data-idx="${idx}" data-field="description" /></td>
+        <td><input type="number" min="0" max="23" value="${row.start_hour}" data-idx="${idx}" data-field="start_hour" /></td>
+        <td><input type="number" min="0" max="23" value="${row.end_hour}" data-idx="${idx}" data-field="end_hour" /></td>
+        <td><input type="number" step="0.01" value="${row.multiplier}" data-idx="${idx}" data-field="multiplier" /></td>
+        <td><button class="btn-small delete" data-idx="${idx}">Ta bort</button></td>
+      `;
+      obTableBody.appendChild(tr);
+    });
+
+    obTableBody.querySelectorAll("input").forEach((inp) => {
+      inp.addEventListener("change", (e) => {
+        const idx = Number(e.target.dataset.idx);
+        const field = e.target.dataset.field;
+        let val = e.target.value;
+        if (field === "start_hour" || field === "end_hour") {
+          val = Number(val || 0);
+        }
+        if (field === "multiplier") {
+          val = Number(val || 1);
+        }
+        settings[idx][field] = val;
+        saveSettings();
+      });
+    });
+
+    obTableBody.querySelectorAll("button.delete").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const idx = Number(e.target.dataset.idx);
+        if (!confirm("Ta bort denna OB‑rad?")) return;
+        settings.splice(idx, 1);
+        saveSettings();
+        renderTable();
+      });
+    });
+  }
+
+  resetDefaultsBtn.addEventListener("click", () => {
+    if (!confirm("Återställ till standardvärden?")) return;
+    settings = defaultObSettings();
+    saveSettings();
+    renderTable();
+  });
+
+  addRowBtn.addEventListener("click", () => {
+    const type = document.getElementById("newType").value;
+    const description = document.getElementById("newDescription").value.trim();
+    const start = Number(document.getElementById("newStart").value || 0);
+    const end = Number(document.getElementById("newEnd").value || 0);
+    const mult = Number(document.getElementById("newMultiplier").value || 1);
+
+    settings.push({
+      id: type + "_" + Math.random().toString(36).slice(2),
+      shift_type: type,
+      description: description || type,
+      start_hour: start,
+      end_hour: end,
+      multiplier: mult
+    });
+
+    saveSettings();
+    renderTable();
+
+    document.getElementById("newDescription").value = "";
+    document.getElementById("newStart").value = "";
+    document.getElementById("newEnd").value = "";
+    document.getElementById("newMultiplier").value = "";
+  });
+
+  renderTable();
+</script>
+</body>
+</html>

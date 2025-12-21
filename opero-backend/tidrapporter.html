@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tidrapporter</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 {
+      font-size: 18px;
+      margin: 0 0 16px;
+    }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .hero { background: linear-gradient(180deg, #fff, #f5f7fb); padding: 18px 20px 12px; border-radius: 16px; box-shadow: 0 10px 30px rgba(15,23,42,0.05); margin-bottom: 14px; }
+    .hero h1 { margin: 0; font-size: 26px; display: flex; align-items: center; gap: 10px; }
+    .hero p { margin: 4px 0 0; color: #64748b; font-size: 15px; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .page-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr);
+      gap: 20px;
+      align-items: flex-start;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .field-group {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 16px;
+      margin-top: 8px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+    }
+
+    .field label {
+      color: #374151;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 60px;
+    }
+
+    .btn-primary {
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: none;
+      background: #1d4ed8;
+      color: #fff;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover { background: #1e40af; }
+
+    .btn-secondary {
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .btn-secondary:hover { background: #f3f4f6; }
+
+    .btn-small {
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-small.delete {
+      border-color: #f87171;
+      color: #b91c1c;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    .badge-empty {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 8px;
+    }
+
+    .time-input-wrapper {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .time-picker {
+      flex: 1;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      max-width: 120px;
+    }
+
+    .time-picker-display {
+      padding: 6px;
+      text-align: center;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1f2937;
+      background: #f9fafb;
+      border-bottom: 1px solid #d1d5db;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .time-picker-scroll-container {
+      display: flex;
+      height: 100px;
+      overflow: hidden;
+    }
+
+    .time-picker-scroll {
+      flex: 1;
+      overflow-y: scroll;
+      padding: 35px 0;
+      scroll-behavior: smooth;
+      scroll-snap-type: y mandatory;
+    }
+
+    .time-picker-scroll::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .time-picker-scroll::-webkit-scrollbar-track {
+      background: #f3f4f6;
+    }
+
+    .time-picker-scroll::-webkit-scrollbar-thumb {
+      background: #d1d5db;
+      border-radius: 2px;
+    }
+
+    .time-picker-option {
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: #9ca3af;
+      scroll-snap-align: center;
+      cursor: pointer;
+    }
+
+    .time-picker-option.active {
+      color: #1f2937;
+      font-weight: 600;
+    }
+
+    .time-picker-divider {
+      width: 1px;
+      background: #e5e7eb;
+      margin: 0 2px;
+    }
+
+    /* Modal */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.55); display: none; align-items: center; justify-content: center; padding: 18px; z-index: 50; }
+    .modal-backdrop.show { display: flex; }
+    .modal { background: #fff; border-radius: 16px; width: min(1100px, 100%); max-height: 90vh; overflow: auto; padding: 18px; box-shadow: 0 25px 70px rgba(15,23,42,0.25); border: 1px solid #e2e8f0; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+
+    /* Dölj adminlänkar i sidomenyn för användarvy */
+    .non-admin .sidebar .admin-only { display: none !important; }
+  </style>
+</head>
+<body>
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item active">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="hero">
+      <h1>⏱︎ Tidrapporter</h1>
+      <p>Registrera arbetad tid, OB och material i samma vy.</p>
+    </div>
+
+    <div class="page-layout" style="grid-template-columns: 1fr;">
+      <section class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <div>
+            <h2>Ny tidrapport</h2>
+            <p style="margin:0; color:#64748b;">Skapa en ny tidrapport i dialogen.</p>
+          </div>
+          <button class="btn-primary" type="button" id="openReportModal">Skapa ny tidrapport</button>
+        </div>
+      </section>
+
+      <!-- ENKEL LISTA ÖVER SPARADE RAPPORTER (LOCALSTORAGE) -->
+      <section class="card">
+        <h2>Sparade rapporter (lokalt)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Datum</th>
+              <th>Projekt</th>
+              <th>Yrkesroll</th>
+              <th>Status</th>
+              <th>Traktamente</th>
+                <th>Restid (h)</th>
+              <th>Åtgärder</th>
+              <th>Materialrader</th>
+            </tr>
+          </thead>
+          <tbody id="reportsBody"></tbody>
+        </table>
+        <div id="noReports" class="badge-empty">
+          Inga rapporter sparade lokalt på denna enhet ännu.
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Modal for new report -->
+  <div class="modal-backdrop" id="reportModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 style="margin:0;">Ny tidrapport</h2>
+        <button class="btn-secondary" type="button" id="closeReportModal">✕</button>
+      </div>
+      <section>
+        <form id="timeForm">
+          <div class="field-group">
+            <div class="field">
+              <label for="date">Datum</label>
+              <input id="date" type="date" required />
+            </div>
+            <div class="field">
+              <label for="projectSelect">Projekt</label>
+              <select id="projectSelect" required>
+                <option value="">Välj projekt (läggs till av admin)</option>
+              </select>
+              <small style="color:#6b7280;">Projekt skapas av admin under sidan Projekt.</small>
+            </div>
+            <div class="field">
+              <label for="start">Starttid</label>
+              <div class="time-input-wrapper">
+                <div id="startTimePicker" class="time-picker"></div>
+                <input id="start" type="hidden" required />
+              </div>
+            </div>
+            <div class="field">
+              <label for="end">Sluttid</label>
+              <div class="time-input-wrapper">
+                <div id="endTimePicker" class="time-picker"></div>
+                <input id="end" type="hidden" required />
+              </div>
+            </div>
+            <div class="field">
+              <label for="jobRole">Yrkesroll</label>
+              <!-- ✅ DROPDOWN, INTE INPUT -->
+              <select id="jobRole" required>
+                <option value="">Välj yrkesroll</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="trakt">Traktamente</label>
+              <select id="trakt">
+                <option value="none">Ingen</option>
+                <option value="hel">Hel</option>
+                <option value="halv">Halv</option>
+                <option value="norsk">Norsk</option>
+              </select>
+              <small style="color:#6b7280;">Traktamente är skattefritt och läggs på nettolön.</small>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:12px;">
+            <label for="comment">Kommentar (valfritt)</label>
+            <textarea id="comment" placeholder="Kort beskrivning av arbetet..."></textarea>
+          </div>
+
+          <div class="field" style="margin-top:8px;">
+            <label for="restid">Restid (timmar)</label>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <input id="restid" type="number" step="0.25" min="0" placeholder="Antal timmar" style="flex:1; min-width:160px;" />
+              <button type="button" id="saveRestBtn" class="btn-secondary">Spara restidsersättning</button>
+            </div>
+            <small style="color:#6b7280;">Ange hur många timmar du rest till/från projektet. Ersättning är 170 kr/timme.</small>
+          </div>
+
+          <!-- MATERIALFÖRBRUKNING -->
+          <div style="margin-top:16px;">
+            <h3 style="margin:0 0 6px; font-size:16px;">Materialförbrukning</h3>
+            <p style="font-size:12px; color:#6b7280; margin:0 0 6px;">
+              Välj materialtyp (förbrukningsmaterial) som admin har lagt in. Användare kan inte skapa egna materialtyper.
+            </p>
+
+            <div class="field-group">
+              <div class="field">
+                <label for="materialTypeSelect">Materialtyp</label>
+                <select id="materialTypeSelect">
+                  <option value="">Välj materialtyp</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="materialQty">Antal</label>
+                <input id="materialQty" type="number" step="0.01" min="0" />
+              </div>
+              <div class="field">
+                <label for="materialPlace">Var användes materialet?</label>
+                <input id="materialPlace" type="text" placeholder="Ex. Spår 3, sektion A" />
+              </div>
+              <div class="field" style="align-self:flex-end;">
+                <button type="button" id="addMaterialBtn" class="btn-secondary">
+                  Lägg till material
+                </button>
+              </div>
+            </div>
+
+            <table style="margin-top:10px;">
+              <thead>
+                <tr>
+                  <th>Materialtyp</th>
+                  <th>Antal</th>
+                  <th>Plats</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="materialsTableBody"></tbody>
+            </table>
+            <div id="noReportMaterials" class="badge-empty">
+              Inga materialrader tillagda.
+            </div>
+          </div>
+
+          <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+            <button type="submit" class="btn-primary">Spara tidrapport</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script>
+    const currentUser = requireLogin();
+    setupSidebarForUser(currentUser);
+    if (!isAdmin(currentUser)) {
+      document.body.classList.add("non-admin");
+    }
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.clear();
+      window.location.href = "login.html";
+    });
+
+    const jobRoleSelect = document.getElementById("jobRole");
+    const materialTypeSelect = document.getElementById("materialTypeSelect");
+    const addMaterialBtn = document.getElementById("addMaterialBtn");
+    const materialsTableBody = document.getElementById("materialsTableBody");
+    const noReportMaterials = document.getElementById("noReportMaterials");
+    const reportsBody = document.getElementById("reportsBody");
+    const noReports = document.getElementById("noReports");
+    const timeForm = document.getElementById("timeForm");
+    const projectSelect = document.getElementById("projectSelect");
+    const saveRestBtn = document.getElementById("saveRestBtn");
+    const restInput = document.getElementById("restid");
+    const reportModal = document.getElementById("reportModal");
+    const openReportModalBtn = document.getElementById("openReportModal");
+    const closeReportModalBtn = document.getElementById("closeReportModal");
+
+    let currentMaterials = [];
+    let editingReportId = null;
+    const PROJECTS_KEY = "projects";
+    const REST_COMP_KEY = "restCompDraft";
+
+    // ===== HÄMTA YRKESROLLER (dropdown, ingen fri text) =====
+    async function loadJobRoles() {
+      try {
+        const res = await fetch("/job-roles");
+        const roles = await res.json();
+
+        jobRoleSelect.innerHTML = '<option value="">Välj yrkesroll</option>';
+        roles.forEach(role => {
+          const opt = document.createElement("option");
+          opt.value = role.id;
+          opt.textContent = role.name;
+          jobRoleSelect.appendChild(opt);
+        });
+      } catch (err) {
+        console.error(err);
+        alert("Kunde inte hämta yrkesroller.");
+      }
+    }
+
+    // ===== HÄMTA MATERIALTYPER =====
+    async function loadMaterialTypes() {
+      try {
+        const res = await fetch("/material-types");
+        const materials = await res.json();
+
+        materialTypeSelect.innerHTML = '<option value="">Välj materialtyp</option>';
+        materials.forEach(mat => {
+          const opt = document.createElement("option");
+          opt.value = mat.id;
+          opt.textContent = mat.unit
+            ? `${mat.name} (${mat.unit})`
+            : mat.name;
+          materialTypeSelect.appendChild(opt);
+        });
+      } catch (err) {
+        console.error(err);
+        alert("Kunde inte hämta materialtyper.");
+      }
+    }
+
+    async function loadProjects() {
+      let projects = [];
+      try {
+        const res = await fetch("/projects", { headers: { Authorization: "Bearer " + (localStorage.getItem("token") || "") } });
+        if (res.ok) {
+          projects = await res.json();
+        }
+      } catch (_) {}
+      if (!Array.isArray(projects) || !projects.length) {
+        try {
+          projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
+        } catch { projects = []; }
+      }
+
+      const activeProjects = projects.filter(p => p.active !== false);
+      projectSelect.innerHTML = '<option value="">Välj projekt (läggs till av admin)</option>';
+      activeProjects.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id || p.projectId || p.name || "";
+        opt.textContent = p.name || "Namnlöst projekt";
+        opt.dataset.name = p.name || "";
+        projectSelect.appendChild(opt);
+      });
+      projectSelect.disabled = activeProjects.length === 0;
+    }
+
+    // Snabbknapp för att spara restidsersättning lokalt
+    if (saveRestBtn) {
+      saveRestBtn.addEventListener("click", () => {
+        const hours = Number(restInput.value || 0);
+        if (!hours || hours <= 0) {
+          alert("Ange restid i timmar innan du sparar restidsersättningen.");
+          return;
+        }
+        const amount = hours * 170;
+        const payload = {
+          hours,
+          amount,
+          savedAt: new Date().toISOString()
+        };
+        try {
+          localStorage.setItem(REST_COMP_KEY, JSON.stringify(payload));
+        } catch (e) {
+          console.warn("Kunde inte spara restidsersättning lokalt:", e);
+        }
+        alert(`Restidsersättning sparad: ${hours.toFixed(2)} h (${amount.toFixed(0)} kr).`);
+      });
+    }
+
+    function roundTimeToStep(timeStr, stepMinutes = 10) {
+      if (!timeStr) return "";
+      const [h, m] = timeStr.split(":").map(Number);
+      if (Number.isNaN(h) || Number.isNaN(m)) return "";
+      const totalMinutes = h * 60 + m;
+      const rounded = Math.round(totalMinutes / stepMinutes) * stepMinutes;
+      const rHours = Math.floor(rounded / 60) % 24;
+      const rMinutes = rounded % 60;
+      return `${String(rHours).padStart(2, "0")}:${String(rMinutes).padStart(2, "0")}`;
+    }
+
+    function computeHours(dateStr, startStr, endStr) {
+      if (!dateStr || !startStr || !endStr) return 0;
+
+      const [sh, sm] = startStr.split(":").map(Number);
+      const [eh, em] = endStr.split(":").map(Number);
+
+      const startDate = new Date(dateStr);
+      startDate.setHours(sh || 0, sm || 0, 0, 0);
+
+      const endDate = new Date(dateStr);
+      endDate.setHours(eh || 0, em || 0, 0, 0);
+
+      if (endDate <= startDate) {
+        // Om sluttid är före starttid, anta dygnsbyte
+        endDate.setDate(endDate.getDate() + 1);
+      }
+
+      const diffMinutes = (endDate - startDate) / 60000;
+      // Runda till närmaste 10-minutersintervall (krav: varje timme/10 min)
+      const roundedMinutes = Math.round(diffMinutes / 10) * 10;
+      const roundedHours = roundedMinutes / 60;
+
+      return roundedHours > 0 ? parseFloat(roundedHours.toFixed(2)) : 0;
+    }
+
+    function renderMaterialsTable() {
+      materialsTableBody.innerHTML = "";
+
+      if (!currentMaterials.length) {
+        noReportMaterials.style.display = "block";
+        return;
+      }
+      noReportMaterials.style.display = "none";
+
+      currentMaterials.forEach((row, index) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${row.typeName}</td>
+          <td>${row.quantity}</td>
+          <td>${row.place || "-"}</td>
+          <td>
+            <button type="button" class="btn-small delete" data-index="${index}">
+              Ta bort
+            </button>
+          </td>
+        `;
+        materialsTableBody.appendChild(tr);
+      });
+
+      materialsTableBody.querySelectorAll(".btn-small.delete").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const idx = parseInt(btn.getAttribute("data-index"), 10);
+          currentMaterials.splice(idx, 1);
+          renderMaterialsTable();
+        });
+      });
+    }
+
+    addMaterialBtn.addEventListener("click", () => {
+      const typeId = materialTypeSelect.value;
+      const typeName = materialTypeSelect.options[materialTypeSelect.selectedIndex]?.textContent || "";
+      const qty = document.getElementById("materialQty").value;
+      const place = document.getElementById("materialPlace").value.trim();
+
+      if (!typeId) {
+        alert("Välj materialtyp.");
+        return;
+      }
+      if (!qty || Number(qty) <= 0) {
+        alert("Ange antal > 0.");
+        return;
+      }
+
+      currentMaterials.push({
+        typeId,
+        typeName,
+        quantity: Number(qty),
+        place
+      });
+
+      // Nollställ fält
+      document.getElementById("materialQty").value = "";
+      document.getElementById("materialPlace").value = "";
+
+      renderMaterialsTable();
+    });
+
+    // ===== SPARA TIDRAPPORT (lokalt, inkl. materialförbrukning) =====
+    function getUserName() {
+      const storedName = localStorage.getItem("user_name");
+      if (storedName) return storedName;
+
+      const first =
+        currentUser?.first_name || currentUser?.firstName || "";
+      const last =
+        currentUser?.last_name || currentUser?.lastName || "";
+
+      const name = `${first || ""} ${last || ""}`.trim();
+      return name || currentUser?.email || "";
+    }
+
+    function normalizeReport(rep) {
+      const normalized = { ...rep };
+      normalized.datum = normalized.datum || normalized.date || "";
+      normalized.starttid = normalized.starttid || normalized.start || "";
+      normalized.sluttid = normalized.sluttid || normalized.end || "";
+      normalized.timmar =
+        normalized.timmar != null && normalized.timmar !== ""
+          ? Number(normalized.timmar) || 0
+          : computeHours(normalized.datum, normalized.starttid, normalized.sluttid);
+
+      normalized.status = normalized.status || "Ny";
+
+      normalized.userName = normalized.userName || getUserName();
+      normalized.projectId = normalized.projectId || normalized.projektId || "";
+      normalized.projectName =
+        normalized.projectName ||
+        normalized.projekt ||
+        normalized.project ||
+        "";
+      normalized.projekt = normalized.projectName;
+
+      return normalized;
+    }
+
+    function loadReportsFromStorage() {
+      let list = [];
+      try {
+        const raw = localStorage.getItem("timeReports") || "[]";
+        list = JSON.parse(raw);
+      } catch {
+        list = [];
+      }
+      const normalized = list.map(normalizeReport);
+      saveReportsToStorage(normalized);
+      return normalized;
+    }
+
+    function saveReportsToStorage(list) {
+      localStorage.setItem("timeReports", JSON.stringify(list));
+    }
+
+    function renderReportsList() {
+      const reports = loadReportsFromStorage();
+      reportsBody.innerHTML = "";
+
+      if (!reports.length) {
+        noReports.style.display = "block";
+        return;
+      }
+      noReports.style.display = "none";
+
+      reports.forEach(rep => {
+        const dateVal = rep.datum || rep.date || "-";
+        const projectVal = rep.projekt || rep.projectName || rep.project || "-";
+        const statusVal = rep.status || "Ny";
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${dateVal}</td>
+          <td>${projectVal}</td>
+          <td>${rep.jobRoleName || "-"}</td>
+          <td>${statusVal}</td>
+          <td>${(rep.traktamente_type ? rep.traktamente_type : 'Ingen')} ${rep.traktamente_amount ? '(' + rep.traktamente_amount + ' kr)' : ''}</td>
+          <td>${rep.restid != null ? Number(rep.restid).toFixed(2) + ' h' : '-'}</td>
+          <td>
+            <button class="btn-small edit-report" data-id="${rep.id}" ${statusVal === "Attesterad" ? "disabled" : ""}>Redigera</button>
+            <button class="btn-small delete-report" data-id="${rep.id}" ${statusVal === "Attesterad" ? "disabled" : ""}>Ta bort</button>
+          </td>
+          <td>${(rep.materials || []).length}</td>
+        `;
+        reportsBody.appendChild(tr);
+      });
+
+      reportsBody.querySelectorAll(".edit-report").forEach(btn => {
+        btn.addEventListener("click", (ev) => {
+          const id = ev.currentTarget.getAttribute("data-id");
+          const rep = reports.find(r => String(r.id) === String(id));
+          if (!rep) return;
+          if (rep.status === "Attesterad") {
+            alert("Attesterade rapporter kan inte redigeras.");
+            return;
+          }
+
+          editingReportId = rep.id;
+          document.getElementById("date").value = rep.datum || rep.date || "";
+          projectSelect.value = rep.projectId || "";
+          if (!projectSelect.value) {
+            // fallback: select by name if id missing
+            [...projectSelect.options].forEach(opt => {
+              if (opt.textContent === rep.projectName) projectSelect.value = opt.value;
+            });
+          }
+          jobRoleSelect.value = rep.jobRoleId || "";
+          document.getElementById("start").value = rep.starttid || rep.start || "";
+          document.getElementById("end").value = rep.sluttid || rep.end || "";
+            document.getElementById("comment").value = rep.comment || "";
+              // Traktamente
+              const traktEl = document.getElementById("trakt");
+              if (traktEl) traktEl.value = rep.traktamente_type || 'none';
+              // Restid
+              const restEl = document.getElementById("restid");
+              if (restEl) restEl.value = rep.restid != null ? rep.restid : "";
+
+            currentMaterials = rep.materials || [];
+          renderMaterialsTable();
+        });
+      });
+
+      reportsBody.querySelectorAll(".delete-report").forEach(btn => {
+        btn.addEventListener("click", (ev) => {
+          const id = ev.currentTarget.getAttribute("data-id");
+          const idx = reports.findIndex(r => String(r.id) === String(id));
+          if (idx === -1) return;
+          if (reports[idx].status === "Attesterad") {
+            alert("Attesterade rapporter kan inte tas bort.");
+            return;
+          }
+          if (!confirm("Ta bort denna tidrapport?")) return;
+          reports.splice(idx, 1);
+          saveReportsToStorage(reports);
+          renderReportsList();
+        });
+      });
+    }
+
+    timeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const date = document.getElementById("date").value;
+      const projectId = projectSelect.value;
+      const projectName =
+        projectSelect.options[projectSelect.selectedIndex]?.dataset.name ||
+        projectSelect.options[projectSelect.selectedIndex]?.textContent ||
+        "";
+      const startInput = document.getElementById("start");
+      const endInput = document.getElementById("end");
+      const start = roundTimeToStep(startInput.value, 10);
+      const end = roundTimeToStep(endInput.value, 10);
+      startInput.value = start;
+      endInput.value = end;
+      const jobRoleId = jobRoleSelect.value;
+      const jobRoleName =
+        jobRoleSelect.options[jobRoleSelect.selectedIndex]?.textContent || "";
+      const comment = document.getElementById("comment").value.trim();
+
+      if (!date || !projectId || !start || !end || !jobRoleId) {
+        alert("Fyll i datum, projekt, tider och yrkesroll.");
+        return;
+      }
+
+      const hoursVal = computeHours(date, start, end);
+      if (!hoursVal || hoursVal <= 0) {
+        alert("Sluttid måste vara efter starttid (kan gå över midnatt).");
+        return;
+      }
+
+      const userName = getUserName();
+
+      // Traktamente selection
+      const traktEl = document.getElementById("trakt");
+      const traktVal = traktEl ? traktEl.value : "none";
+      const TRAKT_VALUES = { none: 0, hel: 290, halv: 145, norsk: 945 };
+      const traktAmount = TRAKT_VALUES[traktVal] || 0;
+
+      const reports = loadReportsFromStorage();
+      const baseReport = {
+        id: editingReportId || Date.now(),
+        userId: currentUser?.id || null,
+        userName,
+        datum: date,
+        date,
+        projekt: projectName,
+        projectName,
+        projectId,
+        starttid: start,
+        sluttid: end,
+        start,
+        end,
+        jobRoleId,
+        jobRoleName,
+        timmar: hoursVal,
+        hours: hoursVal,
+        comment,
+        materials: currentMaterials,
+        traktamente_type: traktVal,
+        traktamente_amount: traktAmount,
+        restid: Number(document.getElementById("restid").value || 0)
+      };
+
+      if (editingReportId) {
+        const idx = reports.findIndex(r => String(r.id) === String(editingReportId));
+        if (idx !== -1) {
+          if (reports[idx].status === "Attesterad") {
+            alert("Attesterad rapport kan inte redigeras.");
+            return;
+          }
+          reports[idx] = { ...reports[idx], ...baseReport, status: reports[idx].status || "Ny" };
+        } else {
+          reports.push({ ...baseReport, status: "Ny" });
+        }
+      } else {
+        reports.push({ ...baseReport, status: "Ny" });
+      }
+
+      saveReportsToStorage(reports);
+
+      alert("Tidrapport sparad lokalt inklusive materialförbrukning.");
+
+      timeForm.reset();
+      currentMaterials = [];
+      editingReportId = null;
+      renderMaterialsTable();
+      renderReportsList();
+    });
+
+    // Init
+    loadJobRoles();
+    loadMaterialTypes();
+    loadProjects();
+
+    // Modal hantering
+    function toggleReportModal(show) {
+      if (!reportModal) return;
+      const visible = !!show;
+      reportModal.classList.toggle("show", visible);
+      reportModal.style.display = visible ? "flex" : "none";
+      if (!visible) {
+        editingReportId = null;
+        currentMaterials = [];
+        renderMaterialsTable();
+        timeForm.reset();
+      }
+    }
+
+    if (openReportModalBtn) openReportModalBtn.addEventListener("click", () => {
+      setTodayDefaults();
+      toggleReportModal(true);
+    });
+    if (closeReportModalBtn) closeReportModalBtn.addEventListener("click", () => toggleReportModal(false));
+    if (reportModal) reportModal.addEventListener("click", (e) => { if (e.target === reportModal) toggleReportModal(false); });
+
+    // ===== INITIALISERA SCROLL-TIDVÄLJARE =====
+    function initTimePicker(pickerId, inputId) {
+      const pickerEl = document.getElementById(pickerId);
+      const inputEl = document.getElementById(inputId);
+
+      // Skapa HTML för tidväljare
+      const displayDiv = document.createElement("div");
+      displayDiv.className = "time-picker-display";
+      displayDiv.textContent = "00:00";
+
+      const scrollContainer = document.createElement("div");
+      scrollContainer.className = "time-picker-scroll-container";
+
+      const hoursScroll = document.createElement("div");
+      hoursScroll.className = "time-picker-scroll";
+      hoursScroll.id = `${pickerId}-hours`;
+
+      const minutesScroll = document.createElement("div");
+      minutesScroll.className = "time-picker-scroll";
+      minutesScroll.id = `${pickerId}-minutes`;
+
+      // Timmar (01-24)
+      for (let h = 1; h <= 24; h++) {
+        const opt = document.createElement("div");
+        opt.className = "time-picker-option";
+        opt.textContent = String(h).padStart(2, "0");
+        opt.dataset.value = String(h).padStart(2, "0");
+        hoursScroll.appendChild(opt);
+      }
+
+      // Minuter (0-55 i 5-minuters intervall)
+      for (let m = 0; m < 60; m += 5) {
+        const opt = document.createElement("div");
+        opt.className = "time-picker-option";
+        opt.textContent = String(m).padStart(2, "0");
+        opt.dataset.value = String(m).padStart(2, "0");
+        minutesScroll.appendChild(opt);
+      }
+
+      scrollContainer.appendChild(hoursScroll);
+      scrollContainer.appendChild(minutesScroll);
+
+      pickerEl.appendChild(displayDiv);
+      pickerEl.appendChild(scrollContainer);
+
+      let selectedHour = "01";
+      let selectedMinute = "00";
+
+      function updateDisplay() {
+        displayDiv.textContent = `${selectedHour}:${selectedMinute}`;
+        inputEl.value = `${selectedHour}:${selectedMinute}`;
+      }
+
+      function scrollToOption(scroll, value) {
+        const options = scroll.querySelectorAll(".time-picker-option");
+        options.forEach(opt => opt.classList.remove("active"));
+
+        const targetOpt = Array.from(options).find(o => o.dataset.value === value);
+        if (targetOpt) {
+          targetOpt.classList.add("active");
+          const offsetTop = targetOpt.offsetTop - scroll.parentElement.clientHeight / 2 + targetOpt.clientHeight / 2;
+          scroll.scrollTop = offsetTop;
+        }
+      }
+
+      // Scroll-event för timmar
+      hoursScroll.addEventListener("scroll", () => {
+        const options = hoursScroll.querySelectorAll(".time-picker-option");
+        const scrollCenter = hoursScroll.scrollTop + hoursScroll.parentElement.clientHeight / 2;
+        
+        let closestOpt = options[0];
+        let minDist = Math.abs(closestOpt.offsetTop + closestOpt.clientHeight / 2 - scrollCenter);
+
+        options.forEach(opt => {
+          const optCenter = opt.offsetTop + opt.clientHeight / 2;
+          const dist = Math.abs(optCenter - scrollCenter);
+          if (dist < minDist) {
+            minDist = dist;
+            closestOpt = opt;
+          }
+        });
+
+        selectedHour = closestOpt.dataset.value;
+        hoursScroll.querySelectorAll(".time-picker-option").forEach(o => o.classList.remove("active"));
+        closestOpt.classList.add("active");
+        updateDisplay();
+      });
+
+      // Scroll-event för minuter
+      minutesScroll.addEventListener("scroll", () => {
+        const options = minutesScroll.querySelectorAll(".time-picker-option");
+        const scrollCenter = minutesScroll.scrollTop + minutesScroll.parentElement.clientHeight / 2;
+        
+        let closestOpt = options[0];
+        let minDist = Math.abs(closestOpt.offsetTop + closestOpt.clientHeight / 2 - scrollCenter);
+
+        options.forEach(opt => {
+          const optCenter = opt.offsetTop + opt.clientHeight / 2;
+          const dist = Math.abs(optCenter - scrollCenter);
+          if (dist < minDist) {
+            minDist = dist;
+            closestOpt = opt;
+          }
+        });
+
+        selectedMinute = closestOpt.dataset.value;
+        minutesScroll.querySelectorAll(".time-picker-option").forEach(o => o.classList.remove("active"));
+        closestOpt.classList.add("active");
+        updateDisplay();
+      });
+
+      // Klick på option för snabbval
+      hoursScroll.querySelectorAll(".time-picker-option").forEach(opt => {
+        opt.addEventListener("click", () => {
+          selectedHour = opt.dataset.value;
+          scrollToOption(hoursScroll, selectedHour);
+          updateDisplay();
+        });
+      });
+
+      minutesScroll.querySelectorAll(".time-picker-option").forEach(opt => {
+        opt.addEventListener("click", () => {
+          selectedMinute = opt.dataset.value;
+          scrollToOption(minutesScroll, selectedMinute);
+          updateDisplay();
+        });
+      });
+
+      // Initiera
+      updateDisplay();
+      scrollToOption(hoursScroll, selectedHour);
+      scrollToOption(minutesScroll, selectedMinute);
+    }
+
+    initTimePicker("startTimePicker", "start");
+    initTimePicker("endTimePicker", "end");
+
+    function setTodayDefaults() {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const dateInput = document.getElementById("date");
+      if (dateInput) {
+        dateInput.value = todayIso;
+        dateInput.max = todayIso;
+      }
+      const rounded = (function () {
+        const now = new Date();
+        const minutes = now.getMinutes();
+        const roundedMinutes = Math.floor(minutes / 10) * 10;
+        return `${String(now.getHours()).padStart(2, "0")}:${String(roundedMinutes).padStart(2, "0")}`;
+      })();
+      const oneHourLater = (() => {
+        const [h, m] = rounded.split(":").map(Number);
+        const d = new Date();
+        d.setHours(h, m, 0, 0);
+        d.setHours(d.getHours() + 1);
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      })();
+      setTimePickerValue("startTimePicker", "start", rounded);
+      setTimePickerValue("endTimePicker", "end", oneHourLater);
+    }
+
+    function setTimePickerValue(pickerId, inputId, timeStr) {
+      const [h, m] = (timeStr || "").split(":");
+      const pickerEl = document.getElementById(pickerId);
+      const inputEl = document.getElementById(inputId);
+      if (!pickerEl || !inputEl || !h || !m) return;
+      const hourOpt = pickerEl.querySelector(`.time-picker-option[data-value="${h}"]`);
+      const minOpt = pickerEl.querySelector(`.time-picker-option[data-value="${m}"]`);
+      const hoursScroll = pickerEl.querySelector(".time-picker-scroll:nth-child(2)") || pickerEl.querySelector(".time-picker-scroll");
+      const minsScroll = pickerEl.querySelector(".time-picker-scroll:nth-child(3)") || pickerEl.querySelectorAll(".time-picker-scroll")[1];
+      if (hourOpt && hoursScroll) {
+        hoursScroll.scrollTop = hourOpt.offsetTop - hoursScroll.clientHeight / 2 + hourOpt.clientHeight / 2;
+        hoursScroll.querySelectorAll(".time-picker-option").forEach(o => o.classList.remove("active"));
+        hourOpt.classList.add("active");
+      }
+      if (minOpt && minsScroll) {
+        minsScroll.scrollTop = minOpt.offsetTop - minsScroll.clientHeight / 2 + minOpt.clientHeight / 2;
+        minsScroll.querySelectorAll(".time-picker-option").forEach(o => o.classList.remove("active"));
+        minOpt.classList.add("active");
+      }
+      inputEl.value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const display = pickerEl.querySelector(".time-picker-display");
+      if (display) display.textContent = inputEl.value;
+    }
+
+    if (openReportModalBtn) {
+      openReportModalBtn.addEventListener("click", () => {
+        setTodayDefaults();
+        toggleReportModal(true);
+      });
+    }
+    if (closeReportModalBtn) closeReportModalBtn.addEventListener("click", () => toggleReportModal(false));
+    if (reportModal) reportModal.addEventListener("click", (e) => { if (e.target === reportModal) toggleReportModal(false); });
+
+
+    renderMaterialsTable();
+    renderReportsList();
+  </script>
+</body>
+</html>

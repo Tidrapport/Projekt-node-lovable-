@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Avvikelser – Rail Work</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .hero { background: linear-gradient(180deg, #fff, #f5f7fb); padding: 18px 20px 12px; border-radius: 16px; box-shadow: 0 10px 30px rgba(15,23,42,0.05); margin-bottom: 14px; }
+    .hero h1 { margin: 0; font-size: 26px; display: flex; align-items: center; gap: 10px; }
+    .hero p { margin: 4px 0 0; color: #64748b; font-size: 15px; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .page-header h2 { margin: 0; font-size: 20px; }
+    .page-header p { margin: 4px 0 0; font-size: 13px; color: #6b7280; }
+
+    .layout-grid {
+      display: grid;
+      grid-template-columns: 2fr 3fr;
+      gap: 16px;
+    }
+
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+    border: 1px solid #e5e7eb;
+  }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: #0f172a;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+
+  .field label { color: #374151; }
+
+  .field input,
+  .field select,
+  .field textarea {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    font-size: 13px;
+    resize: vertical;
+  }
+
+  .field textarea { min-height: 70px; }
+
+  .field input:focus,
+  .field select:focus,
+  .field textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 1px #2563eb25;
+  }
+
+  .helper {
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  .mobile-cards {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .mobile-card {
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    padding: 12px 14px;
+    box-shadow: 0 8px 18px rgba(15,23,42,0.08);
+  }
+  .mobile-card header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 6px;
+  }
+  .mobile-card .pill {
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .pill.status-open { background: #fee2e2; color: #b91c1c; }
+  .pill.status-progress { background: #fef3c7; color: #92400e; }
+  .pill.status-resolved { background: #dcfce7; color: #166534; }
+
+  .mobile-card .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 4px 0;
+  }
+  .mobile-card .row:last-of-type { border-bottom: none; }
+  .mobile-card .label { font-weight: 600; color: #6b7280; }
+  .mobile-card .value { font-weight: 600; color: #0f172a; text-align: right; }
+
+  @media (max-width: 768px) {
+    table { display: none; }
+    .mobile-cards { display: flex; }
+  }
+
+    .btn-primary {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: none;
+      background: #1d4ed8;
+      color: #fff;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover { background: #1e40af; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+
+    .badge-open {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .badge-progress {
+      background: #ffedd5;
+      color: #92400e;
+    }
+
+    .badge-resolved {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .badge-sev-low {
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+
+    .badge-sev-high {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .img-thumb {
+      width: 60px;
+      height: 40px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+    }
+
+    @media (max-width: 1000px) {
+      .layout-grid {
+        grid-template-columns: 1fr;
+      }
+      .main { padding: 16px; }
+    }
+
+    /* Dölj adminlänkar i sidomenyn för användarvy */
+    .non-admin .sidebar .admin-only { display: none !important; }
+  </style>
+</head>
+<body>
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <h2>Admina Bas</h2>
+
+  <div class="nav-section">
+    <a href="dashboard.html" class="nav-item">Översikt</a>
+    <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+    <a href="planning.html" class="nav-item">Planering</a>
+    <a href="deviations.html" class="nav-item active">Avvikelser</a>
+    <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+    <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+    <a href="contacts.html" class="nav-item">Kontakter</a>
+  </div>
+
+  <div class="nav-section-title admin-only">Administration</div>
+  <a href="admin.html" class="nav-item admin-only">Attestering</a>
+  <a href="projects.html" class="nav-item admin-only">Projekt</a>
+  <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+  <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+  <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+  <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+  <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+  <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="hero">
+    <h1>⚡ Avvikelser</h1>
+    <p>Dokumentera risker, fel och tillbud med bild och info.</p>
+  </div>
+
+  <div class="layout-grid">
+    <!-- Formulär -->
+    <div class="card">
+      <div class="card-title">Ny avvikelse</div>
+
+      <form id="deviationForm">
+        <div class="field">
+          <label for="devDate">Datum</label>
+          <input type="date" id="devDate" required />
+        </div>
+
+        <div class="field">
+          <label for="devTitle">Rubrik</label>
+          <input id="devTitle" placeholder="Kort rubrik, t.ex. 'Felplacerat material på spår'" required />
+        </div>
+
+        <div class="field">
+          <label for="devProject">Projekt</label>
+          <select id="devProject" required>
+            <option value="">Välj projekt</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="devSubproject">Underprojekt</label>
+          <select id="devSubproject">
+            <option value="">Välj underprojekt (valfritt)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="devSeverity">Allvarlighetsgrad</label>
+          <select id="devSeverity">
+            <option value="low">Låg</option>
+            <option value="medium">Medel</option>
+            <option value="high">Hög</option>
+            <option value="critical">Kritisk</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="devStatus">Status</label>
+          <select id="devStatus">
+            <option value="open">Öppen</option>
+            <option value="in_progress">Pågår</option>
+            <option value="resolved">Åtgärdad</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="devReport">Koppla till tidrapport</label>
+          <select id="devReport">
+            <option value="">Välj tidrapport</option>
+          </select>
+          <div class="helper">
+            Välj den tidrapport (datum/projekt) avvikelsen gäller. Om listan är tom saknas sparade tidrapporter.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="devDescription">Beskrivning</label>
+          <textarea id="devDescription" placeholder="Beskriv vad som hänt, risker och ev. vidtagna åtgärder" required></textarea>
+        </div>
+
+        <div class="field">
+          <label for="devImage">Bild (mockad storage)</label>
+          <input type="file" id="devImage" accept="image/*" />
+          <div class="helper">
+            Bilden sparas som liten förhandsvisning i din webbläsare (ingen riktig filuppladdning i denna demo).
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Förhandsvisning</label>
+          <img id="devPreview" class="img-thumb" style="display:none;" alt="Förhandsvisning" />
+        </div>
+
+        <button type="submit" class="btn-primary">Spara avvikelse</button>
+      </form>
+    </div>
+
+    <!-- Lista -->
+    <div class="card">
+      <div class="card-title">Mina avvikelser</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Rubrik</th>
+            <th>Projekt</th>
+            <th>Underprojekt</th>
+            <th>Tidrapport</th>
+            <th>Allvarlighetsgrad</th>
+            <th>Status</th>
+            <th>Bild</th>
+          </tr>
+        </thead>
+        <tbody id="devTableBody"></tbody>
+      </table>
+      <div class="helper" style="margin-top:8px;">
+        Admin kan attestera via attesteringen. Avvikelser är kopplade till projekt och tidrapport.
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="auth.js"></script>
+<script>
+  (function syncUser() {
+    const raw = localStorage.getItem("user");
+    if (raw && !localStorage.getItem("currentUser")) {
+      try {
+        const u = JSON.parse(raw);
+        const mapped = {
+          ...u,
+          firstName: u.firstName || u.first_name || "",
+          lastName: u.lastName || u.last_name || ""
+        };
+        setCurrentUser(mapped);
+      } catch (e) {}
+    }
+  })();
+
+  const currentUser = requireLogin();
+  setupSidebarForUser(currentUser);
+  if (!isAdmin(currentUser)) {
+    document.body.classList.add("non-admin");
+  }
+
+  document.getElementById("logoutBtn").addEventListener("click", () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("currentUser");
+    localStorage.removeItem("user");
+    window.location.href = "login.html";
+  });
+
+  const company = JSON.parse(localStorage.getItem("selectedCompany") || "null");
+  const companyName = company?.name || "Rail Work AB";
+  document.getElementById("companyTitle").textContent = companyName;
+
+  const fullName =
+    (currentUser.firstName || "") +
+    (currentUser.lastName ? " " + currentUser.lastName : "");
+  document.getElementById("welcomeText").textContent =
+    "Välkommen, " + (fullName.trim() || currentUser.email || "användare");
+
+  // Avvikelse‑logik
+  const DEV_KEY = "deviations";
+  let deviations = JSON.parse(localStorage.getItem(DEV_KEY) || "[]");
+  const PROJECTS_KEY = "projects";
+  const SUBPROJECTS_KEY = "subProjects";
+  const REPORTS_KEY = "timeReports";
+
+  const deviationForm = document.getElementById("deviationForm");
+  const devImageInput = document.getElementById("devImage");
+  const devPreview = document.getElementById("devPreview");
+  const devTableBody = document.getElementById("devTableBody");
+  const devProject = document.getElementById("devProject");
+  const devSubproject = document.getElementById("devSubproject");
+  const devReport = document.getElementById("devReport");
+  const mobileCards = document.getElementById("mobileCards");
+
+  let currentImageData = null;
+  let projects = [];
+  let subProjects = [];
+  let reports = [];
+
+  function saveDeviations() {
+    localStorage.setItem(DEV_KEY, JSON.stringify(deviations));
+  }
+
+  function loadProjects() {
+    try {
+      projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
+      subProjects = JSON.parse(localStorage.getItem(SUBPROJECTS_KEY) || "[]");
+    } catch {
+      projects = [];
+      subProjects = [];
+    }
+
+    devProject.innerHTML = '<option value="">Välj projekt</option>';
+    projects.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name || "Namnlöst projekt";
+      opt.dataset.name = p.name || "";
+      devProject.appendChild(opt);
+    });
+
+    devProject.disabled = projects.length === 0;
+    renderSubProjects();
+  }
+
+  function loadReports() {
+    try {
+      reports = JSON.parse(localStorage.getItem(REPORTS_KEY) || "[]");
+    } catch {
+      reports = [];
+    }
+
+    devReport.innerHTML = '<option value="">Välj tidrapport</option>';
+    reports
+      .filter((r) => !currentUser.id || r.userId === currentUser.id || r.user_id === currentUser.id)
+      .forEach((r) => {
+        const dateVal = r.datum || r.date || "";
+        const proj = r.projekt || r.projectName || r.project || "";
+        const start = r.starttid || r.start || "";
+        const end = r.sluttid || r.end || "";
+        const labelParts = [dateVal, proj, start && end ? `${start}-${end}` : ""].filter(Boolean);
+        const label = labelParts.join(" • ");
+        const opt = document.createElement("option");
+        opt.value = r.id;
+        opt.textContent = label || "Tidrapport";
+        opt.dataset.label = label;
+        devReport.appendChild(opt);
+      });
+
+    devReport.disabled = devReport.options.length <= 1;
+  }
+
+  function ensureProjectSelected() {
+    if (projects.length === 0) {
+      alert("Det finns inga projekt. Lägg till projekt först på Projektsidan.");
+      return false;
+    }
+    return true;
+  }
+
+  function renderSubProjects() {
+    const selectedProject = devProject.value;
+    devSubproject.innerHTML =
+      '<option value="">Välj underprojekt (valfritt)</option>';
+
+    const filtered = subProjects.filter(
+      (sp) => !selectedProject || sp.projectId === selectedProject
+    );
+
+    filtered.forEach((sp) => {
+      const opt = document.createElement("option");
+      opt.value = sp.id;
+      opt.textContent = sp.name || "Namnlöst";
+      opt.dataset.name = sp.name || "";
+      devSubproject.appendChild(opt);
+    });
+  }
+
+  devProject.addEventListener("change", renderSubProjects);
+
+  function renderMobileCards(list) {
+    if (!mobileCards) return;
+    mobileCards.innerHTML = "";
+    list.forEach((d) => {
+      let statusText = "Öppen";
+      let statusClass = "status-open";
+      if (d.status === "in_progress") {
+        statusText = "Pågår";
+        statusClass = "status-progress";
+      }
+      if (d.status === "resolved") {
+        statusText = "Åtgärdad";
+        statusClass = "status-resolved";
+      }
+      let severityText = "Låg";
+      if (d.severity === "medium") severityText = "Medel";
+      if (d.severity === "high") severityText = "Hög";
+      if (d.severity === "critical") severityText = "Kritisk";
+
+      const card = document.createElement("div");
+      card.className = "mobile-card";
+      card.innerHTML = `
+        <header>
+          <div>${d.title || "Avvikelse"}</div>
+          <div class="pill ${statusClass}">${statusText}</div>
+        </header>
+        <div class="row"><div class="label">Datum</div><div class="value">${d.date || "-"}</div></div>
+        <div class="row"><div class="label">Projekt</div><div class="value">${d.projectName || "-"}</div></div>
+        <div class="row"><div class="label">Underprojekt</div><div class="value">${d.subProjectName || "-"}</div></div>
+        <div class="row"><div class="label">Tidrapport</div><div class="value">${d.reportLabel || "-"}</div></div>
+        <div class="row"><div class="label">Allvarlighet</div><div class="value">${severityText}</div></div>
+        <div class="row"><div class="label">Status</div><div class="value">${statusText}</div></div>
+        <div class="row"><div class="label">Beskrivning</div><div class="value">${(d.description || "-").replace(/</g, "&lt;")}</div></div>
+        ${
+          d.image
+            ? `<div class="row"><div class="label">Bild</div><div class="value"><img src="${d.image}" style="width:100px; height:auto; border:1px solid #e5e7eb; border-radius:8px;" /></div></div>`
+            : ""
+        }
+      `;
+      mobileCards.appendChild(card);
+    });
+  }
+
+  function renderTable() {
+    devTableBody.innerHTML = "";
+    const filtered = deviations
+      .filter((d) => d.user_email === currentUser.email)
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+
+    filtered.forEach((d) => {
+      const tr = document.createElement("tr");
+
+      const sevBadgeClass =
+        d.severity === "high" || d.severity === "critical"
+          ? "badge-sev-high"
+          : "badge-sev-low";
+
+      let severityText = "Låg";
+      if (d.severity === "medium") severityText = "Medel";
+      if (d.severity === "high") severityText = "Hög";
+      if (d.severity === "critical") severityText = "Kritisk";
+
+      let statusText = "Öppen";
+      let statusClass = "badge-open";
+      if (d.status === "in_progress") {
+        statusText = "Pågår";
+        statusClass = "badge-progress";
+      }
+      if (d.status === "resolved") {
+        statusText = "Åtgärdad";
+        statusClass = "badge-resolved";
+      }
+
+      tr.innerHTML = `
+        <td>${d.date || "-"}</td>
+        <td>${d.title || ""}</td>
+        <td>${d.projectName || "-"}</td>
+        <td>${d.subProjectName || "-"}</td>
+        <td>${d.reportLabel || "-"}</td>
+        <td><span class="badge ${sevBadgeClass}">${severityText}</span></td>
+        <td><span class="badge ${statusClass}">${statusText}</span></td>
+        <td>${d.image ? "<img src='" + d.image + "' class='img-thumb' />" : "-"}</td>
+      `;
+
+      devTableBody.appendChild(tr);
+    });
+
+    renderMobileCards(filtered);
+  }
+
+  devImageInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      currentImageData = null;
+      devPreview.style.display = "none";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      currentImageData = ev.target.result;
+      devPreview.src = currentImageData;
+      devPreview.style.display = "block";
+    };
+    reader.readAsDataURL(file);
+  });
+
+  deviationForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    if (!ensureProjectSelected()) return;
+
+    const date = document.getElementById("devDate").value;
+    const title = document.getElementById("devTitle").value.trim();
+    const severity = document.getElementById("devSeverity").value;
+    const status = document.getElementById("devStatus").value;
+    const description = document.getElementById("devDescription").value.trim();
+    const projectId = devProject.value;
+    const projectName =
+      devProject.options[devProject.selectedIndex]?.dataset.name ||
+      devProject.options[devProject.selectedIndex]?.textContent ||
+      "";
+    const subProjectId = devSubproject.value;
+    const subProjectName =
+      devSubproject.options[devSubproject.selectedIndex]?.dataset.name ||
+      devSubproject.options[devSubproject.selectedIndex]?.textContent ||
+      "";
+    const reportId = devReport.value;
+    const reportLabel =
+      devReport.options[devReport.selectedIndex]?.dataset.label ||
+      devReport.options[devReport.selectedIndex]?.textContent ||
+      "";
+
+    if (!date || !title || !description || !projectId) {
+      alert("Datum, rubrik, projekt och beskrivning krävs.");
+      return;
+    }
+
+    if (devReport.options.length > 1 && !reportId) {
+      alert("Välj tidrapport att koppla till (om listan finns).");
+      return;
+    }
+
+    const dev = {
+      id: "dev_" + Math.random().toString(36).slice(2),
+      user_email: currentUser.email || "",
+      user_name: fullName.trim() || currentUser.email || "",
+      company: companyName,
+      date,
+      title,
+      severity,
+      status,
+      description,
+      projectId,
+      projectName,
+      subProjectId,
+      subProjectName,
+      reportId,
+      reportLabel,
+      image: currentImageData,
+      created_at: Date.now()
+    };
+
+    deviations.push(dev);
+    saveDeviations();
+    deviationForm.reset();
+    currentImageData = null;
+    devPreview.style.display = "none";
+    renderTable();
+    alert("Avvikelse sparad.");
+  });
+
+  // init default datum
+  document.getElementById("devDate").value = new Date().toISOString().slice(0, 10);
+  loadProjects();
+  loadReports();
+  renderTable();
+  renderMobileCards && renderMobileCards(deviations.filter(d => d.user_email === currentUser.email));
+</script>
+</body>
+</html>

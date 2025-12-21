@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Svetsrapport</title>
+  <style>
+    * { box-sizing: border-box; font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: flex; background: #f5f7fb; color: #0f172a; }
+
+    .sidebar { width: 240px; background: #0f172a; color: #e5e7eb; padding: 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+    .nav-item { padding: 8px 10px; border-radius: 8px; font-size: 14px; cursor: pointer; text-decoration: none; color: inherit; display: block; }
+    .nav-item:hover { background: #111827; }
+    .nav-item.active { background: #1d4ed8; }
+    .nav-section-title { font-size: 11px; text-transform: uppercase; opacity: 0.6; margin-top: 12px; }
+    .logout { margin-top: auto; font-size: 13px; color: #f97373; cursor: pointer; }
+    .non-admin .admin-only { display: none !important; }
+    .non-admin .sidebar .admin-only { display: none !important; }
+
+    .main { flex: 1; padding: 28px 36px; }
+    .hero { background: linear-gradient(180deg, #fff, #f5f7fb); padding: 18px 20px 12px; border-radius: 16px; box-shadow: 0 10px 30px rgba(15,23,42,0.05); margin-bottom: 14px; }
+    .hero h1 { margin: 0; font-size: 28px; display: flex; align-items: center; gap: 10px; }
+    .hero p { margin: 4px 0 0; color: #64748b; font-size: 15px; }
+
+    .card { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 12px 28px rgba(15,23,42,0.06); border: 1px solid #e5e7eb; margin-bottom: 16px; }
+    .card h2 { margin: 0 0 8px; font-size: 20px; }
+    .card p { margin: 0 0 12px; color: #64748b; }
+
+    .btn-primary { background: #0b60e6; color: #fff; border: none; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 700; }
+    .btn-ghost { background: #fff; border: 1px solid #dce3f0; color: #0f172a; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; }
+
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .report-row { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; background: #f8fafc; display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .row-meta { display: flex; flex-direction: column; gap: 2px; }
+    .pill { padding: 3px 8px; border-radius: 999px; background: #e0f2fe; color: #0369a1; font-size: 11px; }
+
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: none; align-items: center; justify-content: center; padding: 18px; z-index: 20; }
+    .modal-backdrop.show { display: flex; }
+    .modal { background: #fff; border-radius: 16px; width: min(1000px, 100%); max-height: 90vh; overflow: auto; padding: 18px; box-shadow: 0 25px 70px rgba(15,23,42,0.25); border: 1px solid #e2e8f0; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .modal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 900px) { .modal-grid { grid-template-columns: 1fr; } }
+
+    .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+    .field label { color: #0f172a; font-weight: 600; }
+    .field input, .field textarea, .field select { padding: 10px 12px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 14px; }
+    .field textarea { min-height: 70px; resize: vertical; }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item">Kontakter</a>
+    </div>
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <h1>🧾 Svetsrapport</h1>
+      <p>Ladda upp och fyll i svetsrapporter. Admin kan exportera som PDF.</p>
+    </div>
+
+    <section class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <div>
+          <h2>Rapporter</h2>
+          <p style="margin:0; color:#64748b;">Lista över registrerade svetsrapporter</p>
+        </div>
+        <button class="btn-primary" id="openModalBtn">+ Ny svetsrapport</button>
+      </div>
+      <div class="list" id="reportList"></div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="reportModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 style="margin:0;">Ny svetsrapport</h2>
+        <button class="btn-ghost" id="closeModalBtn">✕</button>
+      </div>
+      <form id="reportForm">
+        <div class="modal-grid">
+          <div class="field">
+            <label for="project">Projekt</label>
+            <input id="project" required />
+          </div>
+          <div class="field">
+            <label for="location">Plats/Spår</label>
+            <input id="location" placeholder="Ex. Spår, km, sektion" required />
+          </div>
+          <div class="field">
+            <label for="weldDate">Svetsdatum</label>
+            <input type="date" id="weldDate" required />
+          </div>
+          <div class="field">
+            <label for="welder">Svetsare</label>
+            <input id="welder" placeholder="Namn / ID" required />
+          </div>
+          <div class="field">
+            <label for="method">Svetsmetod</label>
+            <input id="method" placeholder="Ex. aluminotermisk / termit" required />
+          </div>
+          <div class="field">
+            <label for="railProfile">Rälprofil</label>
+            <input id="railProfile" placeholder="Ex. 50E3, 60E1" />
+          </div>
+          <div class="field">
+            <label for="railSteel">Rälsstål / kvalitet</label>
+            <input id="railSteel" placeholder="Ex. R260" />
+          </div>
+          <div class="field">
+            <label for="weldNumber">Svetsnummer</label>
+            <input id="weldNumber" />
+          </div>
+          <div class="field">
+            <label for="jointType">Fogtyp</label>
+            <input id="jointType" placeholder="Stumfog / urslipning / ny räl" />
+          </div>
+          <div class="field">
+            <label for="preHeat">Förvärmning (°C)</label>
+            <input id="preHeat" type="number" step="0.1" />
+          </div>
+          <div class="field">
+            <label for="railTemp">Rältemperatur (°C)</label>
+            <input id="railTemp" type="number" step="0.1" />
+          </div>
+          <div class="field">
+            <label for="airTemp">Lufttemp (°C)</label>
+            <input id="airTemp" type="number" step="0.1" />
+          </div>
+          <div class="field">
+            <label for="inspection">Kontrollant</label>
+            <input id="inspection" placeholder="Namn kontrollant" />
+          </div>
+          <div class="field">
+            <label for="inspectionDate">Kontrolldatum</label>
+            <input type="date" id="inspectionDate" />
+          </div>
+          <div class="field">
+            <label for="remarks">Anmärkningar</label>
+            <textarea id="remarks" rows="3" placeholder="Ex. mätvärden, spårvidd, slipning osv"></textarea>
+          </div>
+          <div class="field">
+            <label for="attachment">Bifoga svetsrapport (PDF eller bild)</label>
+            <input id="attachment" type="file" accept=".pdf,image/*" />
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:12px;">
+          <button type="button" class="btn-ghost" id="cancelBtn">Avbryt</button>
+          <button type="submit" class="btn-primary">Spara</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="auth.js"></script>
+  <script>
+    const currentUser = requireLogin();
+    setupSidebarForUser(currentUser);
+    if (!isAdmin(currentUser)) {
+      document.body.classList.add("non-admin");
+      document.querySelectorAll(".admin-only").forEach(el => el.style.display = "none");
+    }
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.clear();
+      window.location.href = "login.html";
+    });
+
+    const modal = document.getElementById("reportModal");
+    const openBtn = document.getElementById("openModalBtn");
+    const closeBtn = document.getElementById("closeModalBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
+    const form = document.getElementById("reportForm");
+    const list = document.getElementById("reportList");
+
+    const STORAGE_KEY = "weldReports";
+    let reports = [];
+
+    function toggleModal(show) {
+      modal.classList.toggle("show", !!show);
+    }
+
+    function loadReports() {
+      try {
+        reports = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      } catch { reports = []; }
+      renderList();
+    }
+
+    function saveReports() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
+    }
+
+    function renderList() {
+      list.innerHTML = "";
+      if (!reports.length) {
+        list.innerHTML = '<div class="report-row" style="justify-content:center; color:#64748b;">Ingen svetsrapport ännu.</div>';
+        return;
+      }
+      reports.forEach((r, idx) => {
+        const row = document.createElement("div");
+        row.className = "report-row";
+        row.innerHTML = `
+          <div class="row-meta">
+            <strong>${r.project || "Projekt"}</strong>
+            <span>${r.location || ""}</span>
+            <small>${r.weldDate || ""} • Svetsare: ${r.welder || ""}</small>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span class="pill">Metod: ${r.method || "-"}</span>
+            <button class="btn-ghost" data-idx="${idx}" data-action="pdf">Exportera PDF</button>
+            ${r.attachmentName ? `<a class="btn-ghost" href="${r.attachmentData}" download="${r.attachmentName}">Ladda ner bilaga</a>` : ""}
+            <button class="btn-ghost" data-idx="${idx}" data-action="delete" style="border-color:#fca5a5; color:#b91c1c;">Ta bort</button>
+          </div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    async function handleAttachment(file) {
+      if (!file) return { name: "", data: "" };
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result });
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function generatePdf(report) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      let y = 14;
+      doc.setFontSize(16);
+      doc.text("Svetsrapport", 14, y);
+      y += 8;
+      doc.setFontSize(11);
+
+      const lines = [
+        ["Projekt", report.project],
+        ["Plats/Spår", report.location],
+        ["Svetsdatum", report.weldDate],
+        ["Svetsare", report.welder],
+        ["Metod", report.method],
+        ["Svetsnummer", report.weldNumber],
+        ["Rälprofil", report.railProfile],
+        ["Rälsstål", report.railSteel],
+        ["Fogtyp", report.jointType],
+        ["Förvärmning (°C)", report.preHeat],
+        ["Rältemp (°C)", report.railTemp],
+        ["Lufttemp (°C)", report.airTemp],
+        ["Kontrollant", report.inspection],
+        ["Kontrolldatum", report.inspectionDate],
+        ["Anmärkningar", report.remarks]
+      ];
+
+      lines.forEach(([label, value]) => {
+        doc.text(`${label}: ${value || "-"}`, 14, y);
+        y += 8;
+        if (y > 280) { doc.addPage(); y = 14; }
+      });
+
+      doc.save(`svetsrapport_${report.project || "rapport"}.pdf`);
+    }
+
+    openBtn.addEventListener("click", () => toggleModal(true));
+    closeBtn.addEventListener("click", () => toggleModal(false));
+    cancelBtn.addEventListener("click", () => toggleModal(false));
+    modal.addEventListener("click", (e) => { if (e.target === modal) toggleModal(false); });
+
+    list.addEventListener("click", (e) => {
+      const btn = e.target.closest("button, a");
+      if (!btn || !btn.dataset.action) return;
+      const idx = Number(btn.dataset.idx);
+      if (btn.dataset.action === "delete") {
+        reports.splice(idx, 1);
+        saveReports();
+        renderList();
+      }
+      if (btn.dataset.action === "pdf") {
+        generatePdf(reports[idx]);
+      }
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const file = document.getElementById("attachment").files[0];
+      const attachment = await handleAttachment(file);
+      const report = {
+        project: project.value.trim(),
+        location: location.value.trim(),
+        weldDate: weldDate.value,
+        welder: welder.value.trim(),
+        method: method.value.trim(),
+        railProfile: railProfile.value.trim(),
+        railSteel: railSteel.value.trim(),
+        weldNumber: weldNumber.value.trim(),
+        jointType: jointType.value.trim(),
+        preHeat: preHeat.value,
+        railTemp: railTemp.value,
+        airTemp: airTemp.value,
+        inspection: inspection.value.trim(),
+        inspectionDate: inspectionDate.value,
+        remarks: remarks.value.trim(),
+        attachmentName: attachment.name,
+        attachmentData: attachment.data
+      };
+      reports.push(report);
+      saveReports();
+      renderList();
+      form.reset();
+      toggleModal(false);
+    });
+
+    loadReports();
+  </script>
+</body>
+</html>

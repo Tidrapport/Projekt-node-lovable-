@@ -1,0 +1,7 @@
+project_id = "tlplvuiesgderflldjpb"
+
+[functions.sync-from-adminhub]
+verify_jwt = false
+
+[functions.billing-sync]
+verify_jwt = false
