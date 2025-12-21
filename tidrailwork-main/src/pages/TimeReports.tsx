@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
+import { addMaterialToTimeEntry, createTimeEntry, deleteTimeEntry, listTimeEntries, updateTimeEntry, TimeEntry } from "@/api/timeEntries";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { useImpersonation } from "@/contexts/ImpersonationContext";
@@ -19,38 +19,6 @@ import { Clock, Plus, Trash2, X, Pencil, CheckCircle, CalendarDays, List, Copy }
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 import { TimeReportsCalendarView } from "@/components/TimeReportsCalendarView";
-
-interface MaterialReport {
-  id: string;
-  quantity: number;
-  material_type: { name: string; unit: string };
-}
-
-interface TimeEntry {
-  id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  break_minutes: number;
-  total_hours: number;
-  shift_type: string;
-  work_description: string;
-  attested_by: string | null;
-  attested_at: string | null;
-  project_id: string;
-  subproject_id: string | null;
-  job_role_id: string;
-  per_diem_type: string;
-  travel_time_hours: number;
-  save_travel_compensation: boolean;
-  overtime_weekday_hours: number;
-  overtime_weekend_hours: number;
-  ao_number: string | null;
-  project: { name: string };
-  subproject?: { name: string };
-  job_role: { name: string };
-  material_reports?: MaterialReport[];
-}
 
 interface Project {
   id: string;
@@ -134,21 +102,33 @@ const TimeReports = () => {
   const fetchData = async () => {
     if (!effectiveUserId) return;
 
-    // Fetch time entries with material reports
-    const entriesData = await apiFetch(`/time-entries?user_id=${effectiveUserId}`);
-    if (entriesData) setEntries(entriesData as TimeEntry[]);
+    try {
+      const entriesData = await listTimeEntries({ user_id: effectiveUserId, includeMaterials: true });
+      setEntries(entriesData);
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte hämta tidrapporter");
+    }
 
-    // Fetch projects
-    const projectsData = await apiFetch(`/projects?active=true`);
-    if (projectsData) setProjects(projectsData);
+    try {
+      const projectsData = await apiFetch(`/projects?active=true`);
+      if (projectsData) setProjects(projectsData);
+    } catch (error) {
+      console.error("Error fetching projects", error);
+    }
 
-    // Fetch job roles
-    const jobRolesData = await apiFetch(`/job-roles?active=true`);
-    if (jobRolesData) setJobRoles(jobRolesData);
+    try {
+      const jobRolesData = await apiFetch(`/job-roles?active=true`);
+      if (jobRolesData) setJobRoles(jobRolesData);
+    } catch (error) {
+      console.error("Error fetching job roles", error);
+    }
 
-    // Fetch material types
-    const materialTypesData = await apiFetch(`/material-types?active=true`);
-    if (materialTypesData) setMaterialTypes(materialTypesData);
+    try {
+      const materialTypesData = await apiFetch(`/material-types?active=true`);
+      if (materialTypesData) setMaterialTypes(materialTypesData);
+    } catch (error) {
+      console.error("Error fetching material types", error);
+    }
   };
 
   const fetchSubprojects = async (projectId: string) => {
@@ -258,28 +238,16 @@ const TimeReports = () => {
       const calculatedShiftType = determineShiftType(date, startTime, endTime);
 
       // Use effectiveUserId so admin can create entries for selected user
-      const timeEntryData = await apiFetch("/time-entries", {
-        method: "POST",
-        json: {
-          user_id: effectiveUserId,
-          company_id: companyId,
-          date,
-          start_time: startTime,
-          end_time: endTime,
-          break_minutes: parseInt(breakMinutes),
-          project_id: projectId,
-          subproject_id: subprojectId || null,
-          job_role_id: jobRoleId,
-          shift_type: calculatedShiftType as any,
-          work_description: workDescription,
-          total_hours: totalHours,
-          per_diem_type: perDiemType,
-          travel_time_hours: parseFloat(travelTimeHours) || 0,
-          save_travel_compensation: saveTravelCompensation,
-          overtime_weekday_hours: parseFloat(overtimeWeekdayHours) || 0,
-          overtime_weekend_hours: parseFloat(overtimeWeekendHours) || 0,
-          ao_number: aoNumber || null,
-        },
+      const timeEntryData = await createTimeEntry({
+        user_id: effectiveUserId,
+        date,
+        hours: totalHours,
+        project_id: projectId,
+        subproject_id: subprojectId || undefined,
+        job_role_id: jobRoleId || undefined,
+        description: workDescription,
+        start_time: startTime,
+        end_time: endTime,
       });
 
       // Insert material reports if any
@@ -293,9 +261,9 @@ const TimeReports = () => {
 
         // Insert material reports via backend
         for (const mr of materialReports) {
-          await apiFetch(`/time-entries/${timeEntryData.id}/materials`, {
-            method: "POST",
-            json: { material_type_id: mr.material_type_id, quantity: mr.quantity },
+          await addMaterialToTimeEntry(timeEntryData.id, {
+            material_type_id: mr.material_type_id,
+            quantity: mr.quantity,
           });
         }
       }
@@ -313,7 +281,7 @@ const TimeReports = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      await apiFetch(`/time-entries/${id}`, { method: "DELETE" });
+      await deleteTimeEntry(id);
       toast.success("Tidrapport borttagen");
       fetchData();
     } catch (err: any) {
@@ -355,27 +323,15 @@ const TimeReports = () => {
         return;
       }
 
-      await apiFetch(`/time-entries/${editingEntry.id}`, {
-        method: "PUT",
-        json: {
-          date,
-          start_time: startTime,
-          end_time: endTime,
-          break_minutes: parseInt(breakMinutes),
-          project_id: projectId,
-          subproject_id: subprojectId || null,
-          job_role_id: jobRoleId,
-          shift_type: calculatedShiftType as any,
-          work_description: workDescription,
-          total_hours: totalHours,
-          per_diem_type: perDiemType,
-          travel_time_hours: parseFloat(travelTimeHours) || 0,
-          save_travel_compensation: saveTravelCompensation,
-          overtime_weekday_hours: parseFloat(overtimeWeekdayHours) || 0,
-          overtime_weekend_hours: parseFloat(overtimeWeekendHours) || 0,
-          ao_number: aoNumber || null,
-          updated_at: new Date().toISOString(),
-        },
+      await updateTimeEntry(editingEntry.id, {
+        date,
+        hours: totalHours,
+        project_id: projectId,
+        subproject_id: subprojectId || undefined,
+        job_role_id: jobRoleId || undefined,
+        description: workDescription,
+        start_time: startTime,
+        end_time: endTime,
       });
 
       toast.success("Tidrapport uppdaterad!");
