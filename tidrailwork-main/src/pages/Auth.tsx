@@ -276,10 +276,8 @@ const Auth = () => {
           ) : (
             <Building2 className="h-16 w-16 mx-auto text-primary" />
           )}
-          <h1 className="text-3xl font-bold font-heading">Tidrapporteringssystem</h1>
-          <p className="text-muted-foreground">
-            {verifiedCompany ? `Logga in till ${verifiedCompany.name}` : "Logga in för att rapportera tid"}
-          </p>
+          <h1 className="text-3xl font-bold font-heading">💰💰 OPERO 💰💰</h1>
+          <p className="text-muted-foreground">Företags operativsystem</p>
         </div>
 
         <Card className="shadow-elevated">

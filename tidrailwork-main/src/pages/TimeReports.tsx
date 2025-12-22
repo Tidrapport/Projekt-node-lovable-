@@ -634,12 +634,12 @@ const TimeReports = () => {
               <div className="space-y-2">
                 <Label htmlFor="project">Projekt</Label>
                 <Select value={projectId} onValueChange={setProjectId} required>
-                  <SelectTrigger id="project">
+                  <SelectTrigger id="project" className="text-foreground">
                     <SelectValue placeholder="Välj projekt" />
                   </SelectTrigger>
                   <SelectContent>
                     {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
+                      <SelectItem key={project.id} value={project.id} className="text-foreground">
                         {project.name}
                       </SelectItem>
                     ))}
@@ -649,13 +649,13 @@ const TimeReports = () => {
               <div className="space-y-2">
                 <Label htmlFor="subproject">Underprojekt (valfritt)</Label>
                 <Select value={subprojectId} onValueChange={setSubprojectId}>
-                  <SelectTrigger id="subproject">
+                  <SelectTrigger id="subproject" className="text-foreground">
                     <SelectValue placeholder="Välj underprojekt" />
                   </SelectTrigger>
                   <SelectContent>
                     {subprojects.map((subproject) => (
                       <SelectItem key={subproject.id} value={subproject.id}>
-                        {subproject.name}
+                        <span className="text-foreground">{subproject.name}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -667,12 +667,12 @@ const TimeReports = () => {
               <div className="space-y-2">
                 <Label htmlFor="jobRole">Yrkesroll</Label>
                 <Select value={jobRoleId} onValueChange={setJobRoleId} required>
-                  <SelectTrigger id="jobRole">
+                  <SelectTrigger id="jobRole" className="text-foreground">
                     <SelectValue placeholder="Välj roll" />
                   </SelectTrigger>
                   <SelectContent>
                     {jobRoles.map((role) => (
-                      <SelectItem key={role.id} value={role.id}>
+                      <SelectItem key={role.id} value={role.id} className="text-foreground">
                         {role.name}
                       </SelectItem>
                     ))}

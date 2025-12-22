@@ -8,38 +8,34 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { apiFetch } from "@/api/client";
 import { toast } from "sonner";
-import { FolderKanban, Plus, Edit, Trash2, RotateCcw, MapPin, User, Briefcase, Tag } from "lucide-react";
+import { FolderKanban, Plus, Edit, Trash2, RotateCcw, User, Briefcase, Tag } from "lucide-react";
 
 interface Customer {
-  id: string;
+  id: number;
   name: string;
 }
 
 interface Project {
-  id: string;
+  id: number;
   name: string;
-  description: string;
-  active: boolean;
-  customer_id: string | null;
-  customer_name: string | null;
-  work_task: string | null;
-  location: string | null;
-  internal_marking: string | null;
+  code?: string | null;
+  notes?: string | null;
+  is_active: boolean;
+  customer_id: number | null;
+  customer_name?: string | null;
 }
 
 interface Subproject {
-  id: string;
-  project_id: string;
+  id: number;
+  project_id: number;
   name: string;
-  description: string;
-  active: boolean;
+  code?: string | null;
+  is_active: boolean;
 }
 
 const AdminProjects = () => {
-  const { companyId } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [subprojects, setSubprojects] = useState<Subproject[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -51,60 +47,71 @@ const AdminProjects = () => {
   // Project form
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
-  const [projectDescription, setProjectDescription] = useState("");
-  const [projectCustomerId, setProjectCustomerId] = useState<string>("");
-  const [projectWorkTask, setProjectWorkTask] = useState("");
-  const [projectLocation, setProjectLocation] = useState("");
-  const [projectInternalMarking, setProjectInternalMarking] = useState("");
+  const [projectCustomerId, setProjectCustomerId] = useState<string>("_none");
+  const [projectCode, setProjectCode] = useState("");
+  const [projectNotes, setProjectNotes] = useState("");
 
   // Subproject form
   const [editingSubprojectId, setEditingSubprojectId] = useState<string | null>(null);
   const [subprojectName, setSubprojectName] = useState("");
-  const [subprojectDescription, setSubprojectDescription] = useState("");
   const [subprojectProjectId, setSubprojectProjectId] = useState("");
+  const [subprojectCode, setSubprojectCode] = useState("");
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const [projectsRes, subprojectsRes, customersRes] = await Promise.all([
-      supabase.from("projects").select("*").order("name"),
-      supabase.from("subprojects").select("*").order("name"),
-      supabase.from("customers").select("*").order("name"),
-    ]);
-
-    if (projectsRes.data) setProjects(projectsRes.data as Project[]);
-    if (subprojectsRes.data) setSubprojects(subprojectsRes.data);
-    if (customersRes.data) setCustomers(customersRes.data);
+    try {
+      const [projectsRes, subprojectsRes, customersRes] = await Promise.all([
+        apiFetch<Project[]>("/projects"),
+        apiFetch<Subproject[]>("/subprojects"),
+        apiFetch<Customer[]>("/customers"),
+      ]);
+      if (projectsRes) {
+        setProjects(
+          projectsRes.map((p) => ({
+            ...p,
+            is_active: p.is_active === true || p.is_active === 1 || p.is_active === "1",
+          }))
+        );
+      }
+      if (subprojectsRes) {
+        setSubprojects(
+          subprojectsRes.map((s) => ({
+            ...s,
+            is_active: s.is_active === true || s.is_active === 1 || s.is_active === "1",
+          }))
+        );
+      }
+      if (customersRes) setCustomers(customersRes);
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte hämta projektdata");
+    }
   };
   
-  const getCustomerName = (customerId: string | null) => {
+  const getCustomerName = (customerId: number | null) => {
     if (!customerId) return null;
-    const customer = customers.find(c => c.id === customerId);
+    const customer = customers.find(c => String(c.id) === String(customerId));
     return customer?.name || null;
   };
 
-  const activeProjects = projects.filter(p => p.active);
-  const inactiveProjects = projects.filter(p => !p.active);
+  const activeProjects = projects.filter(p => p.is_active);
+  const inactiveProjects = projects.filter(p => !p.is_active);
 
   const openProjectDialog = (project?: Project) => {
     if (project) {
-      setEditingProjectId(project.id);
+      setEditingProjectId(String(project.id));
       setProjectName(project.name);
-      setProjectDescription(project.description || "");
-      setProjectCustomerId(project.customer_id || "");
-      setProjectWorkTask(project.work_task || "");
-      setProjectLocation(project.location || "");
-      setProjectInternalMarking(project.internal_marking || "");
+      setProjectCustomerId(project.customer_id ? String(project.customer_id) : "_none");
+      setProjectCode(project.code || "");
+      setProjectNotes(project.notes || "");
     } else {
       setEditingProjectId(null);
       setProjectName("");
-      setProjectDescription("");
-      setProjectCustomerId("");
-      setProjectWorkTask("");
-      setProjectLocation("");
-      setProjectInternalMarking("");
+      setProjectCustomerId("_none");
+      setProjectCode("");
+      setProjectNotes("");
     }
     setShowProjectDialog(true);
   };
@@ -115,35 +122,27 @@ const AdminProjects = () => {
 
     try {
       if (editingProjectId) {
-        // Update existing project
-        const { error } = await supabase
-          .from("projects")
-          .update({
-            name: projectName.trim(),
-            description: projectDescription.trim(),
-            customer_id: projectCustomerId || null,
-            work_task: projectWorkTask.trim() || null,
-            location: projectLocation.trim() || null,
-            internal_marking: projectInternalMarking.trim() || null,
-          })
-          .eq("id", editingProjectId);
-
-        if (error) throw error;
-        toast.success("Projekt uppdaterat!");
+          await apiFetch(`/projects/${editingProjectId}`, {
+            method: "PUT",
+            json: {
+              name: projectName.trim(),
+              customer_id: projectCustomerId && projectCustomerId !== "_none" ? Number(projectCustomerId) : null,
+              code: projectCode.trim() || null,
+              notes: projectNotes.trim() || null,
+            },
+          });
+          toast.success("Projekt uppdaterat!");
       } else {
-        // Create new project
-        const { error } = await supabase.from("projects").insert({
-          name: projectName.trim(),
-          description: projectDescription.trim(),
-          customer_id: projectCustomerId || null,
-          work_task: projectWorkTask.trim() || null,
-          location: projectLocation.trim() || null,
-          internal_marking: projectInternalMarking.trim() || null,
-          active: true,
-          company_id: companyId,
-        } as any);
-
-        if (error) throw error;
+        await apiFetch(`/projects`, {
+          method: "POST",
+          json: {
+            name: projectName.trim(),
+            customer_id: projectCustomerId && projectCustomerId !== "_none" ? Number(projectCustomerId) : null,
+            code: projectCode.trim() || null,
+            notes: projectNotes.trim() || null,
+            is_active: 1,
+          },
+        });
         toast.success("Projekt skapat!");
       }
 
@@ -160,24 +159,22 @@ const AdminProjects = () => {
   const resetProjectForm = () => {
     setEditingProjectId(null);
     setProjectName("");
-    setProjectDescription("");
-    setProjectCustomerId("");
-    setProjectWorkTask("");
-    setProjectLocation("");
-    setProjectInternalMarking("");
+    setProjectCustomerId("_none");
+    setProjectCode("");
+    setProjectNotes("");
   };
 
   const openSubprojectDialog = (subproject?: Subproject) => {
     if (subproject) {
-      setEditingSubprojectId(subproject.id);
+      setEditingSubprojectId(String(subproject.id));
       setSubprojectName(subproject.name);
-      setSubprojectDescription(subproject.description || "");
-      setSubprojectProjectId(subproject.project_id);
+      setSubprojectProjectId(String(subproject.project_id));
+      setSubprojectCode(subproject.code || "");
     } else {
       setEditingSubprojectId(null);
       setSubprojectName("");
-      setSubprojectDescription("");
       setSubprojectProjectId("");
+      setSubprojectCode("");
     }
     setShowSubprojectDialog(true);
   };
@@ -188,37 +185,33 @@ const AdminProjects = () => {
 
     try {
       if (editingSubprojectId) {
-        // Update existing subproject
-        const { error } = await supabase
-          .from("subprojects")
-          .update({
-            project_id: subprojectProjectId,
+        await apiFetch(`/subprojects/${editingSubprojectId}`, {
+          method: "PUT",
+          json: {
+            project_id: Number(subprojectProjectId),
             name: subprojectName.trim(),
-            description: subprojectDescription.trim(),
-          })
-          .eq("id", editingSubprojectId);
-
-        if (error) throw error;
+            code: subprojectCode.trim() || null,
+          },
+        });
         toast.success("Underprojekt uppdaterat!");
       } else {
-        // Create new subproject
-        const { error } = await supabase.from("subprojects").insert({
-          project_id: subprojectProjectId,
-          name: subprojectName.trim(),
-          description: subprojectDescription.trim(),
-          active: true,
-          company_id: companyId,
-        } as any);
-
-        if (error) throw error;
+        await apiFetch(`/subprojects`, {
+          method: "POST",
+          json: {
+            project_id: Number(subprojectProjectId),
+            name: subprojectName.trim(),
+            code: subprojectCode.trim() || null,
+            is_active: 1,
+          },
+        });
         toast.success("Underprojekt skapat!");
       }
 
       setShowSubprojectDialog(false);
       setEditingSubprojectId(null);
       setSubprojectName("");
-      setSubprojectDescription("");
       setSubprojectProjectId("");
+      setSubprojectCode("");
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
@@ -228,104 +221,43 @@ const AdminProjects = () => {
   };
 
   const toggleProjectActive = async (id: string, active: boolean) => {
-    // If deactivating, check that all time entries are attested
-    if (active) {
-      const { data: unattested, error: checkError } = await supabase
-        .from("time_entries")
-        .select("id")
-        .eq("project_id", id)
-        .is("attested_by", null);
-
-      if (checkError) {
-        toast.error("Kunde inte kontrollera tidsrapporter");
-        return;
-      }
-
-      if (unattested && unattested.length > 0) {
-        toast.error(`Kan inte avsluta projektet. Det finns ${unattested.length} oattesterade tidsrapporter som måste attesteras först.`);
-        return;
-      }
-    }
-
-    const { error } = await supabase
-      .from("projects")
-      .update({ active: !active })
-      .eq("id", id);
-
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await apiFetch(`/projects/${id}`, {
+        method: "PUT",
+        json: { is_active: active ? 0 : 1 },
+      });
       toast.success(active ? "Projekt avslutat" : "Projekt återaktiverat");
       fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte uppdatera projektstatus");
     }
   };
 
   const deleteProject = async (id: string) => {
     // First check if there are any subprojects
-    const projectSubprojects = subprojects.filter(sp => sp.project_id === id);
+    const projectSubprojects = subprojects.filter(sp => String(sp.project_id) === String(id));
     if (projectSubprojects.length > 0) {
       toast.error("Kan inte ta bort projektet. Ta bort alla underprojekt först.");
       return;
     }
 
     // Check if there are time entries
-    const { data: timeEntries, error: checkError } = await supabase
-      .from("time_entries")
-      .select("id")
-      .eq("project_id", id)
-      .limit(1);
-
-    if (checkError) {
-      toast.error("Kunde inte kontrollera tidsrapporter");
-      return;
-    }
-
-    if (timeEntries && timeEntries.length > 0) {
-      toast.error("Kan inte ta bort projektet eftersom det finns tidsrapporter kopplade till det. Avsluta projektet istället.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("projects")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await apiFetch(`/projects/${id}`, { method: "DELETE" });
       toast.success("Projekt borttaget");
       fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte ta bort projektet");
     }
   };
 
   const deleteSubproject = async (id: string) => {
-    // Check if there are time entries linked to this subproject
-    const { data: timeEntries, error: checkError } = await supabase
-      .from("time_entries")
-      .select("id")
-      .eq("subproject_id", id)
-      .limit(1);
-
-    if (checkError) {
-      toast.error("Kunde inte kontrollera tidsrapporter");
-      return;
-    }
-
-    if (timeEntries && timeEntries.length > 0) {
-      toast.error("Kan inte ta bort underprojektet eftersom det finns tidsrapporter kopplade till det.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("subprojects")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await apiFetch(`/subprojects/${id}`, { method: "DELETE" });
       toast.success("Underprojekt borttaget");
       fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte ta bort underprojekt");
     }
   };
 
@@ -337,11 +269,8 @@ const AdminProjects = () => {
             <CardTitle className="flex items-center gap-2">
               <FolderKanban className="h-5 w-5" />
               {project.name}
-              {!project.active && <Badge variant="outline">Avslutat</Badge>}
+            {!project.is_active && <Badge variant="outline">Avslutat</Badge>}
             </CardTitle>
-            {project.description && (
-              <p className="text-sm text-muted-foreground mt-1">{project.description}</p>
-            )}
             <div className="flex flex-wrap gap-4 mt-3 text-sm">
               {(project.customer_id || project.customer_name) && (
                 <div className="flex items-center gap-1 text-muted-foreground">
@@ -349,22 +278,16 @@ const AdminProjects = () => {
                   <span>Kund: {getCustomerName(project.customer_id) || project.customer_name}</span>
                 </div>
               )}
-              {project.work_task && (
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <Briefcase className="h-4 w-4" />
-                  <span>Uppgift: {project.work_task}</span>
-                </div>
-              )}
-              {project.location && (
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <MapPin className="h-4 w-4" />
-                  <span>Plats: {project.location}</span>
-                </div>
-              )}
-              {project.internal_marking && (
+              {project.code && (
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Tag className="h-4 w-4" />
-                  <span>Märkning: {project.internal_marking}</span>
+                  <span>Kod: {project.code}</span>
+                </div>
+              )}
+              {project.notes && (
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <Briefcase className="h-4 w-4" />
+                  <span>Notis: {project.notes}</span>
                 </div>
               )}
             </div>
@@ -382,7 +305,7 @@ const AdminProjects = () => {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => toggleProjectActive(project.id, project.active)}
+                onClick={() => toggleProjectActive(String(project.id), project.is_active)}
               >
                 <RotateCcw className="h-4 w-4 mr-1" />
                 Återaktivera
@@ -391,7 +314,7 @@ const AdminProjects = () => {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => toggleProjectActive(project.id, project.active)}
+                onClick={() => toggleProjectActive(String(project.id), project.is_active)}
               >
                 Avsluta
               </Button>
@@ -418,8 +341,8 @@ const AdminProjects = () => {
                 <div key={subproject.id} className="flex justify-between items-center border rounded p-2">
                   <div>
                     <span className="font-medium">{subproject.name}</span>
-                    {subproject.description && (
-                      <p className="text-sm text-muted-foreground">{subproject.description}</p>
+                    {subproject.code && (
+                      <p className="text-sm text-muted-foreground">Kod: {subproject.code}</p>
                     )}
                   </div>
                   <div className="flex gap-2">
@@ -507,14 +430,14 @@ const AdminProjects = () => {
             </div>
             <div className="space-y-2">
               <Label htmlFor="projectCustomerId">Kund</Label>
-              <Select value={projectCustomerId || "_none"} onValueChange={(val) => setProjectCustomerId(val === "_none" ? "" : val)}>
+              <Select value={projectCustomerId} onValueChange={setProjectCustomerId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Välj kund" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_none">Ingen kund vald</SelectItem>
                   {customers.map((customer) => (
-                    <SelectItem key={customer.id} value={customer.id}>
+                    <SelectItem key={customer.id} value={String(customer.id)}>
                       {customer.name}
                     </SelectItem>
                   ))}
@@ -522,39 +445,21 @@ const AdminProjects = () => {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="projectWorkTask">Arbetsuppgift</Label>
+              <Label htmlFor="projectCode">Projektnummer/kod</Label>
               <Input
-                id="projectWorkTask"
-                value={projectWorkTask}
-                onChange={(e) => setProjectWorkTask(e.target.value)}
-                placeholder="T.ex. Elinstallation"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="projectLocation">Plats</Label>
-              <Input
-                id="projectLocation"
-                value={projectLocation}
-                onChange={(e) => setProjectLocation(e.target.value)}
-                placeholder="T.ex. Stockholm Central"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="projectInternalMarking">Intern märkning (visas på export/attestering)</Label>
-              <Input
-                id="projectInternalMarking"
-                value={projectInternalMarking}
-                onChange={(e) => setProjectInternalMarking(e.target.value)}
+                id="projectCode"
+                value={projectCode}
+                onChange={(e) => setProjectCode(e.target.value)}
                 placeholder="T.ex. PRJ-2024-001"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="projectDescription">Beskrivning</Label>
+              <Label htmlFor="projectNotes">Anteckning</Label>
               <Textarea
-                id="projectDescription"
-                value={projectDescription}
-                onChange={(e) => setProjectDescription(e.target.value)}
-                placeholder="Ytterligare information om projektet..."
+                id="projectNotes"
+                value={projectNotes}
+                onChange={(e) => setProjectNotes(e.target.value)}
+                placeholder="Anteckning om projektet..."
               />
             </div>
             <div className="flex gap-2 pt-2">
@@ -592,8 +497,8 @@ const AdminProjects = () => {
                 required
               >
                 <option value="">Välj projekt</option>
-                {projects.filter(p => p.active).map(project => (
-                  <option key={project.id} value={project.id}>
+                {projects.filter(p => p.is_active).map(project => (
+                  <option key={project.id} value={String(project.id)}>
                     {project.name}
                   </option>
                 ))}
@@ -609,11 +514,12 @@ const AdminProjects = () => {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="subprojectDescription">Beskrivning</Label>
-              <Textarea
-                id="subprojectDescription"
-                value={subprojectDescription}
-                onChange={(e) => setSubprojectDescription(e.target.value)}
+              <Label htmlFor="subprojectCode">Kod (valfri)</Label>
+              <Input
+                id="subprojectCode"
+                value={subprojectCode}
+                onChange={(e) => setSubprojectCode(e.target.value)}
+                placeholder="T.ex. DEL-1"
               />
             </div>
             <div className="flex gap-2">

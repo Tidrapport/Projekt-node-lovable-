@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
+import { getMe } from "@/api/auth";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
@@ -27,26 +27,26 @@ const VEHICLE_OPTIONS = [
 ];
 
 interface UserProfile {
-  id: string;
+  id: number | string;
   full_name: string;
 }
 
 interface Project {
-  id: string;
+  id: number | string;
   name: string;
 }
 
 interface Subproject {
-  id: string;
+  id: number | string;
   name: string;
-  project_id: string;
+  project_id: number | string;
 }
 
 interface ScheduledAssignment {
-  id: string;
-  user_id: string;
-  project_id: string;
-  subproject_id: string | null;
+  id: number | string;
+  user_id: number | string;
+  project: string;
+  subproject: string | null;
   start_date: string;
   end_date: string;
   notes: string | null;
@@ -55,18 +55,10 @@ interface ScheduledAssignment {
   contact_phone: string | null;
   vehicle: string | null;
   work_address: string | null;
-  is_tentative: boolean;
-  profiles: {
-    full_name: string;
-  };
-  projects: {
-    name: string;
-    location?: string | null;
-    customer_name?: string | null;
-  };
-  subprojects: {
-    name: string;
-  } | null;
+  tentative: boolean | number;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
 }
 
 export default function AdminPlanning() {
@@ -102,10 +94,14 @@ export default function AdminPlanning() {
   };
 
   const handleEditAssignment = (assignment: ScheduledAssignment) => {
-    setEditingAssignmentId(assignment.id);
-    setSelectedUser(assignment.user_id);
-    setSelectedProject(assignment.project_id);
-    setSelectedSubproject(assignment.subproject_id || "");
+    // Redigering inte fullt stödd än (ingen PUT-endpoint). Förifyll för ev. framtida stöd.
+    setEditingAssignmentId(String(assignment.id));
+    setSelectedUser(String(assignment.user_id));
+    // Försök matcha projekt/subprojekt via namn
+    const projectMatch = projects.find((p) => p.name === assignment.project);
+    setSelectedProject(projectMatch ? String(projectMatch.id) : "");
+    const subMatch = subprojects.find((sp) => sp.name === assignment.subproject);
+    setSelectedSubproject(subMatch ? String(subMatch.id) : "");
     setDateRange({
       from: parseISO(assignment.start_date),
       to: parseISO(assignment.end_date),
@@ -116,27 +112,43 @@ export default function AdminPlanning() {
     setContactPhone(assignment.contact_phone || "");
     setSelectedVehicle(assignment.vehicle || "");
     setWorkAddress(assignment.work_address || "");
-    setIsTentative(assignment.is_tentative);
+    setIsTentative(!!assignment.tentative);
     setDialogOpen(true);
   };
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [companyId]);
 
   const fetchData = async () => {
     try {
+      // Använd token-scope för users/projects/subprojects (ingen extra query-param för company_id)
       const [assignmentsRes, usersRes, projectsRes, subprojectsRes] = await Promise.all([
-        apiFetch(`/scheduled-assignments?order=start_date`),
-        apiFetch(`/profiles?order=full_name`),
-        apiFetch(`/projects?active=true&order=name`),
-        apiFetch(`/subprojects?active=true&order=name`),
+        apiFetch(`/plans`),
+        apiFetch(`/admin/users`),
+        apiFetch(`/projects`),
+        apiFetch(`/subprojects`),
       ]);
 
-      setAssignments(assignmentsRes || []);
-      setUsers(usersRes || []);
-      setProjects(projectsRes || []);
-      setSubprojects(subprojectsRes || []);
+      const normalizedAssignments = (assignmentsRes || []).map((a: any) => ({
+        ...a,
+        user_id: String(a.user_id),
+        project_id: a.project_id ? String(a.project_id) : String(a.project || ""),
+        subproject_id: a.subproject_id ? String(a.subproject_id) : a.subproject ? String(a.subproject) : null,
+        projects: { name: a.project || a.projects?.name || "" },
+        subprojects: a.subproject || a.subprojects ? { name: a.subproject || a.subprojects?.name || "" } : null,
+        is_tentative: a.tentative === true || a.tentative === 1 || a.is_tentative,
+      }));
+
+      setAssignments(normalizedAssignments);
+      setUsers(
+        (usersRes || []).map((u: any) => ({
+          id: String(u.id),
+          full_name: u.full_name || `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || "Okänd",
+        }))
+      );
+      setProjects((projectsRes || []).map((p: any) => ({ ...p, id: String(p.id) })));
+      setSubprojects((subprojectsRes || []).map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
     } catch (error: any) {
       console.error("Error fetching data:", error);
       toast.error("Kunde inte hämta data");
@@ -153,36 +165,22 @@ export default function AdminPlanning() {
 
     try {
       const userData = await getMe();
+      const projectName = projects.find((p) => String(p.id) === String(selectedProject))?.name || selectedProject;
+      const subprojectName =
+        subprojects.find((sp) => String(sp.id) === String(selectedSubproject))?.name || selectedSubproject || "";
 
       if (editingAssignmentId) {
         // Update existing assignment
-        await apiFetch(`/scheduled-assignments/${editingAssignmentId}`, {
-          method: "PUT",
-          json: {
-            user_id: selectedUser,
-            project_id: selectedProject,
-            subproject_id: selectedSubproject || null,
-            start_date: format(dateRange.from, "yyyy-MM-dd"),
-            end_date: format(dateRange.to, "yyyy-MM-dd"),
-            notes: notes || null,
-            first_shift_start_time: firstShiftStartTime || null,
-            contact_person: contactPerson || null,
-            contact_phone: contactPhone || null,
-            vehicle: selectedVehicle || null,
-            work_address: workAddress || null,
-            is_tentative: isTentative,
-          },
-        });
-
-        toast.success("Planering uppdaterad");
+        toast.error("Uppdatering av planering stöds inte ännu");
+        return;
       } else {
         // Create new assignment
-        await apiFetch(`/scheduled-assignments`, {
+        await apiFetch(`/plans`, {
           method: "POST",
           json: {
             user_id: selectedUser,
-            project_id: selectedProject,
-            subproject_id: selectedSubproject || null,
+            project: projectName,
+            subproject: subprojectName,
             start_date: format(dateRange.from, "yyyy-MM-dd"),
             end_date: format(dateRange.to, "yyyy-MM-dd"),
             notes: notes || null,
@@ -191,7 +189,7 @@ export default function AdminPlanning() {
             contact_phone: contactPhone || null,
             vehicle: selectedVehicle || null,
             work_address: workAddress || null,
-            is_tentative: isTentative,
+            tentative: isTentative,
             created_by: userData.user?.id,
             company_id: companyId,
           },
@@ -210,14 +208,7 @@ export default function AdminPlanning() {
   };
 
   const handleDeleteAssignment = async (id: string) => {
-    try {
-      await apiFetch(`/scheduled-assignments/${id}`, { method: "DELETE" });
-      toast.success("Planering borttagen");
-      fetchData();
-    } catch (error: any) {
-      console.error("Error deleting assignment:", error);
-      toast.error("Kunde inte ta bort planering");
-    }
+    toast.error("Radering av planering stöds inte ännu i backend");
   };
 
   const resetForm = () => {
@@ -463,19 +454,25 @@ export default function AdminPlanning() {
                 <p className="text-muted-foreground">Inga planeringar än</p>
               ) : (
                 <div className="space-y-3">
-                  {assignments.map((assignment) => (
+                  {assignments.map((assignment) => {
+                    const userName =
+                      users.find((u) => String(u.id) === String(assignment.user_id))?.full_name ||
+                      `${assignment.first_name || ""} ${assignment.last_name || ""}`.trim() ||
+                      assignment.email ||
+                      "Okänd";
+                    return (
                     <Card key={assignment.id}>
                       <CardContent className="pt-6">
                         <div className="flex justify-between items-start">
                           <div className="space-y-2">
                             <div>
                               <span className="font-semibold">Användare: </span>
-                              {assignment.profiles.full_name}
+                              {userName}
                             </div>
                             <div>
                               <span className="font-semibold">Projekt: </span>
-                              {assignment.projects.name}
-                              {assignment.subprojects && ` - ${assignment.subprojects.name}`}
+                              {assignment.project}
+                              {assignment.subproject && ` - ${assignment.subproject}`}
                             </div>
                             <div>
                               <span className="font-semibold">Period: </span>
@@ -499,7 +496,8 @@ export default function AdminPlanning() {
                         </div>
                       </CardContent>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
