@@ -50,6 +50,8 @@ const AdminUsers = () => {
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [resetUser, setResetUser] = useState<UserRow | null>(null);
+  const [companyOptions, setCompanyOptions] = useState<{ id: string; name: string; code?: string | null }[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
 
   // New user form state
   const [newName, setNewName] = useState("");
@@ -61,7 +63,6 @@ const AdminUsers = () => {
   const [newRole, setNewRole] = useState<string>("user");
   const [newHourlyWage, setNewHourlyWage] = useState("");
   const [newTaxTable, setNewTaxTable] = useState("");
-  const [newCompanyId, setNewCompanyId] = useState<string>("");
   const [generatedPassword, setGeneratedPassword] = useState<string>("");
 
   // Edit form state
@@ -76,14 +77,18 @@ const AdminUsers = () => {
   const [editTaxTable, setEditTaxTable] = useState("");
 
   const targetCompanyId = useMemo(() => {
-    if (!isSuperAdmin) return companyId ? String(companyId) : "";
-    return newCompanyId || (companyId ? String(companyId) : "");
-  }, [companyId, isSuperAdmin, newCompanyId]);
+    if (isSuperAdmin) return selectedCompanyId;
+    return companyId ? String(companyId) : "";
+  }, [companyId, isSuperAdmin, selectedCompanyId]);
 
   const fetchUsers = async () => {
+    if (!targetCompanyId) {
+      setUsers([]);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await apiFetch<UserRow[]>(`/admin/users${companyId ? `?company_id=${companyId}` : ""}`);
+      const data = await apiFetch<UserRow[]>(`/admin/users?company_id=${targetCompanyId}`);
       setUsers(data || []);
     } catch (err: any) {
       toast.error(err.message || "Kunde inte hämta användare");
@@ -93,9 +98,34 @@ const AdminUsers = () => {
   };
 
   useEffect(() => {
-    fetchUsers();
+    if (!isSuperAdmin) {
+      fetchUsers();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [companyId, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    (async () => {
+      try {
+        const companies = await apiFetch<{ id: string; name: string; code?: string | null }[]>("/companies");
+        setCompanyOptions(companies || []);
+        if (!selectedCompanyId && companies && companies.length) {
+          setSelectedCompanyId(String(companies[0].id));
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Kunde inte hämta företag");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (isSuperAdmin && targetCompanyId) {
+      fetchUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetCompanyId, isSuperAdmin]);
 
   const generatePassword = () => {
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -116,7 +146,7 @@ const AdminUsers = () => {
       return;
     }
     if (!targetCompanyId) {
-      toast.error("Ingen company_id satt");
+      toast.error("Välj ett företag först");
       return;
     }
     const password = generatePassword();
@@ -239,98 +269,131 @@ const AdminUsers = () => {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="mb-6 flex justify-between items-center">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-3xl font-bold font-heading">Användare</h2>
           <p className="text-muted-foreground">Hantera användare och roller</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <UserPlus className="h-4 w-4" />
-              Lägg till användare
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Ny användare</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <Label>Namn *</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Förnamn Efternamn" />
-              </div>
-              <div className="space-y-2">
-                <Label>E-post *</Label>
-                <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="exempel@foretag.se" />
-              </div>
-              <div className="space-y-2">
-                <Label>Telefon</Label>
-                <Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="070-123 45 67" />
-              </div>
-              <div className="space-y-2">
-                <Label>Närmast anhörig</Label>
-                <Input value={newEmergency} onChange={(e) => setNewEmergency(e.target.value)} placeholder="Namn, telefon" />
-              </div>
-              <div className="space-y-2">
-                <Label>Typ av anställning</Label>
-                <Select value={newEmployeeType} onValueChange={setNewEmployeeType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Välj typ" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {employeeTypes.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Anställningsnummer</Label>
-                <Input value={newEmployeeNumber} onChange={(e) => setNewEmployeeNumber(e.target.value)} placeholder="T.ex. 1001" />
-              </div>
-              <div className="space-y-2">
-                <Label>Timlön (kr/h)</Label>
-                <Input type="number" value={newHourlyWage} onChange={(e) => setNewHourlyWage(e.target.value)} placeholder="0.00" />
-              </div>
-              <div className="space-y-2">
-                <Label>Skattetabell</Label>
-                <Input type="number" value={newTaxTable} onChange={(e) => setNewTaxTable(e.target.value)} placeholder="t.ex. 30" />
-              </div>
-              <div className="space-y-2">
-                <Label>Roll</Label>
-                <Select value={newRole} onValueChange={setNewRole}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Välj roll" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roleOptions.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>
-                        {r.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {isSuperAdmin && (
-                <div className="space-y-2">
-                  <Label>Company ID</Label>
-                  <Input value={targetCompanyId} onChange={(e) => setNewCompanyId(e.target.value)} placeholder="t.ex. 1" />
-                </div>
-              )}
-              <Button onClick={handleCreate} className="w-full" disabled={loading}>
-                {loading ? "Skapar..." : "Skapa användare"}
-              </Button>
-              {generatedPassword && (
-                <p className="text-xs text-muted-foreground">
-                  Senast genererat lösenord: <span className="font-mono">{generatedPassword}</span>
-                </p>
-              )}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {isSuperAdmin && (
+            <div className="space-y-1">
+              <Label className="text-xs uppercase text-muted-foreground">Företag</Label>
+              <Select value={targetCompanyId} onValueChange={setSelectedCompanyId}>
+                <SelectTrigger className="sm:min-w-[240px]">
+                  <SelectValue placeholder="Välj företag" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companyOptions.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      <div className="flex flex-col">
+                        <span>{c.name}</span>
+                        {c.code && <span className="text-xs text-muted-foreground">Kod: {c.code}</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </DialogContent>
-        </Dialog>
+          )}
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <UserPlus className="h-4 w-4" />
+                Lägg till användare
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Ny användare</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label>Namn *</Label>
+                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Förnamn Efternamn" />
+                </div>
+                <div className="space-y-2">
+                  <Label>E-post *</Label>
+                  <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="exempel@foretag.se" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Telefon</Label>
+                  <Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="070-123 45 67" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Närmast anhörig</Label>
+                  <Input value={newEmergency} onChange={(e) => setNewEmergency(e.target.value)} placeholder="Namn, telefon" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Typ av anställning</Label>
+                  <Select value={newEmployeeType} onValueChange={setNewEmployeeType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Välj typ" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {employeeTypes.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Anställningsnummer</Label>
+                  <Input value={newEmployeeNumber} onChange={(e) => setNewEmployeeNumber(e.target.value)} placeholder="T.ex. 1001" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Timlön (kr/h)</Label>
+                  <Input type="number" value={newHourlyWage} onChange={(e) => setNewHourlyWage(e.target.value)} placeholder="0.00" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Skattetabell</Label>
+                  <Input type="number" value={newTaxTable} onChange={(e) => setNewTaxTable(e.target.value)} placeholder="t.ex. 30" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Roll</Label>
+                  <Select value={newRole} onValueChange={setNewRole}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Välj roll" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roleOptions.map((r) => (
+                        <SelectItem key={r.value} value={r.value}>
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {isSuperAdmin && (
+                  <div className="space-y-2">
+                    <Label>Företag</Label>
+                    <Select value={targetCompanyId} onValueChange={setSelectedCompanyId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Välj företag" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companyOptions.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.name} {c.code ? `(${c.code})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button onClick={handleCreate} className="w-full" disabled={loading}>
+                  {loading ? "Skapar..." : "Skapa användare"}
+                </Button>
+                {generatedPassword && (
+                  <p className="text-xs text-muted-foreground">
+                    Senast genererat lösenord: <span className="font-mono">{generatedPassword}</span>
+                  </p>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <div className="space-y-4">

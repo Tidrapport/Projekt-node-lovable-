@@ -74,10 +74,8 @@
     <p class="subtitle">Välj ditt företag för att fortsätta till inloggning.</p>
 
     <label for="company">Välj företag</label>
-    <select id="company">
-      <option value="">Välj ditt företag</option>
-      <option value="RWA">Rail Work AB (RWA)</option>
-      <option value="RWEA">Rail Work Entreprenad AB (RWEA)</option>
+    <select id="company" disabled>
+      <option value="">Laddar företag...</option>
     </select>
 
     <button id="continueBtn">Fortsätt</button>
@@ -90,19 +88,65 @@
   </div>
 
   <script>
-    document.getElementById("continueBtn").addEventListener("click", () => {
-      const select = document.getElementById("company");
+    const select = document.getElementById("company");
+    const continueBtn = document.getElementById("continueBtn");
+    const errorEl = document.getElementById("error");
+    const API_BASE = window.location.origin || "http://localhost:3000";
+
+    async function loadCompanies() {
+      select.innerHTML = '<option value="">Laddar företag...</option>';
+      select.disabled = true;
+      errorEl.textContent = "";
+
+      try {
+        const res = await fetch(`${API_BASE}/public/companies`);
+        if (!res.ok) {
+          throw new Error("Kunde inte hämta företag");
+        }
+        const companies = await res.json();
+
+        if (!companies || !companies.length) {
+          select.innerHTML = '<option value="">Inga företag hittades</option>';
+          return;
+        }
+
+        select.disabled = false;
+        select.innerHTML = '<option value="">Välj ditt företag</option>';
+        companies.forEach((c) => {
+          const opt = document.createElement("option");
+          opt.value = c.id;
+          opt.textContent = `${c.name}${c.code ? " (" + c.code + ")" : ""}`;
+          opt.dataset.code = c.code || "";
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        console.error(err);
+        select.innerHTML = '<option value="">Kunde inte ladda företag</option>';
+        errorEl.textContent = "Kunde inte hämta företag. Försök igen.";
+      }
+    }
+
+    loadCompanies();
+
+    continueBtn.addEventListener("click", () => {
       const value = select.value;
-      const text = select.options[select.selectedIndex].text;
-      const errorEl = document.getElementById("error");
+      const text = select.options[select.selectedIndex]?.text || "";
+      const code = select.options[select.selectedIndex]?.dataset.code || "";
+
+      errorEl.textContent = "";
 
       if (!value) {
         errorEl.textContent = "Välj ett företag för att fortsätta.";
         return;
       }
 
-      const company = { code: value, name: text };
-      localStorage.setItem("selectedCompany", JSON.stringify(company));
+      const companyToSave = {
+        id: Number(value),
+        code: code || null,
+        name: text.replace(/\s*\([^)]*\)\s*$/, "") || text // plocka bort (CODE) i slutet
+      };
+
+      localStorage.setItem("selectedCompany", JSON.stringify(companyToSave));
 
       window.location.href = "login.html";
     });

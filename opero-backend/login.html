@@ -108,11 +108,20 @@
 
   <script>
     // Hämta valt företag, annars tillbaka till company-select
-    const company = JSON.parse(localStorage.getItem("selectedCompany") || "null");
+    let company = null;
+    try {
+      company = JSON.parse(localStorage.getItem("selectedCompany") || "null");
+    } catch (e) {
+      company = null;
+    }
+
     if (!company) {
       window.location.href = "company-select.html";
     } else {
-      document.getElementById("companyName").textContent = company.name;
+      const label =
+        (company.name || "Okänt företag") +
+        (company.code ? ` (${company.code})` : "");
+      document.getElementById("companyName").textContent = label;
     }
 
     document.getElementById("changeCompany").addEventListener("click", () => {
@@ -141,10 +150,15 @@
 
       try {
         const apiBase = window.location.origin || "http://localhost:3000";
+        const rawCompanyId = company?.id ?? company?.company_id ?? null;
+        const companyId =
+          rawCompanyId !== null && !Number.isNaN(Number(rawCompanyId))
+            ? Number(rawCompanyId)
+            : null;
         const res = await fetch(`${apiBase}/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, company_id: companyId }),
         });
 
         const data = await res.json().catch(() => ({}));
@@ -167,8 +181,10 @@
         setCurrentUser(user);
 
         // Spara lite extra för sidor som använder company_* och user_*
-        localStorage.setItem("company_id", user.company_id || company.code);
-        localStorage.setItem("company_name", company.name);
+        const companyIdToStore = companyId || user.company_id || company?.code || "";
+        localStorage.setItem("company_id", companyIdToStore);
+        localStorage.setItem("company_code", company?.code || "");
+        localStorage.setItem("company_name", company.name || "");
         localStorage.setItem("user_id", user.id);
         const fullName =
           (user.first_name || user.firstName || "") +

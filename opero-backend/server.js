@@ -93,6 +93,21 @@ app.get("/login.html", (req, res) => {
   res.sendFile(path.join(__dirname, "login.html"));
 });
 
+// Offentligt endpoint för att lista företag vid inloggning
+app.get("/public/companies", (req, res) => {
+  db.all(
+    "SELECT id, name, code, code AS company_code FROM companies ORDER BY name",
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error("DB-fel vid GET /public/companies:", err);
+        return res.status(500).json({ error: "Kunde inte hämta företag" });
+      }
+      res.json(rows || []);
+    }
+  );
+});
+
 // Hämta företag (tenant-säker och användbar i UI)
 app.get("/companies", requireAuth, (req, res) => {
   const role = (req.user.role || "").toLowerCase();

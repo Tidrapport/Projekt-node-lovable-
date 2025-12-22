@@ -27,6 +27,7 @@ interface CompanyOption {
   id: string;
   name: string;
   company_code: string;
+  code?: string | null;
   logo_url: string | null;
   abbreviation: string;
 }
@@ -64,6 +65,7 @@ const Auth = () => {
 
         const companiesWithAbbr = (companiesData || []).map(company => ({
           ...company,
+          company_code: company.company_code || company.code || "",
           abbreviation: generateAbbreviation(company.name)
         }));
         setCompanies(companiesWithAbbr);
@@ -99,10 +101,12 @@ const Auth = () => {
     }
   }, [user, navigate]);
 
+  const getCompanyCode = (company: CompanyOption) => (company.company_code || company.code || "").toUpperCase();
+
   const autoVerifyCompanyCode = async (code: string) => {
     try {
       const codeUp = code.toUpperCase();
-      const found = (companies || []).find((c) => (c.company_code || "").toUpperCase() === codeUp);
+      const found = (companies || []).find((c) => getCompanyCode(c) === codeUp);
       if (found) {
         setVerifiedCompany({ id: found.id, name: found.name, logo_url: found.logo_url });
       } else {
@@ -124,7 +128,7 @@ const Auth = () => {
 
   const handleCompanySelect = (code: string) => {
     setSelectedCompanyCode(code);
-    const company = companies.find(c => c.company_code === code);
+    const company = companies.find(c => getCompanyCode(c) === code.toUpperCase());
     if (company) {
       setVerifiedCompany({ id: company.id, name: company.name, logo_url: company.logo_url });
       saveCompanyCode(code);
@@ -301,7 +305,7 @@ const Auth = () => {
                     </SelectTrigger>
                     <SelectContent className="max-h-60">
                       {companies.map((company) => (
-                        <SelectItem key={company.company_code} value={company.company_code}>
+                        <SelectItem key={getCompanyCode(company)} value={getCompanyCode(company)}>
                           <span className="flex items-center gap-2">
                             <span>{company.name}</span>
                             <span className="text-muted-foreground font-mono text-xs">({company.abbreviation})</span>
