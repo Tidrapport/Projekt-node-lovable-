@@ -256,6 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "Avvikelser": "⚡",        // alert/issue
     "Svetsrapport": "🧾︎",     // receipt/doc
     "Lönöversikt": "¤",       // currency
+    "Fakturering": "🧾",      // invoice
     "Kontakter": "👥︎",        // people
     "Attestering": "✔︎",      // check
     "Projekt": "🏗︎",         // crane/build

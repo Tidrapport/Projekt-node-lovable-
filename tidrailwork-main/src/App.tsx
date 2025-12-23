@@ -34,6 +34,7 @@ import AdminSalaries from "./pages/admin/Salaries";
 import WeldingReport from "./pages/WeldingReport";
 import SuperAdminDashboard from "./pages/superadmin/Dashboard";
 import NotFound from "./pages/NotFound";
+import AdminBilling from "./pages/admin/Billing";
 
 const queryClient = new QueryClient();
 
@@ -230,6 +231,16 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <AdminTimeAttestations />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/billing"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminBilling />
                     </Layout>
                   </ProtectedRoute>
                 }

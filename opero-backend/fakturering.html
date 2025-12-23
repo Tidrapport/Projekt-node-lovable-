@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fakturering – Admin</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      width: 240px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebar h2 { font-size: 18px; margin: 0 0 16px; }
+
+    .nav-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-top: 12px;
+    }
+
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .nav-item.active { background: #1d4ed8; }
+    .nav-item:hover { background: #111827; }
+
+    .logout {
+      margin-top: auto;
+      font-size: 13px;
+      color: #f97373;
+      cursor: pointer;
+    }
+
+    .main { flex: 1; padding: 24px 32px; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .topbar h1 { margin: 0; font-size: 22px; }
+    .topbar small { color: #6b7280; }
+    .welcome { font-size: 14px; color: #374151; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15,23,42,0.08);
+      margin-bottom: 16px;
+    }
+
+    .card h2 { margin: 0 0 10px; font-size: 18px; }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .filters .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+    }
+
+    .filters label { color: #374151; }
+
+    .filters select,
+    .filters input {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+      color: #111827;
+      background: #fff;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .btn-primary {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: none;
+      background: #1d4ed8;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover { background: #1e40af; }
+
+    .btn-secondary {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #6b7280;
+    }
+
+    .badge-empty {
+      color: #6b7280;
+      font-size: 13px;
+      margin-top: 10px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .summary .pill {
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+    }
+
+    .pill .label { color: #6b7280; font-size: 12px; }
+    .pill .value { font-weight: 700; margin-top: 2px; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <h2>Admina Bas</h2>
+
+    <div class="nav-section">
+      <a href="dashboard.html" class="nav-item">Översikt</a>
+      <a href="tidrapporter.html" class="nav-item">Tidrapporter</a>
+      <a href="planning.html" class="nav-item">Planering</a>
+      <a href="deviations.html" class="nav-item">Avvikelser</a>
+      <a href="svetsrapport.html" class="nav-item">Svetsrapport</a>
+      <a href="salary-overview.html" class="nav-item">Lönöversikt</a>
+      <a href="contacts.html" class="nav-item">Kontakter</a>
+    </div>
+
+    <div class="nav-section-title admin-only">Administration</div>
+    <a href="admin.html" class="nav-item admin-only">Attestering</a>
+    <a href="fakturering.html" class="nav-item admin-only active">Fakturering</a>
+    <a href="projects.html" class="nav-item admin-only">Projekt</a>
+    <a href="job_roles.html" class="nav-item admin-only">Yrkesroller</a>
+    <a href="material_types.html" class="nav-item admin-only">Materialtyper</a>
+    <a href="ob_settings.html" class="nav-item admin-only">OB-inställningar</a>
+    <a href="planning-admin.html" class="nav-item admin-only">Planering</a>
+    <a href="admin-users.html" class="nav-item admin-only">Användare</a>
+
+    <div class="logout" id="logoutBtn">⬅ Logga ut</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1 class="company-name">Fakturering</h1>
+        <small>Filtrera tidrapporter per kund/projekt/användare och exportera som PDF eller Fortnox-fil.</small>
+      </div>
+      <div class="welcome" id="welcomeText">Välkommen</div>
+    </div>
+
+    <section class="card">
+      <h2>Filter</h2>
+      <div class="filters">
+        <div class="field">
+          <label for="filterCustomer">Kund</label>
+          <select id="filterCustomer">
+            <option value="">Alla kunder</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterProject">Projekt</label>
+          <select id="filterProject">
+            <option value="">Alla projekt</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterSubproject">Underprojekt</label>
+          <select id="filterSubproject">
+            <option value="">Alla underprojekt</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterUser">Användare</label>
+          <select id="filterUser">
+            <option value="">Alla användare</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterFrom">Från datum</label>
+          <input type="date" id="filterFrom" />
+        </div>
+        <div class="field">
+          <label for="filterTo">Till datum</label>
+          <input type="date" id="filterTo" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-secondary" id="resetFilters">Återställ filter</button>
+        <button class="btn-primary" id="downloadPdf">Ladda ner PDF</button>
+        <button class="btn-primary" id="downloadFortnox">Exportera Fortnox-fil (CSV)</button>
+      </div>
+
+      <div class="summary" id="summaryRow">
+        <div class="pill">
+          <div class="label">Antal rader</div>
+          <div class="value" id="sumCount">0</div>
+        </div>
+        <div class="pill">
+          <div class="label">Totalt timmar</div>
+          <div class="value" id="sumHours">0.0</div>
+        </div>
+        <div class="pill">
+          <div class="label">Attesterade</div>
+          <div class="value" id="sumApproved">0</div>
+        </div>
+        <div class="pill">
+          <div class="label">Restid (h)</div>
+          <div class="value" id="sumTravel">0.0</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Underlag</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Användare</th>
+            <th>Kund</th>
+            <th>Projekt</th>
+            <th>Underprojekt</th>
+            <th>Timmar</th>
+            <th>Restid</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="invoiceTableBody"></tbody>
+      </table>
+      <div id="noRows" class="badge-empty">Ingen data matchar filtren.</div>
+    </section>
+  </main>
+
+  <script src="auth.js"></script>
+  <script>
+    const currentUser = requireLogin();
+    if (!isAdmin(currentUser)) {
+      alert("Endast admin har åtkomst till denna sida.");
+      window.location.href = "dashboard.html";
+    }
+    setupSidebarForUser(currentUser);
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("currentUser");
+      window.location.href = "login.html";
+    });
+
+    const token = localStorage.getItem("token") || "";
+    const authHeaders = token ? { Authorization: "Bearer " + token } : {};
+
+    const filterCustomer = document.getElementById("filterCustomer");
+    const filterProject = document.getElementById("filterProject");
+    const filterSubproject = document.getElementById("filterSubproject");
+    const filterUser = document.getElementById("filterUser");
+    const filterFrom = document.getElementById("filterFrom");
+    const filterTo = document.getElementById("filterTo");
+    const tableBody = document.getElementById("invoiceTableBody");
+    const noRows = document.getElementById("noRows");
+
+    const sumCount = document.getElementById("sumCount");
+    const sumHours = document.getElementById("sumHours");
+    const sumApproved = document.getElementById("sumApproved");
+    const sumTravel = document.getElementById("sumTravel");
+
+    let customers = [];
+    let projects = [];
+    let subprojects = [];
+    let users = [];
+    let reports = [];
+
+    function setSelectOptions(selectEl, items, labelFn, valueFn) {
+      const current = selectEl.value;
+      selectEl.innerHTML = selectEl.querySelector("option") ? selectEl.querySelector("option").outerHTML : '<option value=""></option>';
+      items.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = valueFn(item);
+        opt.textContent = labelFn(item);
+        selectEl.appendChild(opt);
+      });
+      if (Array.from(selectEl.options).some(o => o.value === current)) {
+        selectEl.value = current;
+      }
+    }
+
+    async function loadData() {
+      try {
+        const [custRes, projRes, subRes, userRes, reportRes] = await Promise.all([
+          fetch("/customers", { headers: authHeaders }),
+          fetch("/projects", { headers: authHeaders }),
+          fetch("/subprojects", { headers: authHeaders }),
+          fetch("/admin/users", { headers: authHeaders }),
+          fetch("/time-reports", { headers: authHeaders }),
+        ]);
+
+        customers = await custRes.json().catch(() => []);
+        projects = await projRes.json().catch(() => []);
+        subprojects = await subRes.json().catch(() => []);
+        users = await userRes.json().catch(() => []);
+        reports = await reportRes.json().catch(() => []);
+      } catch (e) {
+        console.error("Kunde inte hämta data för fakturering:", e);
+        customers = customers || [];
+        projects = projects || [];
+        subprojects = subprojects || [];
+        users = users || [];
+        reports = reports || JSON.parse(localStorage.getItem("timeReports") || "[]");
+      }
+
+      setSelectOptions(filterCustomer, customers, c => c.name || "Namnlös kund", c => c.id || "");
+      setSelectOptions(filterProject, projects, p => p.name || "Namnlöst projekt", p => p.id || "");
+      setSelectOptions(filterSubproject, subprojects, s => s.name || "Namnlöst underprojekt", s => s.id || "");
+      setSelectOptions(filterUser, users, u => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || "Användare", u => u.id || "");
+
+      render();
+    }
+
+    function dateInRange(dateStr, from, to) {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      if (from && d < new Date(from)) return false;
+      if (to && d > new Date(to)) return false;
+      return true;
+    }
+
+    function getCustomerName(projectId) {
+      const project = projects.find(p => String(p.id) === String(projectId));
+      if (!project) return "";
+      const customer = customers.find(c => String(c.id) === String(project.customer_id));
+      return customer ? customer.name : (project.customer_name || "");
+    }
+
+    function getUserName(report) {
+      if (report.user_name) return report.user_name;
+      const user = users.find(u => String(u.id) === String(report.user_id));
+      return user ? `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.email : "";
+    }
+
+    function getSubprojectName(id) {
+      const sub = subprojects.find(s => String(s.id) === String(id));
+      return sub ? sub.name : "";
+    }
+
+    function filterReports() {
+      const customerId = filterCustomer.value;
+      const projectId = filterProject.value;
+      const subprojectId = filterSubproject.value;
+      const userId = filterUser.value;
+      const from = filterFrom.value;
+      const to = filterTo.value;
+
+      return reports.filter((r) => {
+        if (projectId && String(r.project_id) !== String(projectId)) return false;
+        if (subprojectId && String(r.subproject_id) !== String(subprojectId)) return false;
+        if (userId && String(r.user_id) !== String(userId)) return false;
+        if (!dateInRange(r.datum || r.date, from, to)) return false;
+
+        if (customerId) {
+          const cName = getCustomerName(r.project_id);
+          const project = projects.find(p => String(p.id) === String(r.project_id));
+          const match = project && String(project.customer_id) === String(customerId);
+          if (!match) return false;
+        }
+        return true;
+      });
+    }
+
+    function render() {
+      const filtered = filterReports();
+      tableBody.innerHTML = "";
+
+      const totalHours = filtered.reduce((acc, r) => acc + (Number(r.timmar || r.hours || 0)), 0);
+      const totalTravel = filtered.reduce((acc, r) => acc + (Number(r.restid || 0)), 0);
+      const approved = filtered.filter((r) => (r.status || "").toLowerCase() === "attesterad").length;
+
+      sumCount.textContent = filtered.length;
+      sumHours.textContent = totalHours.toFixed(1);
+      sumTravel.textContent = totalTravel.toFixed(1);
+      sumApproved.textContent = approved;
+
+      if (!filtered.length) {
+        noRows.style.display = "block";
+        return;
+      }
+      noRows.style.display = "none";
+
+      filtered.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.datum || r.date || "-"}</td>
+          <td>${getUserName(r) || "-"}</td>
+          <td>${getCustomerName(r.project_id) || "-"}</td>
+          <td>${projects.find(p => String(p.id) === String(r.project_id))?.name || "-"}</td>
+          <td>${getSubprojectName(r.subproject_id) || "-"}</td>
+          <td>${Number(r.timmar || r.hours || 0).toFixed(1)}</td>
+          <td>${Number(r.restid || 0).toFixed(1)}</td>
+          <td>${r.status || "-"}</td>
+        `;
+        tableBody.appendChild(tr);
+      });
+    }
+
+    function toCSV(rows) {
+      const headers = ["datum","användare","kund","projekt","underprojekt","timmar","restid","status"];
+      const lines = [headers.join(";")];
+      rows.forEach((r) => {
+        const line = [
+          r.datum || r.date || "",
+          `"${getUserName(r) || ""}"`,
+          `"${getCustomerName(r.project_id) || ""}"`,
+          `"${projects.find(p => String(p.id) === String(r.project_id))?.name || ""}"`,
+          `"${getSubprojectName(r.subproject_id) || ""}"`,
+          Number(r.timmar || r.hours || 0).toFixed(2),
+          Number(r.restid || 0).toFixed(2),
+          r.status || ""
+        ].join(";");
+        lines.push(line);
+      });
+      return lines.join("\n");
+    }
+
+    document.getElementById("resetFilters").addEventListener("click", () => {
+      filterCustomer.value = "";
+      filterProject.value = "";
+      filterSubproject.value = "";
+      filterUser.value = "";
+      filterFrom.value = "";
+      filterTo.value = "";
+      render();
+    });
+
+    document.getElementById("downloadFortnox").addEventListener("click", () => {
+      const filtered = filterReports();
+      if (!filtered.length) {
+        alert("Inget att exportera.");
+        return;
+      }
+      const csv = toCSV(filtered);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "fortnox_underlag.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("downloadPdf").addEventListener("click", () => {
+      window.print(); // använd "Spara som PDF" i dialogen
+    });
+
+    [filterCustomer, filterProject, filterSubproject, filterUser, filterFrom, filterTo].forEach((el) => {
+      el.addEventListener("change", render);
+    });
+
+    // Uppdatera subprojektlista baserat på projekt
+    filterProject.addEventListener("change", () => {
+      const pid = filterProject.value;
+      const filteredSubs = pid ? subprojects.filter(s => String(s.project_id) === String(pid)) : subprojects;
+      setSelectOptions(filterSubproject, filteredSubs, s => s.name || "Underprojekt", s => s.id || "");
+      render();
+    });
+
+    loadData();
+  </script>
+</body>
+</html>

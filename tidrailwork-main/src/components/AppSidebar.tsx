@@ -60,6 +60,7 @@ const adminMainItems = [
   { title: "Admin Panel", url: "/admin/dashboard", icon: Shield },
   { title: "Statistik", url: "/admin/statistics", icon: BarChart3 },
   { title: "Attestering", url: "/admin/attestations", icon: CheckSquare },
+  { title: "Fakturering", url: "/admin/billing", icon: FileText },
   { title: "Löner", url: "/admin/salaries", icon: Wallet },
   { title: "Svetsrapporter", url: "/admin/welding-reports", icon: Briefcase },
   { title: "Planering", url: "/admin/planning", icon: Calendar },
