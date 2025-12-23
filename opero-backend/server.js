@@ -1505,6 +1505,9 @@ app.post("/time-entries", requireAuth, (req, res) => {
   const {
     date, // maps to datum
     hours, // maps to timmar
+    start_time,
+    end_time,
+    break_minutes = 0,
     job_role_id,
     project_id,
     subproject_id,
@@ -1517,7 +1520,27 @@ app.post("/time-entries", requireAuth, (req, res) => {
   } = req.body || {};
 
   if (!date) return res.status(400).json({ error: "date required" });
-  if (hours == null) return res.status(400).json({ error: "hours required" });
+
+  const calcHours = () => {
+    if (!start_time || !end_time) return null;
+    const [sH, sM] = start_time.split(":").map(Number);
+    const [eH, eM] = end_time.split(":").map(Number);
+    if ([sH, sM, eH, eM].some((v) => Number.isNaN(v))) return null;
+    const startDate = new Date();
+    startDate.setHours(sH, sM, 0, 0);
+    const endDate = new Date();
+    endDate.setHours(eH, eM, 0, 0);
+    if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+    const totalMinutes = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60));
+    const effectiveBreak = Math.max(0, Math.min(Number(break_minutes) || 0, totalMinutes));
+    const workMinutes = Math.max(0, totalMinutes - effectiveBreak);
+    return workMinutes > 0 ? workMinutes / 60 : 0;
+  };
+
+  const hoursValue = hours != null ? Number(hours) : calcHours();
+  if (hoursValue == null || Number.isNaN(hoursValue) || hoursValue <= 0) {
+    return res.status(400).json({ error: "hours required" });
+  }
 
   // Validate target user belongs to the scoped company
   db.get("SELECT company_id FROM users WHERE id = ?", [userId], (uErr, uRow) => {
@@ -1543,9 +1566,9 @@ app.post("/time-entries", requireAuth, (req, res) => {
           userId,
           null,
           date,
-          null,
-          null,
-          Number(hours),
+          start_time || null,
+          end_time || null,
+          Number(hoursValue),
           project_id || null,
           subproject_id || null,
           job_role_id || null,
@@ -1659,6 +1682,8 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
       const {
         date,
         hours,
+        start_time,
+        end_time,
         job_role_id,
         project_id,
         subproject_id,
@@ -1668,10 +1693,29 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         allowance_amount
       } = req.body || {};
 
+      // If hours missing but start/end provided, calculate hours
+      let normalizedHours = hours;
+      if ((hours === undefined || hours === null) && start_time && end_time) {
+        const [sH, sM] = start_time.split(":").map(Number);
+        const [eH, eM] = end_time.split(":").map(Number);
+        if (![sH, sM, eH, eM].some((v) => Number.isNaN(v))) {
+          const startDate = new Date();
+          startDate.setHours(sH, sM, 0, 0);
+          const endDate = new Date();
+          endDate.setHours(eH, eM, 0, 0);
+          if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+          const minutes = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60));
+          normalizedHours = minutes > 0 ? minutes / 60 : null;
+        }
+      }
+      normalizedHours = normalizedHours != null ? Number(normalizedHours) : null;
+
       function performUpdate() {
         db.run(
           `UPDATE time_reports SET
             datum = COALESCE(?, datum),
+            starttid = COALESCE(?, starttid),
+            sluttid = COALESCE(?, sluttid),
             timmar = COALESCE(?, timmar),
             job_role_id = COALESCE(?, job_role_id),
             project_id = COALESCE(?, project_id),
@@ -1683,7 +1727,9 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
           WHERE id = ?`,
           [
             date ?? null,
-            hours ?? null,
+            start_time ?? null,
+            end_time ?? null,
+            normalizedHours ?? null,
             job_role_id ?? null,
             project_id ?? null,
             subproject_id ?? null,

@@ -4,7 +4,6 @@ import { AppSidebar } from "./AppSidebar";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Train } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 
 interface LayoutProps {
   children: ReactNode;
@@ -15,20 +14,14 @@ export const Layout = ({ children }: LayoutProps) => {
   const [fullName, setFullName] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchUserName = async () => {
-      if (user?.id) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle();
-        if (data) {
-          setFullName(data.full_name);
-        }
-      }
-    };
-    fetchUserName();
-  }, [user?.id]);
+    if (user?.full_name) {
+      setFullName(user.full_name);
+    } else if (user?.email) {
+      setFullName(user.email);
+    } else {
+      setFullName(null);
+    }
+  }, [user?.id, user?.full_name, user?.email]);
 
   return (
     <SidebarProvider>

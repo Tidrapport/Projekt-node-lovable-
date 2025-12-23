@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, AlertTriangle, Briefcase, Calendar } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { format, startOfMonth, startOfWeek, endOfWeek, endOfMonth } from "date-fns";
 import { calculateOBDistribution } from "@/lib/obDistribution";
+import { apiFetch } from "@/api/client";
 
 const Dashboard = () => {
   const { effectiveUserId, isImpersonating, impersonatedUserName } = useEffectiveUser();
@@ -48,12 +48,12 @@ const Dashboard = () => {
       const monthEnd = format(endOfMonth(new Date()), "yyyy-MM-dd");
 
       // Fetch user profile with hourly wage
-      const profileData = await apiFetch(`/profiles/${effectiveUserId}`);
+      const profileData = await apiFetch(`/profiles/${effectiveUserId}`).catch(() => null);
       if (profileData) setHourlyWage(profileData.hourly_wage || 0);
 
       // Fetch OB multipliers
-      const obData = await apiFetch(`/shift_types_config`);
-      if (obData) {
+      const obData = await apiFetch(`/shift_types_config`).catch(() => null);
+      if (obData && Array.isArray(obData)) {
         const multipliers = {
           day: obData.find((o: any) => o.shift_type === "day")?.multiplier || 1.0,
           evening: obData.find((o: any) => o.shift_type === "evening")?.multiplier || 1.29,
@@ -63,21 +63,20 @@ const Dashboard = () => {
         setObMultipliers(multipliers);
       }
 
-      // Get today's hours
-      const todayData = await apiFetch(`/time-entries?user_id=${effectiveUserId}&date=${today}`);
+      const todayQs = `user_id=${effectiveUserId}&from=${today}&to=${today}`;
+      const weekQs = `user_id=${effectiveUserId}&from=${weekStart}&to=${weekEnd}`;
+      const monthQs = `user_id=${effectiveUserId}&from=${monthStart}&to=${monthEnd}`;
 
-      // Get week hours
-      const weekData = await apiFetch(`/time-entries?user_id=${effectiveUserId}&gte=${weekStart}&lte=${weekEnd}`);
+      const todayData = await apiFetch(`/time-entries?${todayQs}`).catch(() => []);
+      const weekData = await apiFetch(`/time-entries?${weekQs}`).catch(() => []);
+      const monthData = await apiFetch(`/time-entries?${monthQs}`).catch(() => []);
 
-      // Get month hours
-      const monthData = await apiFetch(`/time-entries?user_id=${effectiveUserId}&gte=${monthStart}&lte=${monthEnd}`);
+      const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}&status=open`).catch(
+        () => []
+      );
+      const count = Array.isArray(deviationsData) ? deviationsData.length : 0;
 
-      // Get open deviations
-      const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}&status=open`);
-      const count = deviationsData?.length || 0;
-
-      // Get current month time entries with detailed time information (to match monthHours and SalaryOverview)
-      const allTimeEntries = await apiFetch(`/time-entries?user_id=${effectiveUserId}&gte=${monthStart}&lte=${monthEnd}`);
+      const allTimeEntries = await apiFetch(`/time-entries?${monthQs}`).catch(() => []);
 
       // Calculate shift type distribution, travel compensation, and per diem
       const shiftTotals = {
@@ -97,11 +96,11 @@ const Dashboard = () => {
       // Track per diem by date (max one per day)
       const perDiemByDate: Record<string, string> = {};
 
-      allTimeEntries?.forEach((entry) => {
+      (allTimeEntries || []).forEach((entry: any) => {
         const distribution = calculateOBDistribution(
-          entry.date,
-          entry.start_time,
-          entry.end_time,
+          entry.date || today,
+          entry.start_time || "00:00",
+          entry.end_time || "00:00",
           entry.break_minutes || 0
         );
 
@@ -162,12 +161,13 @@ const Dashboard = () => {
         }
       });
 
+      const safeReduce = (arr: any[] | undefined) =>
+        (arr || []).reduce((sum, entry: any) => sum + (Number(entry.total_hours) || 0), 0);
+
       setStats({
-        todayHours:
-          todayData?.reduce((sum, entry) => sum + Number(entry.total_hours), 0) || 0,
-        weekHours: weekData?.reduce((sum, entry) => sum + Number(entry.total_hours), 0) || 0,
-        monthHours:
-          monthData?.reduce((sum, entry) => sum + Number(entry.total_hours), 0) || 0,
+        todayHours: safeReduce(todayData),
+        weekHours: safeReduce(weekData),
+        monthHours: safeReduce(monthData),
         openDeviations: count || 0,
       });
 

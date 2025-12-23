@@ -18,9 +18,14 @@ type RawTimeEntry = {
   starttid?: string | null;
   sluttid?: string | null;
   timmar?: number | string | null;
+  restid?: number | string | null;
   project_id?: number | string | null;
   subproject_id?: number | string | null;
   job_role_id?: number | string | null;
+  shift_type?: string | null;
+  break_minutes?: number | string | null;
+  traktamente_type?: string | null;
+  traktamente_amount?: number | string | null;
   comment?: string | null;
   status?: string | null;
   attested_by?: number | string | null;
@@ -38,6 +43,11 @@ export type TimeEntry = {
   start_time: string;
   end_time: string;
   total_hours: number;
+  break_minutes: number;
+  shift_type?: string | null;
+  per_diem_type?: string | null;
+  per_diem_amount?: number | null;
+  travel_time_hours?: number;
   project_id: string;
   subproject_id: string | null;
   job_role_id: string | null;
@@ -68,6 +78,7 @@ type CreatePayload = {
   user_id?: string | number;
   date: string;
   hours: number;
+  break_minutes?: number;
   project_id?: string;
   subproject_id?: string;
   job_role_id?: string;
@@ -101,6 +112,11 @@ const toTimeEntry = (raw: RawTimeEntry): TimeEntry => ({
   subproject_id: raw.subproject_id != null ? String(raw.subproject_id) : null,
   job_role_id: raw.job_role_id != null ? String(raw.job_role_id) : null,
   work_description: raw.comment || "",
+  break_minutes: raw.break_minutes != null ? Number(raw.break_minutes) : 0,
+  shift_type: raw.shift_type ?? null,
+  per_diem_type: raw.traktamente_type ?? null,
+  per_diem_amount: raw.traktamente_amount != null ? Number(raw.traktamente_amount) : null,
+  travel_time_hours: raw.restid != null ? Number(raw.restid) : 0,
   status: raw.status || null,
   attested_by: raw.attested_by != null ? String(raw.attested_by) : null,
   attested_at: raw.attested_at || null,
@@ -128,6 +144,9 @@ export async function createTimeEntry(payload: CreatePayload) {
     user_id: payload.user_id,
     date: payload.date,
     hours: payload.hours,
+    break_minutes: payload.break_minutes,
+    start_time: payload.start_time,
+    end_time: payload.end_time,
     job_role_id: payload.job_role_id || null,
     project_id: payload.project_id || null,
     subproject_id: payload.subproject_id || null,
@@ -149,6 +168,9 @@ export async function updateTimeEntry(id: string | number, payload: UpdatePayloa
   const body: any = {
     date: payload.date,
     hours: payload.hours,
+    break_minutes: payload.break_minutes,
+    start_time: payload.start_time,
+    end_time: payload.end_time,
     job_role_id: payload.job_role_id || null,
     project_id: payload.project_id || null,
     subproject_id: payload.subproject_id || null,

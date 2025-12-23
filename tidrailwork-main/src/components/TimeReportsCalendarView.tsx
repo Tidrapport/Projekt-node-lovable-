@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { format, isSameDay, isWithinInterval, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/api/client";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 
 interface TimeEntry {
@@ -38,19 +38,15 @@ export const TimeReportsCalendarView = ({ entries, onDateSelect }: TimeReportsCa
   useEffect(() => {
     const fetchAssignments = async () => {
       if (!effectiveUserId) return;
-      
-      const { data } = await supabase
-        .from("scheduled_assignments")
-        .select(`
-          id,
-          start_date,
-          end_date,
-          is_tentative,
-          project:projects(name)
-        `)
-        .eq("user_id", effectiveUserId);
-      
-      if (data) setAssignments(data as ScheduledAssignment[]);
+
+      try {
+        // Backend endpoint for plans/scheduled assignments is not defined yet;
+        // fall back to an empty list to avoid Supabase dependency.
+        const data = await apiFetch<ScheduledAssignment[]>(`/planning?user_id=${effectiveUserId}`).catch(() => []);
+        if (Array.isArray(data)) setAssignments(data);
+      } catch {
+        setAssignments([]);
+      }
     };
     
     fetchAssignments();

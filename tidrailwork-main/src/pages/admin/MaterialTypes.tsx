@@ -7,7 +7,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Package, Plus, Trash2 } from "lucide-react";
@@ -35,12 +34,12 @@ const AdminMaterialTypes = () => {
   }, []);
 
   const fetchMaterialTypes = async () => {
-    const { data } = await supabase
-      .from("material_types")
-      .select("*")
-      .order("name");
-
-    if (data) setMaterialTypes(data);
+    try {
+      const data = await apiFetch<MaterialType[]>("/material-types?active=true");
+      setMaterialTypes(data || []);
+    } catch {
+      setMaterialTypes([]);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,15 +47,10 @@ const AdminMaterialTypes = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.from("material_types").insert({
-        name,
-        description,
-        unit,
-        active: true,
-        company_id: companyId,
-      } as any);
-
-      if (error) throw error;
+      await apiFetch("/material-types", {
+        method: "POST",
+        json: { name, description, unit, active: true, company_id: companyId },
+      });
 
       toast.success("Tillägg skapat!");
       setShowDialog(false);
@@ -72,30 +66,22 @@ const AdminMaterialTypes = () => {
   };
 
   const toggleActive = async (id: string, active: boolean) => {
-    const { error } = await supabase
-      .from("material_types")
-      .update({ active: !active })
-      .eq("id", id);
-
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await apiFetch(`/material-types/${id}`, { method: "PUT", json: { active: !active } });
       toast.success(active ? "Tillägg inaktiverat" : "Tillägg aktiverat");
       fetchMaterialTypes();
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte uppdatera");
     }
   };
 
   const deleteMaterialType = async (id: string) => {
-    const { error } = await supabase
-      .from("material_types")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await apiFetch(`/material-types/${id}`, { method: "DELETE" });
       toast.success("Tillägg borttaget");
       fetchMaterialTypes();
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte ta bort");
     }
   };
 

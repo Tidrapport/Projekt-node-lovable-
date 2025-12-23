@@ -1,6 +1,5 @@
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -15,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
+import { apiFetch } from "@/api/client";
 
 const SalaryOverview = () => {
   const { effectiveUserId, isImpersonating, impersonatedUserName } = useEffectiveUser();
@@ -26,14 +26,8 @@ const SalaryOverview = () => {
   const { data: profile } = useQuery({
     queryKey: ["profile", effectiveUserId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("hourly_wage, tax_table, full_name")
-        .eq("id", effectiveUserId)
-        .single();
-
-      if (error) throw error;
-      return data;
+      const data = await apiFetch(`/admin/users/${effectiveUserId}`).catch(() => null);
+      return data || { hourly_wage: 0, tax_table: 30, full_name: "" };
     },
     enabled: !!effectiveUserId,
   });
@@ -41,35 +35,19 @@ const SalaryOverview = () => {
   const { data: shiftMultipliers } = useQuery({
     queryKey: ["shift-multipliers"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("shift_types_config")
-        .select("*");
-
-      if (error) throw error;
-      return data.reduce((acc, config) => {
-        acc[config.shift_type] = config.multiplier;
-        return acc;
-      }, {} as Record<string, number>);
+      // Node-backend har inte detta än: använd 1x för alla skift
+      return { day: 1, evening: 1, night: 1, weekend: 1 } as Record<string, number>;
     },
   });
 
   const { data: timeEntries = [] } = useQuery({
     queryKey: ["time-entries", effectiveUserId, startDate, endDate],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("time_entries")
-        .select(`
-          *,
-          project:projects(name),
-          subproject:subprojects(name),
-          job_role:job_roles(name)
-        `)
-        .eq("user_id", effectiveUserId)
-        .gte("date", format(startDate, "yyyy-MM-dd"))
-        .lte("date", format(endDate, "yyyy-MM-dd"))
-        .order("date", { ascending: false });
-
-      if (error) throw error;
+      const qs = new URLSearchParams();
+      qs.set("user_id", String(effectiveUserId));
+      qs.set("from", format(startDate, "yyyy-MM-dd"));
+      qs.set("to", format(endDate, "yyyy-MM-dd"));
+      const data = await apiFetch(`/time-entries?${qs.toString()}`).catch(() => []);
       return data;
     },
     enabled: !!effectiveUserId,

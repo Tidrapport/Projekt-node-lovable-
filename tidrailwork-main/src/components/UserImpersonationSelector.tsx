@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useImpersonation } from "@/contexts/ImpersonationContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Eye } from "lucide-react";
+import { apiFetch } from "@/api/client";
 
 export const UserImpersonationSelector = () => {
   const { companyId, isAdmin } = useAuth();
@@ -12,14 +12,8 @@ export const UserImpersonationSelector = () => {
   const { data: users = [] } = useQuery({
     queryKey: ["company-users", companyId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .eq("company_id", companyId)
-        .order("full_name");
-
-      if (error) throw error;
-      return data;
+      const data = await apiFetch(`/admin/users?company_id=${companyId}`);
+      return data || [];
     },
     enabled: !!companyId && isAdmin,
   });

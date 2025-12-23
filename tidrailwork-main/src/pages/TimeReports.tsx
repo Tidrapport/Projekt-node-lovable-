@@ -242,6 +242,7 @@ const TimeReports = () => {
         user_id: effectiveUserId,
         date,
         hours: totalHours,
+        break_minutes: parseInt(breakMinutes),
         project_id: projectId,
         subproject_id: subprojectId || undefined,
         job_role_id: jobRoleId || undefined,
@@ -326,6 +327,7 @@ const TimeReports = () => {
       await updateTimeEntry(editingEntry.id, {
         date,
         hours: totalHours,
+        break_minutes: parseInt(breakMinutes),
         project_id: projectId,
         subproject_id: subprojectId || undefined,
         job_role_id: jobRoleId || undefined,

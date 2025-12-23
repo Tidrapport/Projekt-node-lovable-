@@ -30,9 +30,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { apiFetch } from "@/api/client";
 
 interface TimeEntry {
   id: string;
@@ -83,6 +83,8 @@ const Billing = () => {
   const [projectId, setProjectId] = useState<string>("all");
   const [subprojectId, setSubprojectId] = useState<string>("all");
   const [userId, setUserId] = useState<string>("all");
+  const [invoiceStatus, setInvoiceStatus] = useState<string>("all");
+  const [attestStatus, setAttestStatus] = useState<string>("all");
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
 
@@ -93,28 +95,33 @@ const Billing = () => {
 
   const fetchData = async () => {
     try {
-      const [{ data: entryData, error: entryError }, { data: customerData }, { data: projectData }, { data: subprojectData }, { data: userData }] =
-        await Promise.all([
-          supabase
-            .from("time_entries")
-            .select(
-              `
-                *,
-                project:projects(id, name, customer_id, customer_name),
-                subproject:subprojects(id, name, project_id),
-                profiles:profiles!time_entries_user_id_fkey(id, full_name)
-              `
-            )
-            .order("date", { ascending: false }),
-          supabase.from("customers").select("id, name").order("name"),
-          supabase.from("projects").select("id, name, customer_id, customer_name").order("name"),
-          supabase.from("subprojects").select("id, name, project_id").order("name"),
-          supabase.from("profiles").select("id, full_name").order("full_name"),
-        ]);
+      const [entryData, customerData, projectData, subprojectData, userData] = await Promise.all([
+        apiFetch<any[]>("/time-entries?include_materials=true"),
+        apiFetch<Customer[]>("/customers"),
+        apiFetch<Project[]>("/projects?active=true"),
+        apiFetch<Subproject[]>("/subprojects?active=true"),
+        apiFetch<UserProfile[]>("/admin/users"),
+      ]);
 
-      if (entryError) throw entryError;
+      const normalized = (entryData || []).map((e) => ({
+        id: String(e.id),
+        date: e.datum || e.date || "",
+        total_hours: e.timmar != null ? Number(e.timmar) : Number(e.total_hours) || 0,
+        travel_time_hours: e.restid != null ? Number(e.restid) : Number(e.travel_time_hours) || 0,
+        attested_by: e.attested_by != null ? String(e.attested_by) : null,
+        invoiced: e.invoiced ?? false,
+        project_id: e.project_id != null ? String(e.project_id) : null,
+        subproject_id: e.subproject_id != null ? String(e.subproject_id) : null,
+        user_id: e.user_id != null ? String(e.user_id) : "",
+        project:
+          e.project_name || e.customer_name
+            ? { id: String(e.project_id || ""), name: e.project_name || "", customer_id: e.customer_id, customer_name: e.customer_name }
+            : e.project,
+        subproject: e.subproject_name ? { id: String(e.subproject_id || ""), name: e.subproject_name, project_id: e.project_id } : e.subproject,
+        profiles: e.user_full_name ? { id: String(e.user_id || ""), full_name: e.user_full_name } : e.profiles,
+      })) as TimeEntry[];
 
-      setEntries(entryData || []);
+      setEntries(normalized);
       setCustomers(customerData || []);
       setProjects(projectData || []);
       setSubprojects(subprojectData || []);
@@ -143,9 +150,22 @@ const Billing = () => {
       if (projectId !== "all" && entry.project_id !== projectId) return false;
       if (subprojectId !== "all" && entry.subproject_id !== subprojectId) return false;
       if (userId !== "all" && entry.user_id !== userId) return false;
+      if (attestStatus === "attested" && !entry.attested_by) return false;
+      if (attestStatus === "not_attested" && entry.attested_by) return false;
+      if (invoiceStatus === "invoiced" && !(entry as any).invoiced) return false;
+      if (invoiceStatus === "not_invoiced" && (entry as any).invoiced) return false;
+      if (attestStatus === "attested" && !entry.attested_by) return false;
+      if (attestStatus === "not_attested" && entry.attested_by) return false;
+      if (invoiceStatus === "invoiced" && !(entry as any).invoiced) return false;
+      if (invoiceStatus === "not_invoiced" && (entry as any).invoiced) return false;
 
-      if (fromDate && new Date(entry.date) < new Date(fromDate)) return false;
-      if (toDate && new Date(entry.date) > new Date(toDate)) return false;
+      const d = entry.date ? new Date(entry.date) : null;
+      const fromD = fromDate ? new Date(fromDate) : null;
+      const toD = toDate ? new Date(toDate) : null;
+      if (d && !Number.isNaN(d.getTime())) {
+        if (fromD && !Number.isNaN(fromD.getTime()) && d < fromD) return false;
+        if (toD && !Number.isNaN(toD.getTime()) && d > toD) return false;
+      }
 
       return true;
     });
@@ -158,14 +178,19 @@ const Billing = () => {
     return { hours, travel, attested, count: filteredEntries.length };
   }, [filteredEntries]);
 
-  const getProjectName = (entry: TimeEntry) => entry.project?.name || "–";
-  const getSubprojectName = (entry: TimeEntry) => entry.subproject?.name || "–";
+  const getProjectName = (entry: TimeEntry) => entry.project?.name || (entry as any).project_name || "–";
+  const getSubprojectName = (entry: TimeEntry) => entry.subproject?.name || (entry as any).subproject_name || "–";
   const getCustomerName = (entry: TimeEntry) => {
     if (entry.project?.customer_name) return entry.project.customer_name;
-    const projCustomer = customers.find((c) => c.id === entry.project?.customer_id);
+    const projCustomer = customers.find((c) => c.id === (entry.project?.customer_id || (entry as any).customer_id));
     return projCustomer?.name || "–";
   };
-  const getUserName = (entry: TimeEntry) => entry.profiles?.full_name || "–";
+  const getUserName = (entry: TimeEntry) => entry.profiles?.full_name || (entry as any).user_full_name || "–";
+  const safeFormatDate = (dateStr: string) => {
+    const d = dateStr ? new Date(dateStr) : null;
+    if (d && !Number.isNaN(d.getTime())) return format(d, "yyyy-MM-dd");
+    return dateStr || "";
+  };
 
   const exportCSV = () => {
     if (!filteredEntries.length) {
@@ -215,7 +240,7 @@ const Billing = () => {
       startY: 34,
       head: [["Datum", "Användare", "Kund", "Projekt", "Underprojekt", "Timmar", "Restid", "Status"]],
       body: filteredEntries.map((e) => [
-        format(new Date(e.date), "yyyy-MM-dd"),
+        safeFormatDate(e.date),
         getUserName(e),
         getCustomerName(e),
         getProjectName(e),
@@ -343,12 +368,42 @@ const Billing = () => {
           </div>
 
           <div className="space-y-2">
+            <Label>Atteststatus</Label>
+            <Select value={attestStatus} onValueChange={setAttestStatus}>
+              <SelectTrigger>
+                <SelectValue placeholder="Alla" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla</SelectItem>
+                <SelectItem value="attested">Attesterade</SelectItem>
+                <SelectItem value="not_attested">Ej attesterade</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Fakturering</Label>
+            <Select value={invoiceStatus} onValueChange={setInvoiceStatus}>
+              <SelectTrigger>
+                <SelectValue placeholder="Alla" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla</SelectItem>
+                <SelectItem value="invoiced">Fakturerade</SelectItem>
+                <SelectItem value="not_invoiced">Ej fakturerade</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
             <Label className="sr-only">Reset</Label>
             <Button variant="outline" className="w-full" onClick={() => {
               setCustomerId("all");
               setProjectId("all");
               setSubprojectId("all");
               setUserId("all");
+              setInvoiceStatus("all");
+              setAttestStatus("all");
               setFromDate("");
               setToDate("");
             }}>
