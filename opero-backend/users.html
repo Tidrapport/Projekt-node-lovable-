@@ -239,7 +239,7 @@
   <main class="main">
     <div class="topbar">
       <div>
-        <h1>Rail Work AB</h1>
+        <h1 class="company-name">Rail Work AB</h1>
         <small>Användare – lägg till, ge roller och hantera inloggningar</small>
       </div>
       <div class="welcome" id="welcomeText">Välkommen</div>
@@ -319,6 +319,7 @@
 
     const logoutBtn = document.getElementById("logoutBtn");
     const welcomeText = document.getElementById("welcomeText");
+    const companyName = localStorage.getItem("company_name") || "";
 
     const currentUserRaw = localStorage.getItem("currentUser");
     if (!currentUserRaw) {
@@ -332,11 +333,17 @@
       window.location.href = "dashboard.html";
     }
 
+    if (companyName) {
+      document.querySelectorAll(".company-name").forEach((el) => {
+        el.textContent = companyName;
+      });
+    }
+
     // Visa namn/e‑post uppe till höger
-    welcomeText.textContent =
-      currentUser.firstName
-        ? `Välkommen, ${currentUser.firstName}`
-        : `Välkommen, ${currentUser.email}`;
+    const userLabel = currentUser.firstName ? currentUser.firstName : currentUser.email;
+    welcomeText.textContent = companyName
+      ? `Välkommen, ${userLabel} · ${companyName}`
+      : `Välkommen, ${userLabel}`;
 
     // Dölj admin-delar för icke-admin (ifall man manipulerar DOM)
     document.querySelectorAll(".admin-only").forEach(el => {

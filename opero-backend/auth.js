@@ -51,6 +51,12 @@ function setCurrentUser(user) {
 
   // Spara full user från backend
   localStorage.setItem("currentUser", JSON.stringify(user));
+  if (user.company_id) {
+    localStorage.setItem("company_id", user.company_id);
+  }
+  if (user.company_name) {
+    localStorage.setItem("company_name", user.company_name);
+  }
 
   // Extra fält för äldre sidor
   const name =
@@ -106,6 +112,75 @@ function isAdmin(user) {
   return user && user.role === "admin";
 }
 
+function getCompanyNameFromStorage() {
+  return localStorage.getItem("company_name") || "";
+}
+
+function applyCompanyBranding(companyName) {
+  if (!companyName) return;
+  localStorage.setItem("company_name", companyName);
+
+  document.querySelectorAll(".company-name").forEach((el) => {
+    el.textContent = companyName;
+  });
+
+  // uppdatera sidtitel om den använder "–"
+  if (document.title.includes("–")) {
+    const parts = document.title.split("–");
+    if (parts.length >= 2) {
+      parts[0] = `${companyName} `;
+      document.title = parts.join("–");
+    }
+  }
+}
+
+function getUserDisplayName(user) {
+  return (
+    (user.first_name || user.firstName || "") +
+    ((user.last_name || user.lastName) ? " " + (user.last_name || user.lastName) : "")
+  ).trim();
+}
+
+function applyWelcomeText(user, companyName) {
+  const welcomeEls = document.querySelectorAll("#welcomeText, .welcome");
+  const label = getUserDisplayName(user) || user.email || "";
+  if (!label && !companyName) return;
+
+  const companyLabel = companyName || getCompanyNameFromStorage();
+  const welcome = label ? `Välkommen, ${label}` : "Välkommen";
+  const full = companyLabel ? `${welcome} · ${companyLabel}` : welcome;
+
+  welcomeEls.forEach((el) => {
+    el.textContent = full;
+  });
+}
+
+async function refreshCompanyNameFromApi() {
+  const token = localStorage.getItem("token");
+  const companyId = localStorage.getItem("company_id");
+  if (!token || !companyId) return null;
+
+  try {
+    const res = await fetch("/companies", {
+      headers: { Authorization: "Bearer " + token }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) return null;
+
+    const match = data.find((c) => String(c.id) === String(companyId)) || data[0];
+    if (match?.name) {
+      applyCompanyBranding(match.name);
+      const user = getCurrentUser();
+      if (user) applyWelcomeText(user, match.name);
+      return match.name;
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
 // ------------------------------------------------------
 // Meny & header (vänstersida + välkomsttext)
 // ------------------------------------------------------
@@ -120,18 +195,10 @@ function setupSidebarForUser(user) {
     });
   }
 
-  // Sätt välkomsttext
-  const welcomeEls = document.querySelectorAll("#welcomeText, .welcome");
-  const name =
-    (user.first_name || user.firstName || "") +
-    ((user.last_name || user.lastName) ? " " + (user.last_name || user.lastName) : "");
-  const label = name.trim() || user.email || "";
-
-  if (label) {
-    welcomeEls.forEach((el) => {
-      el.textContent = "Välkommen, " + label;
-    });
-  }
+  const companyName = getCompanyNameFromStorage();
+  applyCompanyBranding(companyName);
+  applyWelcomeText(user, companyName);
+  refreshCompanyNameFromApi();
 }
 
 // ------------------------------------------------------

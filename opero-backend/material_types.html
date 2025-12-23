@@ -205,7 +205,7 @@
   <main class="main">
     <div class="topbar">
       <div>
-        <h1>Rail Work AB</h1>
+        <h1 class="company-name">Rail Work AB</h1>
         <small>Materialtyper – förbrukningsmaterial som kan väljas i tidrapport</small>
       </div>
       <div class="welcome" id="welcomeText">Välkommen</div>
@@ -267,6 +267,9 @@
     }
     setupSidebarForUser(currentUser);
 
+    const token = localStorage.getItem("token") || "";
+    const authHeaders = token ? { Authorization: "Bearer " + token } : {};
+
     document.getElementById("logoutBtn").addEventListener("click", () => {
       localStorage.clear();
       window.location.href = "login.html";
@@ -281,7 +284,7 @@
     async function loadMaterials() {
       materialsBody.innerHTML = "";
       try {
-        const res = await fetch("/material-types");
+        const res = await fetch("/material-types", { headers: authHeaders });
         const materials = await res.json();
 
         if (!materials.length) {
@@ -310,7 +313,7 @@
             const id = btn.getAttribute("data-id");
             if (!confirm("Ta bort materialtypen?")) return;
             try {
-              const res = await fetch("/material-types/" + id, { method: "DELETE" });
+              const res = await fetch("/material-types/" + id, { method: "DELETE", headers: authHeaders });
               const data = await res.json().catch(() => ({}));
               if (!res.ok) {
                 alert(data.error || "Kunde inte ta bort materialtyp.");
@@ -342,7 +345,7 @@
       try {
         const res = await fetch("/material-types", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({ name, unit })
         });
 

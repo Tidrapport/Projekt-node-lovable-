@@ -83,6 +83,10 @@ function isAdminRole(req) {
   return role === "admin" || role === "super_admin";
 }
 
+function getAuthUserId(req) {
+  return req.user?.user_id ?? req.user?.id ?? null;
+}
+
 // Test-route
 app.get("/", (req, res) => {
   res.send("Opero backend är igång!");
@@ -182,12 +186,23 @@ app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
   );
 });
 
-// Uppdatera företag (superadmin)
-app.put("/companies/:id", requireAuth, requireSuperAdmin, (req, res) => {
+// Uppdatera företag (superadmin valfritt, admin endast sitt företag)
+app.put("/companies/:id", requireAuth, (req, res) => {
   const { id } = req.params;
   const { name, billing_email, code } = req.body || {};
+  const role = (req.user.role || "").toLowerCase();
+  const isSuper = role === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+
+  if (!isSuper) {
+    if (!scopedCompanyId || String(scopedCompanyId) !== String(id)) {
+      return res.status(403).json({ error: "Admin kan bara uppdatera sitt eget företag" });
+    }
+  }
+
   const fields = [];
   const params = [];
+
   if (name !== undefined) {
     fields.push("name = ?");
     params.push(String(name).trim());
@@ -197,9 +212,13 @@ app.put("/companies/:id", requireAuth, requireSuperAdmin, (req, res) => {
     params.push(billing_email ? String(billing_email).trim() : null);
   }
   if (code !== undefined) {
+    if (!isSuper) {
+      return res.status(403).json({ error: "Endast superadmin kan ändra företagskod" });
+    }
     fields.push("code = ?");
     params.push(String(code).trim());
   }
+
   if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
   params.push(id);
 
@@ -1216,10 +1235,14 @@ app.post("/plans", requireAdmin, (req, res) => {
 //   YRKESROLLER (job_roles)
 // =========================
 
-// Hämta alla yrkesroller – används av både admin & tidrapport
-app.get("/job-roles", (req, res) => {
+// Hämta alla yrkesroller – används av både admin & tidrapport (företagsscope)
+app.get("/job-roles", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
   db.all(
-    `SELECT id, name FROM job_roles ORDER BY name`,
+    `SELECT id, name FROM job_roles WHERE company_id = ? ORDER BY name`,
+    [companyId],
     (err, rows) => {
       if (err) {
         console.error("DB-fel vid GET /job-roles:", err);
@@ -1231,7 +1254,10 @@ app.get("/job-roles", (req, res) => {
 });
 
 // Skapa ny yrkesroll (admin)
-app.post("/job-roles", (req, res) => {
+app.post("/job-roles", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
   const { name } = req.body;
 
   if (!name || !name.trim()) {
@@ -1241,8 +1267,8 @@ app.post("/job-roles", (req, res) => {
   const cleanName = name.trim();
 
   db.run(
-    `INSERT INTO job_roles (name) VALUES (?)`,
-    [cleanName],
+    `INSERT INTO job_roles (company_id, name) VALUES (?, ?)`,
+    [companyId, cleanName],
     function (err) {
       if (err) {
         console.error("DB-fel vid POST /job-roles:", err);
@@ -1258,12 +1284,15 @@ app.post("/job-roles", (req, res) => {
 });
 
 // Ta bort yrkesroll (admin)
-app.delete("/job-roles/:id", (req, res) => {
+app.delete("/job-roles/:id", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
   const { id } = req.params;
 
   db.run(
-    `DELETE FROM job_roles WHERE id = ?`,
-    [id],
+    `DELETE FROM job_roles WHERE id = ? AND company_id = ?`,
+    [id, companyId],
     function (err) {
       if (err) {
         console.error("DB-fel vid DELETE /job-roles:", err);
@@ -1283,10 +1312,14 @@ app.delete("/job-roles/:id", (req, res) => {
 //   MATERIALTYPER (förbrukning)
 // ===========================
 
-// Hämta alla materialtyper – används i material_types.html + tidrapporter
-app.get("/material-types", (req, res) => {
+// Hämta alla materialtyper – används i material_types.html + tidrapporter (företagsscope)
+app.get("/material-types", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
   db.all(
-    `SELECT id, name, unit FROM material_types ORDER BY name`,
+    `SELECT id, name, unit FROM material_types WHERE company_id = ? ORDER BY name`,
+    [companyId],
     (err, rows) => {
       if (err) {
         console.error("DB-fel vid GET /material-types:", err);
@@ -1298,7 +1331,10 @@ app.get("/material-types", (req, res) => {
 });
 
 // Skapa ny materialtyp (admin)
-app.post("/material-types", (req, res) => {
+app.post("/material-types", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
   const { name, unit } = req.body;
 
   if (!name || !name.trim()) {
@@ -1309,8 +1345,8 @@ app.post("/material-types", (req, res) => {
   const cleanUnit = (unit || "").trim();
 
   db.run(
-    `INSERT INTO material_types (name, unit) VALUES (?, ?)`,
-    [cleanName, cleanUnit],
+    `INSERT INTO material_types (company_id, name, unit) VALUES (?, ?, ?)`,
+    [companyId, cleanName, cleanUnit],
     function (err) {
       if (err) {
         console.error("DB-fel vid POST /material-types:", err);
@@ -1327,12 +1363,15 @@ app.post("/material-types", (req, res) => {
 });
 
 // Ta bort materialtyp (admin)
-app.delete("/material-types/:id", (req, res) => {
+app.delete("/material-types/:id", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
   const { id } = req.params;
 
   db.run(
-    `DELETE FROM material_types WHERE id = ?`,
-    [id],
+    `DELETE FROM material_types WHERE id = ? AND company_id = ?`,
+    [id, companyId],
     function (err) {
       if (err) {
         console.error("DB-fel vid DELETE /material-types:", err);
@@ -1495,7 +1534,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
     const checkProject = project_id ? `SELECT id FROM projects WHERE id = ? AND company_id = ?` : null;
     const checkSubproject = subproject_id ? `SELECT id, project_id FROM subprojects WHERE id = ? AND company_id = ?` : null;
 
-    function doInsert() {
+    function performInsert() {
       db.run(
         `INSERT INTO time_reports (
           user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, restid, status, traktamente_type, traktamente_amount
@@ -1528,6 +1567,23 @@ app.post("/time-entries", requireAuth, (req, res) => {
             }
             res.json(row);
           });
+        }
+      );
+    }
+
+    function doInsert() {
+      if (!job_role_id) return performInsert();
+
+      db.get(
+        `SELECT id FROM job_roles WHERE id = ? AND company_id = ?`,
+        [job_role_id, companyId],
+        (jrErr, jrRow) => {
+          if (jrErr) {
+            console.error("DB-fel vid SELECT job_role för time entry:", jrErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          if (!jrRow) return res.status(400).json({ error: "Invalid job_role_id" });
+          performInsert();
         }
       );
     }
@@ -1612,45 +1668,64 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         allowance_amount
       } = req.body || {};
 
-      db.run(
-        `UPDATE time_reports SET
-          datum = COALESCE(?, datum),
-          timmar = COALESCE(?, timmar),
-          job_role_id = COALESCE(?, job_role_id),
-          project_id = COALESCE(?, project_id),
-          subproject_id = COALESCE(?, subproject_id),
-          comment = COALESCE(?, comment),
-          status = COALESCE(?, status),
-          traktamente_type = COALESCE(?, traktamente_type),
-          traktamente_amount = COALESCE(?, traktamente_amount)
-        WHERE id = ?`,
-        [
-          date ?? null,
-          hours ?? null,
-          job_role_id ?? null,
-          project_id ?? null,
-          subproject_id ?? null,
-          description ?? null,
-          status ?? null,
-          allowance_type ?? null,
-          allowance_amount ?? null,
-          id
-        ],
-        function (e2) {
-          if (e2) {
-            console.error("DB-fel vid UPDATE time_report:", e2);
-            return res.status(500).json({ error: "DB error", details: String(e2) });
-          }
+      function performUpdate() {
+        db.run(
+          `UPDATE time_reports SET
+            datum = COALESCE(?, datum),
+            timmar = COALESCE(?, timmar),
+            job_role_id = COALESCE(?, job_role_id),
+            project_id = COALESCE(?, project_id),
+            subproject_id = COALESCE(?, subproject_id),
+            comment = COALESCE(?, comment),
+            status = COALESCE(?, status),
+            traktamente_type = COALESCE(?, traktamente_type),
+            traktamente_amount = COALESCE(?, traktamente_amount)
+          WHERE id = ?`,
+          [
+            date ?? null,
+            hours ?? null,
+            job_role_id ?? null,
+            project_id ?? null,
+            subproject_id ?? null,
+            description ?? null,
+            status ?? null,
+            allowance_type ?? null,
+            allowance_amount ?? null,
+            id
+          ],
+          function (e2) {
+            if (e2) {
+              console.error("DB-fel vid UPDATE time_report:", e2);
+              return res.status(500).json({ error: "DB error", details: String(e2) });
+            }
 
-          db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (e3, row) => {
-            if (e3) {
-              console.error("DB-fel vid SELECT uppdaterad time_report:", e3);
+            db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (e3, row) => {
+              if (e3) {
+                console.error("DB-fel vid SELECT uppdaterad time_report:", e3);
+                return res.status(500).json({ error: "DB error" });
+              }
+              res.json(row);
+            });
+          }
+        );
+      }
+
+      if (job_role_id != null) {
+        db.get(
+          `SELECT id FROM job_roles WHERE id = ? AND company_id = ?`,
+          [job_role_id, companyId],
+          (jrErr, jrRow) => {
+            if (jrErr) {
+              console.error("DB-fel vid SELECT job_role för update:", jrErr);
               return res.status(500).json({ error: "DB error" });
             }
-            res.json(row);
-          });
-        }
-      );
+            if (!jrRow) return res.status(400).json({ error: "Invalid job_role_id" });
+            performUpdate();
+          }
+        );
+      } else {
+        performUpdate();
+      }
     });
   });
 });
@@ -1702,41 +1777,53 @@ app.delete("/time-entries/:id", requireAuth, (req, res) => {
   });
 });
 app.get("/time-reports", requireAuth, (req, res) => {
-  const isAdminUser = (req.user?.role || "").toLowerCase() === "admin";
-  const { user_id, status, project_id } = req.query;
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
 
-  let sql = `SELECT * FROM time_reports`;
-  const params = [];
+  const isAdminUser = isAdminRole(req);
+  const authUserId = getAuthUserId(req);
+  const { user_id, status, project_id } = req.query || {};
 
-  const where = [];
+  let sql = `
+    SELECT tr.*, u.first_name, u.last_name, u.email
+    FROM time_reports tr
+    JOIN users u ON u.id = tr.user_id
+    WHERE u.company_id = ?`;
+  const params = [companyId];
+
   if (!isAdminUser) {
-    where.push(`user_id = ?`);
-    params.push(req.user.id);
-  } else {
-    if (user_id) {
-      where.push(`user_id = ?`);
-      params.push(user_id);
-    }
+    sql += ` AND tr.user_id = ?`;
+    params.push(authUserId);
+  } else if (user_id) {
+    sql += ` AND tr.user_id = ?`;
+    params.push(user_id);
   }
 
   if (status) {
-    where.push(`status = ?`);
+    sql += ` AND tr.status = ?`;
     params.push(status);
   }
 
   if (project_id) {
-    where.push(`project_id = ?`);
+    sql += ` AND tr.project_id = ?`;
     params.push(project_id);
   }
 
-  if (where.length) sql += ` WHERE ` + where.join(" AND ");
-  sql += ` ORDER BY datum DESC, id DESC`;
+  sql += ` ORDER BY tr.datum DESC, tr.id DESC`;
 
   db.all(sql, params, (err, reports) => {
     if (err) {
       console.error("DB-fel vid GET /time-reports:", err);
       return res.status(500).json({ error: "Kunde inte hämta tidrapporter." });
     }
+
+    // Sätt fallback-namn
+    reports.forEach((r) => {
+      if (!r.user_name) {
+        const name = `${r.first_name || ""} ${r.last_name || ""}`.trim();
+        r.user_name = name || r.email || null;
+      }
+    });
 
     // Hämta materialrader för varje rapport
     const tasks = reports.map((r) => {
@@ -1760,10 +1847,13 @@ app.get("/time-reports", requireAuth, (req, res) => {
 // Skapa ny tidrapport
 app.post("/time-reports", requireAuth, (req, res) => {
   const body = req.body || {};
-  const isAdminUser = (req.user?.role || "").toLowerCase() === "admin";
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
 
-  const userId = isAdminUser && body.user_id ? body.user_id : req.user.id;
-  const userName = body.user_name || body.userName || null;
+  const isAdminUser = isAdminRole(req);
+  const authUserId = getAuthUserId(req);
+
+  const userId = isAdminUser && body.user_id ? body.user_id : authUserId;
   const datum = body.datum || body.date;
   if (!datum) return res.status(400).json({ error: "Datum krävs." });
 
@@ -1778,104 +1868,54 @@ app.post("/time-reports", requireAuth, (req, res) => {
   const status = body.status || "Ny";
   const traktType = body.traktamente_type || body.traktType || null;
   const traktAmount = body.traktamente_amount != null ? Number(body.traktamente_amount) : (body.traktAmount != null ? Number(body.traktAmount) : 0);
-  const materials = Array.isArray(body.materials) ? body.materials : [];
+  const materials = Array.isArray(body.materials) ? body.materials : null;
 
-  db.run(
-    `INSERT INTO time_reports
-      (user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, restid, status, traktamente_type, traktamente_amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, userName, datum, starttid, sluttid, timmar, projectId, subprojectId, jobRoleId, comment, restid, status, traktType, traktAmount],
-    function (err) {
-      if (err) {
-        console.error("DB-fel vid POST /time-reports:", err);
-        return res.status(500).json({ error: "Kunde inte skapa tidrapport." });
-      }
+  if (!timmar || timmar <= 0) {
+    return res.status(400).json({ error: "Antal timmar krävs." });
+  }
 
-      const reportId = this.lastID;
-
-      // Lägg till materialrader
-      const insertMat = db.prepare(`INSERT INTO report_materials (report_id, material_type_id, quantity, place) VALUES (?, ?, ?, ?)`);
-      materials.forEach((m) => {
-        insertMat.run([reportId, m.typeId || m.material_type_id, m.quantity || m.qty || 0, m.place || null]);
-      });
-      insertMat.finalize(() => {
-        db.get(`SELECT * FROM time_reports WHERE id = ?`, [reportId], (gErr, row) => {
-          if (gErr) return res.status(500).json({ error: "Kunde inte läsa ny tidrapport." });
-          row.materials = materials;
-          res.status(201).json(row);
-        });
-      });
+  // säkerställ att användaren tillhör företaget
+  db.get(`SELECT id, company_id, first_name, last_name, email FROM users WHERE id = ?`, [userId], (uErr, userRow) => {
+    if (uErr) {
+      console.error("DB-fel vid SELECT user för time_report:", uErr);
+      return res.status(500).json({ error: "DB error" });
     }
-  );
-});
-
-// Uppdatera tidrapport
-app.put("/time-reports/:id", requireAuth, (req, res) => {
-  const { id } = req.params;
-  const body = req.body || {};
-  const isAdminUser = (req.user?.role || "").toLowerCase() === "admin";
-
-  db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (err, report) => {
-    if (err) {
-      console.error("DB-fel vid SELECT tidrapport:", err);
-      return res.status(500).json({ error: "Tekniskt fel." });
-    }
-    if (!report) return res.status(404).json({ error: "Tidrapporten hittades inte." });
-
-    if (!isAdminUser) {
-      if (report.user_id !== req.user.id) return res.status(403).json({ error: "Du kan inte ändra andras tidrapporter." });
-      if (report.status === "Attesterad") return res.status(403).json({ error: "Attesterade tidrapporter kan inte ändras av användare." });
+    if (!userRow || String(userRow.company_id) !== String(companyId)) {
+      return res.status(403).json({ error: "User not in company" });
     }
 
-    const userName = body.user_name || body.userName || report.user_name;
-    const datum = body.datum || body.date || report.datum;
-    const starttid = body.starttid || body.start || report.starttid;
-    const sluttid = body.sluttid || body.end || report.sluttid;
-    const timmar = body.timmar != null ? Number(body.timmar) : report.timmar;
-    const projectId = body.project_id || body.projectId || report.project_id;
-    const subprojectId = body.subproject_id || body.subProjectId || report.subproject_id;
-    const jobRoleId = body.job_role_id || body.jobRoleId || report.job_role_id;
-    const comment = body.comment || report.comment;
-    const restid = body.restid != null ? Number(body.restid) : report.restid;
-    const status = body.status || report.status;
-    const traktType = body.traktamente_type || body.traktType || report.traktamente_type || null;
-    const traktAmount = body.traktamente_amount != null ? Number(body.traktamente_amount) : (body.traktAmount != null ? Number(body.traktAmount) : (report.traktamente_amount != null ? Number(report.traktamente_amount) : 0));
-    const materials = Array.isArray(body.materials) ? body.materials : null;
+    const userName = (body.user_name || body.userName || `${userRow.first_name || ""} ${userRow.last_name || ""}`.trim()) || userRow.email || null;
 
     db.run(
-      `UPDATE time_reports SET user_name = ?, datum = ?, starttid = ?, sluttid = ?, timmar = ?, project_id = ?, subproject_id = ?, job_role_id = ?, comment = ?, restid = ?, status = ?, traktamente_type = ?, traktamente_amount = ?, updated_at = datetime('now') WHERE id = ?`,
-      [userName, datum, starttid, sluttid, timmar, projectId, subprojectId, jobRoleId, comment, restid, status, traktType, traktAmount, id],
-      function (uErr) {
-        if (uErr) {
-          console.error("DB-fel vid UPDATE tidrapport:", uErr);
-          return res.status(500).json({ error: "Kunde inte uppdatera tidrapport." });
+      `INSERT INTO time_reports
+        (user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, restid, status, traktamente_type, traktamente_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, userName, datum, starttid, sluttid, timmar, projectId, subprojectId, jobRoleId, comment, restid, status, traktType, traktAmount],
+      function (err) {
+        if (err) {
+          console.error("DB-fel vid POST /time-reports:", err);
+          return res.status(500).json({ error: "Kunde inte skapa tidrapport." });
         }
 
-        // Uppdatera materialrader om skickade
-        if (materials) {
-          db.run(`DELETE FROM report_materials WHERE report_id = ?`, [id], (dErr) => {
-            if (dErr) console.error("Kunde ta bort gamla materialrader:", dErr);
-            const insertMat = db.prepare(`INSERT INTO report_materials (report_id, material_type_id, quantity, place) VALUES (?, ?, ?, ?)`);
-            materials.forEach((m) => {
-              insertMat.run([id, m.typeId || m.material_type_id, m.quantity || m.qty || 0, m.place || null]);
-            });
-            insertMat.finalize(() => {
-              db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (gErr, row) => {
-                if (gErr) return res.status(500).json({ error: "Kunde läsa uppdaterad tidrapport." });
-                db.all(`SELECT id, material_type_id, quantity, place FROM report_materials WHERE report_id = ?`, [id], (mErr, rows) => {
-                  row.materials = mErr ? [] : rows;
-                  res.json(row);
-                });
-              });
+        const reportId = this.lastID;
+
+        // Lägg till materialrader
+        if (materials && materials.length) {
+          const insertMat = db.prepare(`INSERT INTO report_materials (report_id, material_type_id, quantity, place) VALUES (?, ?, ?, ?)`);
+          materials.forEach((m) => {
+            insertMat.run([reportId, m.typeId || m.material_type_id, m.quantity || m.qty || 0, m.place || null]);
+          });
+          insertMat.finalize(() => {
+            db.get(`SELECT * FROM time_reports WHERE id = ?`, [reportId], (gErr, row) => {
+              if (gErr) return res.status(500).json({ error: "Kunde inte läsa ny tidrapport." });
+              row.materials = materials;
+              res.status(201).json(row);
             });
           });
         } else {
-          db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (gErr, row) => {
-            if (gErr) return res.status(500).json({ error: "Kunde läsa uppdaterad tidrapport." });
-            db.all(`SELECT id, material_type_id, quantity, place FROM report_materials WHERE report_id = ?`, [id], (mErr, rows) => {
-              row.materials = mErr ? [] : rows;
-              res.json(row);
-            });
+          db.get(`SELECT * FROM time_reports WHERE id = ?`, [reportId], (gErr, row) => {
+            if (gErr) return res.status(500).json({ error: "Kunde inte läsa ny tidrapport." });
+            res.status(201).json(row);
           });
         }
       }
@@ -1883,17 +1923,106 @@ app.put("/time-reports/:id", requireAuth, (req, res) => {
   });
 });
 
+// Uppdatera tidrapport
+app.put("/time-reports/:id", requireAuth, (req, res) => {
+  const { id } = req.params;
+  const body = req.body || {};
+  const isAdminUser = isAdminRole(req);
+  const authUserId = getAuthUserId(req);
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  db.get(
+    `SELECT tr.*, u.company_id FROM time_reports tr JOIN users u ON u.id = tr.user_id WHERE tr.id = ?`,
+    [id],
+    (err, report) => {
+      if (err) {
+        console.error("DB-fel vid SELECT tidrapport:", err);
+        return res.status(500).json({ error: "Tekniskt fel." });
+      }
+      if (!report) return res.status(404).json({ error: "Tidrapporten hittades inte." });
+      if (String(report.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+
+      if (!isAdminUser) {
+        if (report.user_id !== authUserId) return res.status(403).json({ error: "Du kan inte ändra andras tidrapporter." });
+        if (report.status === "Attesterad") return res.status(403).json({ error: "Attesterade tidrapporter kan inte ändras av användare." });
+      }
+
+      const userName = body.user_name || body.userName || report.user_name;
+      const datum = body.datum || body.date || report.datum;
+      const starttid = body.starttid || body.start || report.starttid;
+      const sluttid = body.sluttid || body.end || report.sluttid;
+      const timmar = body.timmar != null ? Number(body.timmar) : report.timmar;
+      const projectId = body.project_id || body.projectId || report.project_id;
+      const subprojectId = body.subproject_id || body.subProjectId || report.subproject_id;
+      const jobRoleId = body.job_role_id || body.jobRoleId || report.job_role_id;
+      const comment = body.comment || report.comment;
+      const restid = body.restid != null ? Number(body.restid) : report.restid;
+      const status = body.status || report.status;
+      const traktType = body.traktamente_type || body.traktType || report.traktamente_type || null;
+      const traktAmount = body.traktamente_amount != null ? Number(body.traktamente_amount) : (body.traktAmount != null ? Number(body.traktAmount) : (report.traktamente_amount != null ? Number(report.traktamente_amount) : 0));
+      const materials = Array.isArray(body.materials) ? body.materials : null;
+
+      db.run(
+        `UPDATE time_reports SET user_name = ?, datum = ?, starttid = ?, sluttid = ?, timmar = ?, project_id = ?, subproject_id = ?, job_role_id = ?, comment = ?, restid = ?, status = ?, traktamente_type = ?, traktamente_amount = ?, updated_at = datetime('now') WHERE id = ?`,
+        [userName, datum, starttid, sluttid, timmar, projectId, subprojectId, jobRoleId, comment, restid, status, traktType, traktAmount, id],
+        function (uErr) {
+          if (uErr) {
+            console.error("DB-fel vid UPDATE tidrapport:", uErr);
+            return res.status(500).json({ error: "Kunde inte uppdatera tidrapport." });
+          }
+
+          // Uppdatera materialrader om skickade
+          if (materials) {
+            db.run(`DELETE FROM report_materials WHERE report_id = ?`, [id], (dErr) => {
+              if (dErr) console.error("Kunde ta bort gamla materialrader:", dErr);
+              const insertMat = db.prepare(`INSERT INTO report_materials (report_id, material_type_id, quantity, place) VALUES (?, ?, ?, ?)`);
+              materials.forEach((m) => {
+                insertMat.run([id, m.typeId || m.material_type_id, m.quantity || m.qty || 0, m.place || null]);
+              });
+              insertMat.finalize(() => {
+                db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (gErr, row) => {
+                  if (gErr) return res.status(500).json({ error: "Kunde läsa uppdaterad tidrapport." });
+                  db.all(`SELECT id, material_type_id, quantity, place FROM report_materials WHERE report_id = ?`, [id], (mErr, rows) => {
+                    row.materials = mErr ? [] : rows;
+                    res.json(row);
+                  });
+                });
+              });
+            });
+          } else {
+            db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (gErr, row) => {
+              if (gErr) return res.status(500).json({ error: "Kunde läsa uppdaterad tidrapport." });
+              db.all(`SELECT id, material_type_id, quantity, place FROM report_materials WHERE report_id = ?`, [id], (mErr, rows) => {
+                row.materials = mErr ? [] : rows;
+                res.json(row);
+              });
+            });
+          }
+        }
+      );
+    }
+  );
+});
+
 // Radera tidrapport
 app.delete("/time-reports/:id", requireAuth, (req, res) => {
   const { id } = req.params;
-  const isAdminUser = (req.user?.role || "").toLowerCase() === "admin";
+  const isAdminUser = isAdminRole(req);
+  const authUserId = getAuthUserId(req);
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
 
-  db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (err, report) => {
+  db.get(
+    `SELECT tr.*, u.company_id FROM time_reports tr JOIN users u ON u.id = tr.user_id WHERE tr.id = ?`,
+    [id],
+    (err, report) => {
     if (err) return res.status(500).json({ error: "Tekniskt fel." });
     if (!report) return res.status(404).json({ error: "Tidrapporten hittades inte." });
+    if (String(report.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
 
     if (!isAdminUser) {
-      if (report.user_id !== req.user.id) return res.status(403).json({ error: "Du kan inte ta bort andras tidrapporter." });
+      if (report.user_id !== authUserId) return res.status(403).json({ error: "Du kan inte ta bort andras tidrapporter." });
       if (report.status === "Attesterad") return res.status(403).json({ error: "Attesterade tidrapporter kan inte raderas av användare." });
     }
 
@@ -1911,13 +2040,19 @@ app.delete("/time-reports/:id", requireAuth, (req, res) => {
 app.post("/time-reports/:id/attest", requireAdmin, (req, res) => {
   const { id } = req.params;
   const action = (req.body && req.body.action) || "attest"; // 'attest' eller 'unattest'
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
 
-  db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (err, report) => {
+  db.get(
+    `SELECT tr.*, u.company_id FROM time_reports tr JOIN users u ON u.id = tr.user_id WHERE tr.id = ?`,
+    [id],
+    (err, report) => {
     if (err) return res.status(500).json({ error: "Tekniskt fel." });
     if (!report) return res.status(404).json({ error: "Tidrapporten hittades inte." });
+    if (String(report.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
 
     if (action === "attest") {
-      db.run(`UPDATE time_reports SET status = 'Attesterad', attested_by = ?, attested_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [req.user.id, id], function (uErr) {
+      db.run(`UPDATE time_reports SET status = 'Attesterad', attested_by = ?, attested_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [getAuthUserId(req), id], function (uErr) {
         if (uErr) return res.status(500).json({ error: "Kunde inte attesterar rapporten." });
         res.json({ success: true });
       });
@@ -1927,7 +2062,8 @@ app.post("/time-reports/:id/attest", requireAdmin, (req, res) => {
         res.json({ success: true });
       });
     }
-  });
+    }
+  );
 });
 
 // Lovable-style attest endpoint for time-entries (admin/super_admin within scoped company)
@@ -2004,10 +2140,10 @@ app.post("/time-entries/:id/attest", requireAuth, requireAdmin, (req, res) => {
               db.all(
                 `SELECT rm.*, mt.name AS material_name, mt.unit AS material_unit
                  FROM report_materials rm
-                 LEFT JOIN material_types mt ON mt.id = rm.material_type_id
+                 LEFT JOIN material_types mt ON mt.id = rm.material_type_id AND mt.company_id = ?
                  WHERE rm.report_id = ?
                  ORDER BY rm.id DESC`,
-                [id],
+                [companyId, id],
                 (e2, rows) => {
                   if (e2) {
                     console.error("DB-fel vid SELECT report_materials:", e2);
@@ -2049,24 +2185,46 @@ app.post("/time-entries/:id/attest", requireAuth, requireAdmin, (req, res) => {
               }
               if (!isAdmin && Number(tr.user_id) !== Number(req.user.user_id)) return res.status(403).json({ error: "Forbidden" });
 
-              const placeValue = place ?? notes ?? null;
+              function insertMaterial() {
+                const placeValue = place ?? notes ?? null;
 
-              db.run(
-                `INSERT INTO report_materials (report_id, material_type_id, quantity, place)
-                 VALUES (?, ?, ?, ?)`,
-                [reportId, material_type_id, quantity, placeValue],
-                function (e2) {
-                  if (e2) {
-                    console.error("DB-fel vid INSERT report_materials:", e2);
-                    return res.status(500).json({ error: "DB error", details: String(e2) });
-                  }
-                  db.get(`SELECT rm.*, mt.name AS material_name, mt.unit AS material_unit FROM report_materials rm LEFT JOIN material_types mt ON mt.id = rm.material_type_id WHERE rm.id = ?`, [this.lastID], (e3, row) => {
-                    if (e3) {
-                      console.error("DB-fel vid SELECT ny report_material:", e3);
-                      return res.status(500).json({ error: "DB error" });
+                db.run(
+                  `INSERT INTO report_materials (report_id, material_type_id, quantity, place)
+                   VALUES (?, ?, ?, ?)`,
+                  [reportId, material_type_id, quantity, placeValue],
+                  function (e2) {
+                    if (e2) {
+                      console.error("DB-fel vid INSERT report_materials:", e2);
+                      return res.status(500).json({ error: "DB error", details: String(e2) });
                     }
-                    res.json(row);
-                  });
+                    db.get(
+                      `SELECT rm.*, mt.name AS material_name, mt.unit AS material_unit
+                       FROM report_materials rm
+                       LEFT JOIN material_types mt ON mt.id = rm.material_type_id AND mt.company_id = ?
+                       WHERE rm.id = ?`,
+                      [companyId, this.lastID],
+                      (e3, row) => {
+                        if (e3) {
+                          console.error("DB-fel vid SELECT ny report_material:", e3);
+                          return res.status(500).json({ error: "DB error" });
+                        }
+                        res.json(row);
+                      }
+                    );
+                  }
+                );
+              }
+
+              db.get(
+                `SELECT id FROM material_types WHERE id = ? AND company_id = ?`,
+                [material_type_id, companyId],
+                (mtErr, mtRow) => {
+                  if (mtErr) {
+                    console.error("DB-fel vid SELECT material_type för insert:", mtErr);
+                    return res.status(500).json({ error: "DB error" });
+                  }
+                  if (!mtRow) return res.status(400).json({ error: "Invalid material_type_id" });
+                  insertMaterial();
                 }
               );
             });
@@ -2114,13 +2272,20 @@ app.post("/time-entries/:id/attest", requireAuth, requireAdmin, (req, res) => {
                     return res.status(500).json({ error: "DB error", details: String(e2) });
                   }
                   if (this.changes === 0) return res.status(404).json({ error: "Not found" });
-                  db.get(`SELECT rm.*, mt.name AS material_name, mt.unit AS material_unit FROM report_materials rm LEFT JOIN material_types mt ON mt.id = rm.material_type_id WHERE rm.id = ?`, [rowId], (e3, row) => {
-                    if (e3) {
-                      console.error("DB-fel vid SELECT uppdaterad report_material:", e3);
-                      return res.status(500).json({ error: "DB error" });
+                  db.get(
+                    `SELECT rm.*, mt.name AS material_name, mt.unit AS material_unit
+                     FROM report_materials rm
+                     LEFT JOIN material_types mt ON mt.id = rm.material_type_id AND mt.company_id = ?
+                     WHERE rm.id = ?`,
+                    [companyId, rowId],
+                    (e3, row) => {
+                      if (e3) {
+                        console.error("DB-fel vid SELECT uppdaterad report_material:", e3);
+                        return res.status(500).json({ error: "DB error" });
+                      }
+                      res.json(row);
                     }
-                    res.json(row);
-                  });
+                  );
                 }
               );
             });

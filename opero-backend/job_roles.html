@@ -199,7 +199,7 @@
   <main class="main">
     <div class="topbar">
       <div>
-        <h1>Rail Work AB</h1>
+        <h1 class="company-name">Rail Work AB</h1>
         <small>Yrkesroller – används i tidrapporteringen</small>
       </div>
       <div class="welcome" id="welcomeText">Välkommen</div>
@@ -254,6 +254,9 @@
     }
     setupSidebarForUser(currentUser);
 
+    const token = localStorage.getItem("token") || "";
+    const authHeaders = token ? { Authorization: "Bearer " + token } : {};
+
     document.getElementById("logoutBtn").addEventListener("click", () => {
       localStorage.clear();
       window.location.href = "login.html";
@@ -267,7 +270,7 @@
     async function loadRoles() {
       rolesBody.innerHTML = "";
       try {
-        const res = await fetch("/job-roles");
+        const res = await fetch("/job-roles", { headers: authHeaders });
         const roles = await res.json();
 
         if (!roles.length) {
@@ -296,7 +299,7 @@
             const id = btn.getAttribute("data-id");
             if (!confirm("Ta bort yrkesrollen?")) return;
             try {
-              const res = await fetch("/job-roles/" + id, { method: "DELETE" });
+              const res = await fetch("/job-roles/" + id, { method: "DELETE", headers: authHeaders });
               if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
                 alert(data.error || "Kunde inte ta bort yrkesrollen.");
@@ -326,7 +329,7 @@
       try {
         const res = await fetch("/job-roles", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({ name })
         });
 

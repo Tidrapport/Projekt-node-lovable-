@@ -167,6 +167,44 @@
       box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
     }
 
+    .company-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .company-card h3 {
+      margin: 0 0 4px;
+      font-size: 16px;
+    }
+
+    .company-card small {
+      color: #6b7280;
+    }
+
+    .company-edit {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .company-edit input {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      min-width: 220px;
+    }
+
+    .company-edit input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 1px #2563eb25;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -474,10 +512,22 @@
 <main class="main">
   <div class="topbar">
     <div>
-      <h1>Rail Work AB</h1>
+      <h1 class="company-name">Rail Work AB</h1>
       <small>Attestering av tidrapporter</small>
     </div>
     <div class="welcome" id="welcomeText">Välkommen</div>
+  </div>
+
+  <div class="card company-card" id="companyCard">
+    <div>
+      <h3 id="companyNameDisplay">Företag</h3>
+      <small>Visas för alla användare på dashboard.</small>
+    </div>
+    <div class="company-edit">
+      <input id="companyNameInput" type="text" placeholder="Företagsnamn" />
+      <button class="btn-secondary" id="saveCompanyNameBtn">Spara namn</button>
+      <div id="companySaveStatus" style="min-width:160px; font-size:12px; color:#6b7280;"></div>
+    </div>
   </div>
 
   <div class="page-header">
@@ -602,6 +652,13 @@
     window.location.href = "login.html";
   });
 
+  document.getElementById("saveCompanyNameBtn").addEventListener("click", (e) => {
+    e.preventDefault();
+    saveCompanyName();
+  });
+
+  loadCompany();
+
   const STORAGE_KEY = "timeReports"; // kept for backward compatibility
   const PROJECTS_KEY = "projects";
   const SUBPROJECTS_KEY = "subProjects";
@@ -613,6 +670,79 @@
   let deviations = [];
 
   const API_TOKEN = localStorage.getItem("token") || null;
+  const companyNameDisplay = document.getElementById("companyNameDisplay");
+  const companyNameInput = document.getElementById("companyNameInput");
+  const companySaveStatus = document.getElementById("companySaveStatus");
+
+  function setCompanyUI(name) {
+    if (name) {
+      companyNameDisplay.textContent = name;
+      companyNameInput.value = name;
+    }
+    if (typeof applyCompanyBranding === "function") applyCompanyBranding(name);
+    if (typeof applyWelcomeText === "function") applyWelcomeText(currentUser, name);
+  }
+
+  async function loadCompany() {
+    const storedName = localStorage.getItem("company_name");
+    if (storedName) setCompanyUI(storedName);
+
+    if (!API_TOKEN) return;
+    try {
+      const res = await fetch("/companies", {
+        headers: { Authorization: "Bearer " + API_TOKEN }
+      });
+      const data = await res.json().catch(() => []);
+      const myCompanyId = localStorage.getItem("company_id");
+      const company =
+        Array.isArray(data) && data.length
+          ? data.find((c) => String(c.id) === String(myCompanyId)) || data[0]
+          : null;
+      if (company?.name) {
+        localStorage.setItem("company_name", company.name);
+        setCompanyUI(company.name);
+      }
+    } catch (e) {
+      console.warn("Kunde inte ladda företagsinfo", e);
+    }
+  }
+
+  async function saveCompanyName() {
+    const newName = (companyNameInput.value || "").trim();
+    const companyId = localStorage.getItem("company_id");
+    if (!newName) {
+      companySaveStatus.textContent = "Ange ett namn.";
+      return;
+    }
+    if (!companyId) {
+      companySaveStatus.textContent = "Ingen företags-id hittades.";
+      return;
+    }
+    companySaveStatus.textContent = "Sparar...";
+
+    try {
+      const res = await fetch(`/companies/${companyId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + (API_TOKEN || "")
+        },
+        body: JSON.stringify({ name: newName })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        companySaveStatus.textContent = data.error || "Kunde inte spara.";
+        return;
+      }
+      localStorage.setItem("company_name", newName);
+      setCompanyUI(newName);
+      companySaveStatus.textContent = "Namn sparat.";
+      setTimeout(() => (companySaveStatus.textContent = ""), 1500);
+    } catch (err) {
+      console.error(err);
+      companySaveStatus.textContent = "Tekniskt fel.";
+    }
+  }
 
   function saveReports() {
     try {

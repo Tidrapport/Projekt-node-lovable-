@@ -113,33 +113,111 @@ db.serialize(() => {
     }
   });
 
-  // --- Job roles (Yrkesroller) ---
+  // --- Job roles (Yrkesroller) per företag ---
   db.run(`
     CREATE TABLE IF NOT EXISTS job_roles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      created_at TEXT DEFAULT (datetime('now'))
+      company_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      UNIQUE (company_id, name)
     );
   `);
 
-  // --- Material types (Materialtyper) ---
+  db.all(`PRAGMA table_info(job_roles);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för job_roles:", err);
+      return;
+    }
+    const hasCompanyId = columns.some((col) => col.name === "company_id");
+    if (!hasCompanyId) {
+      // Migrera befintlig tabell till företagsscope (default company_id = 1)
+      db.serialize(() => {
+        db.run(`
+          CREATE TABLE IF NOT EXISTS job_roles_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT,
+            FOREIGN KEY (company_id) REFERENCES companies(id),
+            UNIQUE (company_id, name)
+          );
+        `, (createErr) => {
+          if (createErr) {
+            console.error("Kunde inte skapa job_roles_new:", createErr);
+          }
+        });
+        db.run(
+          `INSERT INTO job_roles_new (id, company_id, name, created_at)
+           SELECT id, 1 AS company_id, name, created_at FROM job_roles;`,
+          (copyErr) => {
+            if (copyErr) console.error("Kunde inte kopiera data till job_roles_new:", copyErr);
+          }
+        );
+        db.run(`DROP TABLE job_roles;`, (dropErr) => {
+          if (dropErr) console.error("Kunde inte ta bort gamla job_roles:", dropErr);
+        });
+        db.run(`ALTER TABLE job_roles_new RENAME TO job_roles;`, (renameErr) => {
+          if (renameErr) console.error("Kunde inte döpa om job_roles_new:", renameErr);
+        });
+      });
+    }
+    db.run(`CREATE INDEX IF NOT EXISTS idx_job_roles_company_id ON job_roles(company_id);`);
+  });
+
+  // --- Material types (Materialtyper) per företag ---
   db.run(`
     CREATE TABLE IF NOT EXISTS material_types (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
+      company_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
       unit TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      UNIQUE (company_id, name)
     );
   `);
 
-  // Lägg till "unit"-kolumn om tabellen redan fanns utan den
   db.all(`PRAGMA table_info(material_types);`, (err, columns) => {
     if (err) {
       console.error("Kunde inte läsa schema för material_types:", err);
       return;
     }
+    const hasCompanyId = columns.some((col) => col.name === "company_id");
     const hasUnit = columns.some((col) => col.name === "unit");
-    if (!hasUnit) {
+
+    if (!hasCompanyId) {
+      // Migrera befintlig tabell till företagsscope (default company_id = 1)
+      db.serialize(() => {
+        db.run(`
+          CREATE TABLE IF NOT EXISTS material_types_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            unit TEXT,
+            created_at TEXT,
+            FOREIGN KEY (company_id) REFERENCES companies(id),
+            UNIQUE (company_id, name)
+          );
+        `, (createErr) => {
+          if (createErr) console.error("Kunde inte skapa material_types_new:", createErr);
+        });
+        db.run(
+          `INSERT INTO material_types_new (id, company_id, name, unit, created_at)
+           SELECT id, 1 AS company_id, name, unit, created_at FROM material_types;`,
+          (copyErr) => {
+            if (copyErr) console.error("Kunde inte kopiera data till material_types_new:", copyErr);
+          }
+        );
+        db.run(`DROP TABLE material_types;`, (dropErr) => {
+          if (dropErr) console.error("Kunde inte ta bort gamla material_types:", dropErr);
+        });
+        db.run(`ALTER TABLE material_types_new RENAME TO material_types;`, (renameErr) => {
+          if (renameErr) console.error("Kunde inte döpa om material_types_new:", renameErr);
+        });
+      });
+    } else if (!hasUnit) {
       db.run(`ALTER TABLE material_types ADD COLUMN unit TEXT;`, (alterErr) => {
         if (alterErr) {
           console.error("Kunde inte lägga till kolumnen unit:", alterErr);
@@ -148,6 +226,8 @@ db.serialize(() => {
         }
       });
     }
+
+    db.run(`CREATE INDEX IF NOT EXISTS idx_material_types_company_id ON material_types(company_id);`);
   });
 
   // Standard‑företag (id = 1)

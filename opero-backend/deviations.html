@@ -431,14 +431,16 @@
   });
 
   const company = JSON.parse(localStorage.getItem("selectedCompany") || "null");
-  const companyName = company?.name || "Rail Work AB";
+  const companyName = localStorage.getItem("company_name") || company?.name || "Rail Work AB";
   document.getElementById("companyTitle").textContent = companyName;
 
   const fullName =
     (currentUser.firstName || "") +
     (currentUser.lastName ? " " + currentUser.lastName : "");
-  document.getElementById("welcomeText").textContent =
-    "Välkommen, " + (fullName.trim() || currentUser.email || "användare");
+  const userLabel = fullName.trim() || currentUser.email || "användare";
+  document.getElementById("welcomeText").textContent = companyName
+    ? `Välkommen, ${userLabel} · ${companyName}`
+    : `Välkommen, ${userLabel}`;
 
   // Avvikelse‑logik
   const DEV_KEY = "deviations";

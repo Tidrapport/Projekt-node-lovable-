@@ -109,6 +109,20 @@
       border-radius: 8px;
       border: 1px solid #d1d5db;
       font-size: 13px;
+      color: #111827;
+      background: #fff;
+    }
+
+    .field select option {
+      color: #111827;
+      background: #fff;
+    }
+
+    /* Tvinga textfärg i select även för tomt/defaultvärde */
+    .field select,
+    .field select:invalid,
+    .field select option[value=""] {
+      color: #111827 !important;
     }
 
     .field input:focus,
@@ -476,6 +490,9 @@
       document.body.classList.add("non-admin");
     }
 
+    const token = localStorage.getItem("token") || "";
+    const authHeaders = token ? { Authorization: "Bearer " + token } : {};
+
     document.getElementById("logoutBtn").addEventListener("click", () => {
       localStorage.clear();
       window.location.href = "login.html";
@@ -504,7 +521,7 @@
     // ===== HÄMTA YRKESROLLER (dropdown, ingen fri text) =====
     async function loadJobRoles() {
       try {
-        const res = await fetch("/job-roles");
+        const res = await fetch("/job-roles", { headers: authHeaders });
         const roles = await res.json();
 
         jobRoleSelect.innerHTML = '<option value="">Välj yrkesroll</option>';
@@ -523,7 +540,7 @@
     // ===== HÄMTA MATERIALTYPER =====
     async function loadMaterialTypes() {
       try {
-        const res = await fetch("/material-types");
+        const res = await fetch("/material-types", { headers: authHeaders });
         const materials = await res.json();
 
         materialTypeSelect.innerHTML = '<option value="">Välj materialtyp</option>';
@@ -544,7 +561,7 @@
     async function loadProjects() {
       let projects = [];
       try {
-        const res = await fetch("/projects", { headers: { Authorization: "Bearer " + (localStorage.getItem("token") || "") } });
+        const res = await fetch("/projects", { headers: authHeaders });
         if (res.ok) {
           projects = await res.json();
         }

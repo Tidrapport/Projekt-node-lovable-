@@ -389,7 +389,9 @@
 
     document.getElementById("companyTitle").textContent = companyName;
     document.getElementById("sidebarCompanyName").textContent = companyName;
-    document.getElementById("welcomeText").textContent = "Välkommen, " + userName;
+  document.getElementById("welcomeText").textContent = companyName
+    ? `Välkommen, ${userName} · ${companyName}`
+    : `Välkommen, ${userName}`;
 
     document.getElementById("logoutBtn").addEventListener("click", () => {
       localStorage.removeItem("token");
