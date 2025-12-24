@@ -164,12 +164,12 @@ export const TimeEntryForm = ({ onAddEntry }: TimeEntryFormProps) => {
             <div className="space-y-2">
               <Label htmlFor="project">Projekt</Label>
               <Select value={project} onValueChange={setProject} required>
-                <SelectTrigger id="project">
-                  <SelectValue placeholder="Välj projekt" />
+                <SelectTrigger id="project" className="text-foreground">
+                  <SelectValue placeholder="Välj projekt" className="text-foreground" />
                 </SelectTrigger>
                 <SelectContent>
                   {PROJECT_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
+                    <SelectItem key={option} value={option} className="text-foreground">
                       {option}
                     </SelectItem>
                   ))}

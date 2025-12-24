@@ -111,14 +111,14 @@ const TimeReports = () => {
 
     try {
       const projectsData = await apiFetch(`/projects?active=true`);
-      if (projectsData) setProjects(projectsData);
+      if (projectsData) setProjects(projectsData.map((p: any) => ({ ...p, id: String(p.id) })));
     } catch (error) {
       console.error("Error fetching projects", error);
     }
 
     try {
       const jobRolesData = await apiFetch(`/job-roles?active=true`);
-      if (jobRolesData) setJobRoles(jobRolesData);
+      if (jobRolesData) setJobRoles(jobRolesData.map((j: any) => ({ ...j, id: String(j.id) })));
     } catch (error) {
       console.error("Error fetching job roles", error);
     }
@@ -133,7 +133,7 @@ const TimeReports = () => {
 
   const fetchSubprojects = async (projectId: string) => {
     const data = await apiFetch(`/subprojects?project_id=${projectId}&active=true`);
-    if (data) setSubprojects(data);
+    if (data) setSubprojects(data.map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
   };
 
   const calculateHours = (start: string, end: string, breakMins: number): number => {
@@ -637,7 +637,7 @@ const TimeReports = () => {
                 <Label htmlFor="project">Projekt</Label>
                 <Select value={projectId} onValueChange={setProjectId} required>
                   <SelectTrigger id="project" className="text-foreground">
-                    <SelectValue placeholder="Välj projekt" />
+                    <SelectValue placeholder="Välj projekt" className="text-foreground" />
                   </SelectTrigger>
                   <SelectContent>
                     {projects.map((project) => (
@@ -652,7 +652,7 @@ const TimeReports = () => {
                 <Label htmlFor="subproject">Underprojekt (valfritt)</Label>
                 <Select value={subprojectId} onValueChange={setSubprojectId}>
                   <SelectTrigger id="subproject" className="text-foreground">
-                    <SelectValue placeholder="Välj underprojekt" />
+                    <SelectValue placeholder="Välj underprojekt" className="text-foreground" />
                   </SelectTrigger>
                   <SelectContent>
                     {subprojects.map((subproject) => (
@@ -670,7 +670,7 @@ const TimeReports = () => {
                 <Label htmlFor="jobRole">Yrkesroll</Label>
                 <Select value={jobRoleId} onValueChange={setJobRoleId} required>
                   <SelectTrigger id="jobRole" className="text-foreground">
-                    <SelectValue placeholder="Välj roll" />
+                    <SelectValue placeholder="Välj roll" className="text-foreground" />
                   </SelectTrigger>
                   <SelectContent>
                     {jobRoles.map((role) => (
