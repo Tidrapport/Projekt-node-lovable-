@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,11 +16,14 @@ import { sv } from "date-fns/locale";
 import { CheckCircle, Lock, Unlock, Pencil, CheckCircle2, AlertCircle } from "lucide-react";
 import { useRef } from "react";
 
+const REST_OPTIONS = ["0", "15", "30", "45", "60"];
+
 type User = { id: string; full_name?: string; email?: string };
 type Project = { id: string; name: string };
 type Subproject = { id: string; name: string; project_id: string };
 type JobRole = { id: string; name: string };
 type Customer = { id: string; name: string };
+type MaterialType = { id: string; name: string; unit?: string };
 
 type TimeEntry = {
   id: string;
@@ -42,6 +47,14 @@ type TimeEntry = {
   user_email?: string | null;
   user_full_name?: string | null;
   customer_name?: string | null;
+  shift_type?: string | null;
+  ao_number?: string | null;
+  per_diem_type?: string | null;
+  travel_time_hours?: number | null;
+  save_travel_compensation?: boolean;
+  overtime_weekday_hours?: number | null;
+  overtime_weekend_hours?: number | null;
+  materials?: { id?: string | number; material_type_id: string | number; quantity: number; place?: string | null }[];
 };
 
 const statusBadge = (entry: TimeEntry) => {
@@ -64,6 +77,7 @@ export default function TimeAttestations() {
   const [subprojects, setSubprojects] = useState<Subproject[]>([]);
   const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [materialTypes, setMaterialTypes] = useState<MaterialType[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>("all");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [selectedProject, setSelectedProject] = useState<string>("all");
@@ -81,6 +95,20 @@ export default function TimeAttestations() {
   const [editProjectId, setEditProjectId] = useState("");
   const [editSubprojectId, setEditSubprojectId] = useState("");
   const [editJobRoleId, setEditJobRoleId] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
+  const [editBreakMinutes, setEditBreakMinutes] = useState("0");
+  const [editAoNumber, setEditAoNumber] = useState("");
+  const [editPerDiem, setEditPerDiem] = useState("none");
+  const [editTravelHours, setEditTravelHours] = useState("");
+  const [editSaveTravelComp, setEditSaveTravelComp] = useState(false);
+  const [editOvertimeWeekday, setEditOvertimeWeekday] = useState("0");
+  const [editOvertimeWeekend, setEditOvertimeWeekend] = useState("0");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editMaterials, setEditMaterials] = useState<{ material_type_id: string; quantity: number; id?: string | number }[]>([]);
+  const [selectedMaterialType, setSelectedMaterialType] = useState("");
+  const [materialQuantity, setMaterialQuantity] = useState("0");
 
   useEffect(() => {
     if (!isAdmin || !companyId) return;
@@ -97,11 +125,20 @@ export default function TimeAttestations() {
         apiFetch<JobRole[]>(`/job-roles?active=true`),
         apiFetch<Customer[]>(`/customers`),
       ]);
-      setUsers(usersData || []);
-      setProjects(projectsData || []);
-      setSubprojects(subprojectsData || []);
-      setJobRoles(jobRolesData || []);
-      setCustomers(customersData || []);
+      setUsers(
+        (usersData || []).map((u: any) => ({
+          ...u,
+          id: String(u.id),
+          full_name: u.full_name || `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || u.id,
+        }))
+      );
+      setProjects((projectsData || []).map((p: any) => ({ ...p, id: String(p.id) })));
+      setSubprojects((subprojectsData || []).map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
+      setJobRoles((jobRolesData || []).map((j: any) => ({ ...j, id: String(j.id) })));
+      setCustomers((customersData || []).map((c: any) => ({ ...c, id: String(c.id) })));
+
+      const materialTypesData = await apiFetch<MaterialType[]>(`/material-types?active=true`);
+      setMaterialTypes((materialTypesData || []).map((m) => ({ ...m, id: String(m.id) })));
     } catch (e: any) {
       toast.error(e.message || "Kunde inte hämta listor");
     }
@@ -136,6 +173,19 @@ export default function TimeAttestations() {
         user_full_name: e.user_full_name || e.user_name || null,
         invoiced: e.invoiced ?? false,
         customer_name: e.customer_name || null,
+        shift_type: e.shift_type || null,
+        ao_number: e.ao_number || null,
+        per_diem_type: e.per_diem_type || null,
+        travel_time_hours: e.travel_time_hours ?? null,
+        save_travel_compensation: e.save_travel_compensation ?? false,
+        overtime_weekday_hours: e.overtime_weekday_hours ?? null,
+        overtime_weekend_hours: e.overtime_weekend_hours ?? null,
+        materials: (e.materials || []).map((m: any) => ({
+          id: m.id,
+          material_type_id: String(m.material_type_id),
+          quantity: m.quantity,
+          place: m.place || null,
+        })),
       })) as TimeEntry[];
       setEntries(normalized);
     } catch (e: any) {
@@ -198,6 +248,25 @@ export default function TimeAttestations() {
     setEditProjectId(entry.project_id || "");
     setEditSubprojectId(entry.subproject_id || "");
     setEditJobRoleId(entry.job_role_id || "");
+    setEditDate(entry.date || "");
+    setEditStartTime(entry.start_time || "");
+    setEditEndTime(entry.end_time || "");
+    setEditBreakMinutes(String(entry.break_minutes ?? 0));
+    setEditAoNumber((entry as any).ao_number || "");
+    setEditPerDiem((entry as any).per_diem_type || "none");
+    setEditTravelHours(String((entry as any).travel_time_hours ?? ""));
+    setEditSaveTravelComp(Boolean((entry as any).save_travel_compensation));
+    setEditOvertimeWeekday(String((entry as any).overtime_weekday_hours ?? "0"));
+    setEditOvertimeWeekend(String((entry as any).overtime_weekend_hours ?? "0"));
+    setEditMaterials(
+      (entry.materials || []).map((m) => ({
+        id: m.id,
+        material_type_id: String(m.material_type_id),
+        quantity: Number(m.quantity) || 0,
+      }))
+    );
+    setSelectedMaterialType("");
+    setMaterialQuantity("0");
   };
 
   const saveEdit = async () => {
@@ -206,11 +275,25 @@ export default function TimeAttestations() {
       await apiFetch(`/time-entries/${editEntry.id}`, {
         method: "PUT",
         json: {
-          date: editEntry.date || undefined,
-          description: editDescription,
+          date: editDate || editEntry.date || undefined,
+          start_time: editStartTime || null,
+          end_time: editEndTime || null,
+          break_minutes: Number(editBreakMinutes) || 0,
+          work_description: editDescription,
           project_id: editProjectId || null,
           subproject_id: editSubprojectId || null,
           job_role_id: editJobRoleId || null,
+          ao_number: editAoNumber || null,
+          per_diem_type: editPerDiem || "none",
+          travel_time_hours: editTravelHours ? Number(editTravelHours) : 0,
+          save_travel_compensation: editSaveTravelComp,
+          overtime_weekday_hours: editOvertimeWeekday ? Number(editOvertimeWeekday) : 0,
+          overtime_weekend_hours: editOvertimeWeekend ? Number(editOvertimeWeekend) : 0,
+          materials: editMaterials.map((m) => ({
+            material_type_id: m.material_type_id,
+            quantity: m.quantity,
+            id: m.id,
+          })),
         },
       });
       toast.success("Uppdaterad");
@@ -218,6 +301,19 @@ export default function TimeAttestations() {
       loadEntries();
     } catch (e: any) {
       toast.error(e.message || "Kunde inte spara");
+    }
+  };
+
+  const deleteEntry = async () => {
+    if (!editEntry) return;
+    setShowDeleteConfirm(false);
+    try {
+      await apiFetch(`/time-entries/${editEntry.id}`, { method: "DELETE" });
+      toast.success("Tidrapport borttagen");
+      setEditEntry(null);
+      loadEntries();
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte ta bort tidrapport");
     }
   };
 
@@ -415,114 +511,140 @@ export default function TimeAttestations() {
         <CardHeader>
           <CardTitle>Filter</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Select value={selectedUser} onValueChange={setSelectedUser}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Användare" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla användare</SelectItem>
-              {users.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.full_name || u.email || u.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={selectedProject}
-            onValueChange={(v) => {
-              setSelectedProject(v);
-              setSelectedSubproject("all");
-            }}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Projekt" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla projekt</SelectItem>
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedSubproject} onValueChange={setSelectedSubproject}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Underprojekt" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla underprojekt</SelectItem>
-              {filteredSubprojects.map((sp) => (
-                <SelectItem key={sp.id} value={sp.id}>
-                  {sp.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Kund" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla kunder</SelectItem>
-              {customers.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla</SelectItem>
-              <SelectItem value="attested">Attesterade</SelectItem>
-              <SelectItem value="not_attested">Ej attesterade</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedInvoiceStatus} onValueChange={setSelectedInvoiceStatus}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Fakturering" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla</SelectItem>
-              <SelectItem value="invoiced">Fakturerade</SelectItem>
-              <SelectItem value="not_invoiced">Ej fakturerade</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Vecka" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alla veckor</SelectItem>
-              {weekOptions.map((wk) => (
-                <SelectItem key={wk} value={wk}>
-                  {`Vecka ${wk.split("W")[1]}, ${wk.split("-")[0]}`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="flex items-center gap-2">
-            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-[150px]" />
-            <span className="text-sm text-muted-foreground">–</span>
-            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[150px]" />
+        <CardContent className="grid gap-3 md:grid-cols-4">
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Användare</Label>
+            <Select value={selectedUser} onValueChange={setSelectedUser}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla användare" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla användare</SelectItem>
+                {users.map((u) => (
+                  <SelectItem key={u.id} value={String(u.id)}>
+                    {u.full_name || u.email || u.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          <Button variant="outline" onClick={loadEntries} disabled={loading}>
-            Uppdatera
-          </Button>
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Projekt</Label>
+            <Select
+              value={selectedProject}
+              onValueChange={(v) => {
+                setSelectedProject(v);
+                setSelectedSubproject("all");
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla projekt" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla projekt</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Underprojekt</Label>
+            <Select value={selectedSubproject} onValueChange={setSelectedSubproject}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla underprojekt" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla underprojekt</SelectItem>
+                {filteredSubprojects.map((sp) => (
+                  <SelectItem key={sp.id} value={String(sp.id)}>
+                    {sp.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Kund</Label>
+            <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla kunder" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla kunder</SelectItem>
+                {customers.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Atteststatus</Label>
+            <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla</SelectItem>
+                <SelectItem value="attested">Attesterade</SelectItem>
+                <SelectItem value="not_attested">Ej attesterade</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Fakturering</Label>
+            <Select value={selectedInvoiceStatus} onValueChange={setSelectedInvoiceStatus}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla</SelectItem>
+                <SelectItem value="invoiced">Fakturerade</SelectItem>
+                <SelectItem value="not_invoiced">Ej fakturerade</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Vecka</Label>
+            <Select value={selectedWeek} onValueChange={setSelectedWeek}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Alla veckor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alla veckor</SelectItem>
+                {weekOptions.map((wk) => (
+                  <SelectItem key={wk} value={wk}>
+                    {`Vecka ${wk.split("W")[1]}, ${wk.split("-")[0]}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-sm text-muted-foreground">Datumintervall</Label>
+            <div className="flex items-center gap-2">
+              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-[150px]" />
+              <span className="text-sm text-muted-foreground">–</span>
+              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[150px]" />
+            </div>
+          </div>
+
+          <div className="flex items-end">
+            <Button variant="outline" onClick={loadEntries} disabled={loading} className="w-full">
+              Uppdatera
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -533,109 +655,322 @@ export default function TimeAttestations() {
           </Card>
         )}
 
-        {filteredEntries.map((entry) => (
-          <Card key={entry.id} className="shadow-card hover:shadow-elevated transition-shadow">
-            <CardHeader className="flex flex-row items-start justify-between">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  {statusBadge(entry)}
-                  <span>
-                    {(() => {
-                      const d = entry.date ? new Date(entry.date) : null;
-                      if (d && !Number.isNaN(d.getTime())) {
-                        return `${format(d, "EEEE d MMMM yyyy", { locale: sv })} – ${entry.total_hours.toFixed(2)} h`;
-                      }
-                      return `${entry.date || "Okänt datum"} – ${entry.total_hours.toFixed(2)} h`;
-                    })()}
-                  </span>
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  {(entry.start_time || "–")} – {(entry.end_time || "–")} · {entry.project?.name || "Projekt saknas"}
-                  {entry.subproject?.name ? ` · ${entry.subproject.name}` : ""}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {entry.user_full_name || entry.user_email || entry.user_id} · {entry.job_role?.name || "Roll saknas"}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {entry.attested_by ? (
-                  <Button size="sm" variant="outline" onClick={() => attestEntry(entry.id, false)}>
-                    <Unlock className="h-4 w-4 mr-1" /> Lås upp
+        {filteredEntries.map((entry) => {
+          const d = entry.date ? new Date(entry.date) : null;
+          const dateLabel =
+            d && !Number.isNaN(d.getTime())
+              ? `${format(d, "EEEE d MMMM", { locale: sv })}`
+              : entry.date || "Okänt datum";
+
+          const userName = entry.user_full_name || entry.user_email || entry.user_id;
+          const shift = entry.shift_type || "–";
+          const restLabel = entry.break_minutes ? `${entry.break_minutes} min` : "Ingen rast";
+          return (
+            <Card key={entry.id} className="shadow-card hover:shadow-elevated transition-shadow">
+              <CardHeader className="flex flex-row items-start justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    {statusBadge(entry)}
+                    <span>{userName} – {dateLabel}</span>
+                    <span className="text-muted-foreground text-sm">{entry.total_hours.toFixed(2)} h</span>
+                  </CardTitle>
+                  <div className="text-sm text-muted-foreground flex flex-wrap gap-3">
+                    <span>{entry.start_time || "–"} – {entry.end_time || "–"}</span>
+                    <span>Rast: {restLabel}</span>
+                    <span>Skift: {shift}</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground flex flex-wrap gap-3">
+                    <span>Projekt: {entry.project?.name || "–"}</span>
+                    {entry.subproject?.name && <span>Underprojekt: {entry.subproject.name}</span>}
+                    <span>Roll: {entry.job_role?.name || "–"}</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground flex flex-wrap gap-3">
+                    <span>Traktamente: {entry.per_diem_type || "none"}</span>
+                    <span>Restid: {entry.travel_time_hours ?? 0}h</span>
+                    <span>ÖT vardag: {entry.overtime_weekday_hours ?? 0}h</span>
+                    <span>ÖT helg: {entry.overtime_weekend_hours ?? 0}h</span>
+                  </div>
+                  {entry.ao_number && <div className="text-sm text-muted-foreground">AO: {entry.ao_number}</div>}
+                  {entry.materials && entry.materials.length > 0 && (
+                    <div className="text-sm text-muted-foreground flex flex-wrap gap-2">
+                      {entry.materials.map((m) => {
+                        const mt = materialTypes.find((t) => t.id === String(m.material_type_id));
+                        return (
+                          <Badge key={`${entry.id}-mat-${m.material_type_id}`} variant="outline">
+                            {mt?.name || m.material_type_id}: {m.quantity} {mt?.unit || ""}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {entry.work_description && (
+                    <p className="text-sm text-muted-foreground">Kommentar: {entry.work_description}</p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(entry)}>
+                    <Pencil className="h-4 w-4 mr-1" /> Redigera
                   </Button>
-                ) : (
-                  <Button size="sm" onClick={() => attestEntry(entry.id, true)}>
-                    <Lock className="h-4 w-4 mr-1" /> Attestera
+                  {entry.attested_by ? (
+                    <Button size="sm" variant="outline" onClick={() => attestEntry(entry.id, false)}>
+                      <Unlock className="h-4 w-4 mr-1" /> Lås upp
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => attestEntry(entry.id, true)}>
+                      <Lock className="h-4 w-4 mr-1" /> Attestera
+                    </Button>
+                  )}
+                  <Button size="sm" variant="destructive" onClick={() => { setEditEntry(entry); setShowDeleteConfirm(true); }}>
+                    Radera
                   </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={() => openEdit(entry)}>
-                  <Pencil className="h-4 w-4 mr-1" /> Redigera
-                </Button>
-              </div>
-            </CardHeader>
-            {entry.work_description && (
-              <CardContent className="text-sm text-muted-foreground pt-0">{entry.work_description}</CardContent>
-            )}
-          </Card>
-        ))}
+                </div>
+              </CardHeader>
+            </Card>
+          );
+        })}
       </div>
 
       <Dialog open={!!editEntry} onOpenChange={() => setEditEntry(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Redigera tidrapport</DialogTitle>
-            <DialogDescription>Uppdatera projekt, roll och beskrivning.</DialogDescription>
+            <DialogDescription>Uppdatera tid, projekt, roll och övriga fält.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Select value={editProjectId} onValueChange={(v) => { setEditProjectId(v); setEditSubprojectId(""); }}>
-              <SelectTrigger>
-                <SelectValue placeholder="Projekt" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-sm text-muted-foreground">Datum</Label>
+                <Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-sm text-muted-foreground">Starttid</Label>
+                  <Input type="time" value={editStartTime} onChange={(e) => setEditStartTime(e.target.value)} />
+                </div>
+                <div>
+                  <Label className="text-sm text-muted-foreground">Sluttid</Label>
+                  <Input type="time" value={editEndTime} onChange={(e) => setEditEndTime(e.target.value)} />
+                </div>
+              </div>
+            </div>
 
-            <Select value={editSubprojectId} onValueChange={setEditSubprojectId} disabled={!editProjectId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Underprojekt" />
-              </SelectTrigger>
-              <SelectContent>
-                {subprojectsForProject.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-sm text-muted-foreground">Rast</Label>
+                <Select value={editBreakMinutes} onValueChange={setEditBreakMinutes}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Välj rast" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REST_OPTIONS.map((m) => (
+                      <SelectItem key={m} value={m}>{m === "0" ? "Ingen rast" : `${m} minuter`}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm text-muted-foreground">AO-nummer (valfritt)</Label>
+                <Input value={editAoNumber} onChange={(e) => setEditAoNumber(e.target.value)} />
+              </div>
+            </div>
 
-            <Select value={editJobRoleId} onValueChange={setEditJobRoleId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Yrkesroll" />
-              </SelectTrigger>
-              <SelectContent>
-                {jobRoles.map((j) => (
-                  <SelectItem key={j.id} value={j.id}>
-                    {j.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground">Projekt</Label>
+              <Select value={editProjectId} onValueChange={(v) => { setEditProjectId(v); setEditSubprojectId(""); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Välj projekt" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground">Underprojekt (valfritt)</Label>
+              <Select value={editSubprojectId} onValueChange={setEditSubprojectId} disabled={!editProjectId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Välj underprojekt" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subprojectsForProject.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground">Yrkesroll</Label>
+              <Select value={editJobRoleId} onValueChange={setEditJobRoleId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Välj yrkesroll" />
+                </SelectTrigger>
+                <SelectContent>
+                  {jobRoles.map((j) => (
+                    <SelectItem key={j.id} value={j.id}>
+                      {j.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm text-muted-foreground">Traktamente</label>
+                <Select value={editPerDiem} onValueChange={setEditPerDiem}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Traktamente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ingen</SelectItem>
+                    <SelectItem value="half">Halv</SelectItem>
+                    <SelectItem value="full">Hel</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Restid (timmar)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={editTravelHours}
+                  onChange={(e) => setEditTravelHours(e.target.value)}
+                />
+                <div className="flex items-center gap-2 mt-2">
+                  <Checkbox
+                    id="saveTravel"
+                    checked={editSaveTravelComp}
+                    onCheckedChange={(v) => setEditSaveTravelComp(v === true)}
+                  />
+                  <label htmlFor="saveTravel" className="text-sm text-muted-foreground">Spara restidsersättning</label>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm text-muted-foreground">Övertid vardag (timmar)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={editOvertimeWeekday}
+                  onChange={(e) => setEditOvertimeWeekday(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">Övertid helg (timmar)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={editOvertimeWeekend}
+                  onChange={(e) => setEditOvertimeWeekend(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
 
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Arbetsbeskrivning</label>
               <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
             </div>
 
+            <div className="space-y-2">
+              <Label className="text-sm text-muted-foreground">Lägg till tillägg</Label>
+              <div className="flex gap-2">
+                <Select value={selectedMaterialType} onValueChange={setSelectedMaterialType}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Välj material" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {materialTypes.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name} {m.unit ? `(${m.unit})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Antal"
+                  value={materialQuantity}
+                  onChange={(e) => setMaterialQuantity(e.target.value)}
+                  className="w-28"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (!selectedMaterialType) return;
+                    const qty = Number(materialQuantity) || 0;
+                    if (qty <= 0) return;
+                    // ersätt om samma typ redan finns
+                    setEditMaterials((prev) => {
+                      const filtered = prev.filter((m) => m.material_type_id !== selectedMaterialType);
+                      return [...filtered, { material_type_id: selectedMaterialType, quantity: qty }];
+                    });
+                    setMaterialQuantity("0");
+                    setSelectedMaterialType("");
+                  }}
+                >
+                  Lägg till
+                </Button>
+              </div>
+              {editMaterials.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {editMaterials.map((m) => {
+                    const mt = materialTypes.find((t) => t.id === m.material_type_id);
+                    return (
+                      <Badge key={m.material_type_id} variant="secondary" className="gap-1">
+                        {mt?.name || m.material_type_id}: {m.quantity} {mt?.unit || ""}
+                        <X
+                          className="h-3 w-3 cursor-pointer hover:text-destructive"
+                          onClick={() => setEditMaterials((prev) => prev.filter((x) => x.material_type_id !== m.material_type_id))}
+                        />
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2 pt-2">
+              {editEntry && (
+                <Button variant="destructive" onClick={() => setShowDeleteConfirm(true)}>
+                  Ta bort
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setEditEntry(null)}>
                 Avbryt
               </Button>
               <Button onClick={saveEdit}>Spara</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ta bort tidrapport</DialogTitle>
+            <DialogDescription>Är du säker på att du vill ta bort denna tidrapport? Detta kan inte ångras.</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>Avbryt</Button>
+            <Button variant="destructive" onClick={deleteEntry}>Ta bort</Button>
           </div>
         </DialogContent>
       </Dialog>
