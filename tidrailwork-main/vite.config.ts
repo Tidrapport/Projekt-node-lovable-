@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => ({
       "/plans": "http://localhost:3000",
       "/scheduled-assignments": "http://localhost:3000",
       "/deviation-reports": "http://localhost:3000",
+      "/uploads": "http://localhost:3000",
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

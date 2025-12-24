@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "@/api/client";
+import { apiFetch, getToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 import { useAuth } from "@/contexts/AuthContext";
+import { Eye, FileDown } from "lucide-react";
 
 type DeviationReport = {
   id: string;
@@ -26,7 +27,6 @@ type DeviationReport = {
   project_name?: string | null;
   time_entry_start?: string | null;
   time_entry_end?: string | null;
-  images?: { storage_path: string }[];
 };
 
 const severityLabel = (s?: string | null) => {
@@ -57,6 +57,8 @@ export default function AdminDeviations() {
   const [selected, setSelected] = useState<DeviationReport | null>(null);
   const [form, setForm] = useState({ title: "", description: "", severity: "medium", status: "open" });
   const [saving, setSaving] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewEntry, setViewEntry] = useState<DeviationReport | null>(null);
   const [images, setImages] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
@@ -72,11 +74,11 @@ export default function AdminDeviations() {
         id: String(d.id),
         images: d.images || [],
       }));
-      const imgs: Record<string, string[]> = {};
+      const imgMap: Record<string, string[]> = {};
       mapped.forEach((d) => {
-        imgs[d.id] = (d.images || []).map((img: any) => img.storage_path);
+        imgMap[d.id] = (d.images || []).map((img: any) => img.storage_path);
       });
-      setImages(imgs);
+      setImages(imgMap);
       setDeviations(mapped);
     } catch (e: any) {
       toast.error(e.message || "Kunde inte hämta avvikelser");
@@ -119,36 +121,39 @@ export default function AdminDeviations() {
     }
   };
 
+  const openView = (d: DeviationReport) => {
+    setViewEntry(d);
+    setViewOpen(true);
+  };
+
+  const safeFormat = (value?: string | null, fmt = "d MMM yyyy") => {
+    if (!value) return "Okänt datum";
+    try {
+      return format(new Date(value), fmt, { locale: sv });
+    } catch {
+      return value;
+    }
+  };
+
   const downloadPdf = (d: DeviationReport) => {
-    const w = window.open("", "_blank", "width=900,height=1100");
-    if (!w) return;
-    const dateStr = d.time_entry_date ? (() => { try { return format(new Date(d.time_entry_date), "d MMM yyyy", { locale: sv }); } catch { return d.time_entry_date; } })() : "";
-    const imgs = images[d.id] || [];
-    w.document.write(`
-      <html><head><title>Avvikelse ${d.id}</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 16px; }
-        h1 { font-size: 20px; margin-bottom: 8px; }
-        .meta { margin-bottom: 8px; color: #444; }
-        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; border: 1px solid #ddd; margin-right: 6px; }
-        .images img { height: 120px; margin: 4px; border: 1px solid #ccc; border-radius: 4px; object-fit: cover; }
-      </style>
-      </head><body>
-        <h1>${d.title}</h1>
-        <div class="meta">
-          <div>Användare: ${d.user_full_name || d.user_email || "-"}</div>
-          <div>Projekt: ${d.project_name || "-"}</div>
-          <div>Datum: ${dateStr}</div>
-          <div>Skift: ${d.time_entry_start || ""} ${d.time_entry_end ? " - " + d.time_entry_end : ""}</div>
-          <div>Status: ${statusLabel(d.status)}</div>
-          <div>Allvarlighet: ${severityLabel(d.severity)}</div>
-        </div>
-        <div><strong>Beskrivning</strong><br/>${d.description || "-"}</div>
-        ${imgs.length ? `<div class="images"><strong>Bilder</strong><br/>${imgs.map(src => `<img src="${src}" />`).join("")}</div>` : ""}
-        <script>window.print();</script>
-      </body></html>
-    `);
-    w.document.close();
+    const token = getToken();
+    const base = import.meta.env.VITE_API_BASE_URL?.trim() || "";
+    const url = base ? `${base}/deviation-reports/${d.id}/pdf` : `/deviation-reports/${d.id}/pdf`;
+    fetch(url, {
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Kunde inte hämta PDF");
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `avvikelse_${d.id}.pdf`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch((e) => toast.error(e.message || "Kunde inte ladda ner PDF"));
   };
 
   if (!isAdmin) {
@@ -187,17 +192,11 @@ export default function AdminDeviations() {
                   <Badge variant="outline">{severityLabel(d.severity)}</Badge>
                   <Badge variant="secondary">{statusLabel(d.status)}</Badge>
                 </div>
-                {images[d.id]?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {images[d.id].map((src, idx) => (
-                      <img key={`${d.id}-${idx}`} src={src} alt="Avvikelsebild" className="h-20 w-20 object-cover rounded border" />
-                    ))}
-                  </div>
-                )}
               </div>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => openEdit(d)}>Redigera</Button>
-                <Button size="sm" variant="secondary" onClick={() => downloadPdf(d)}>Ladda ner PDF</Button>
+                <Button size="sm" variant="outline" onClick={() => openView(d)}><Eye className="h-4 w-4 mr-1" /> Visa</Button>
+                <Button size="sm" variant="outline" onClick={() => downloadPdf(d)}><FileDown className="h-4 w-4 mr-1" /> PDF</Button>
+                <Button size="sm" variant="secondary" onClick={() => openEdit(d)}>Redigera</Button>
               </div>
             </CardHeader>
           </Card>
@@ -250,6 +249,39 @@ export default function AdminDeviations() {
               <Button onClick={saveEdit} disabled={saving}>{saving ? "Sparar..." : "Spara"}</Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{viewEntry?.title}</DialogTitle>
+            <DialogDescription>Detaljerad avvikelseinformation</DialogDescription>
+          </DialogHeader>
+          {viewEntry && (
+            <div className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                {viewEntry.user_full_name || viewEntry.user_email} • {safeFormat(viewEntry.time_entry_date)}
+                {viewEntry.time_entry_start && viewEntry.time_entry_end ? ` • ${viewEntry.time_entry_start} - ${viewEntry.time_entry_end}` : ""}
+              </div>
+              <div className="flex gap-2">
+                <Badge variant="outline">{severityLabel(viewEntry.severity)}</Badge>
+                <Badge variant="secondary">{statusLabel(viewEntry.status)}</Badge>
+              </div>
+              <div className="text-sm"><strong>Projekt:</strong> {viewEntry.project_name || "-"}</div>
+              <div className="text-sm"><strong>Beskrivning:</strong><br />{viewEntry.description || "-"}</div>
+              {images[viewEntry.id]?.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {images[viewEntry.id].map((src, idx) => (
+                    <img key={idx} src={src} alt="Avvikelsebild" className="w-full h-32 object-cover rounded border" />
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={() => downloadPdf(viewEntry)}><FileDown className="h-4 w-4 mr-1" /> PDF</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

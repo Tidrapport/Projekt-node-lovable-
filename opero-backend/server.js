@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
+const PDFDocument = require("pdfkit");
 const db = require("./database");
 
 const app = express();
@@ -16,9 +17,12 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // ✅ servera alla .html, .js, .css osv från samma mapp som server.js
 app.use(express.static(__dirname));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Serve uppladdade filer (bilder m.m.)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -2493,23 +2497,19 @@ app.get("/deviation-reports", requireAuth, (req, res) => {
     if (String(include_images) === "true" && rows.length > 0) {
       const ids = rows.map((r) => r.id);
       const placeholders = ids.map(() => "?").join(",");
-      db.all(
-        `SELECT * FROM deviation_images WHERE deviation_report_id IN (${placeholders})`,
-        ids,
-        (imgErr, imgs) => {
-          if (imgErr) {
-            console.error("DB-fel vid SELECT deviation_images:", imgErr);
-            return res.status(500).json({ error: "DB error" });
-          }
-          const byId = new Map();
-          imgs.forEach((img) => {
-            if (!byId.has(img.deviation_report_id)) byId.set(img.deviation_report_id, []);
-            byId.get(img.deviation_report_id).push(img);
-          });
-          const out = rows.map((r) => ({ ...r, images: byId.get(r.id) || [] }));
-          res.json(out);
+      db.all(`SELECT * FROM deviation_images WHERE deviation_report_id IN (${placeholders})`, ids, (imgErr, imgs) => {
+        if (imgErr) {
+          console.error("DB-fel vid SELECT deviation_images:", imgErr);
+          return res.status(500).json({ error: "DB error" });
         }
-      );
+        const byId = new Map();
+        imgs.forEach((img) => {
+          if (!byId.has(img.deviation_report_id)) byId.set(img.deviation_report_id, []);
+          byId.get(img.deviation_report_id).push(img);
+        });
+        const out = rows.map((r) => ({ ...r, images: byId.get(r.id) || [] }));
+        res.json(out);
+      });
     } else {
       res.json(rows || []);
     }
@@ -2652,11 +2652,10 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
   );
 });
 
-// POST /deviation-reports/:id/images (expects { filename, content_base64 })
+// POST /deviation-reports/:id/images (base64 upload)
 app.post("/deviation-reports/:id/images", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
   if (!companyId) return res.status(400).json({ error: "Company not found" });
-
   const id = req.params.id;
   const { filename, content_base64 } = req.body || {};
   if (!filename || !content_base64) return res.status(400).json({ error: "filename och content_base64 krävs" });
@@ -2672,11 +2671,7 @@ app.post("/deviation-reports/:id/images", requireAuth, (req, res) => {
       if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
 
       const uploadsDir = path.join(__dirname, "uploads", "deviation-images");
-      try {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      } catch (e) {
-        console.error("Kunde inte skapa upload-mapp:", e);
-      }
+      try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (e) { console.error("Kunde inte skapa upload-mapp:", e); }
 
       const safeName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
       const filePath = path.join(uploadsDir, safeName);
@@ -2738,6 +2733,81 @@ app.get("/deviation-reports/:id/images", requireAuth, (req, res) => {
   );
 });
 
+// GET /deviation-reports/:id/pdf (server-side PDF)
+app.get("/deviation-reports/:id/pdf", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const id = req.params.id;
+
+  db.get(
+    `SELECT dr.*, u.email AS user_email, (u.first_name || ' ' || u.last_name) AS user_full_name,
+            tr.datum AS time_entry_date, tr.starttid AS time_entry_start, tr.sluttid AS time_entry_end,
+            p.name AS project_name
+     FROM deviation_reports dr
+     JOIN users u ON u.id = dr.user_id
+     JOIN time_reports tr ON tr.id = dr.time_entry_id
+     LEFT JOIN projects p ON p.id = tr.project_id
+     WHERE dr.id = ? AND dr.company_id = ?`,
+    [id, companyId],
+    (err, dev) => {
+      if (err) {
+        console.error("DB-fel vid SELECT avvikelse:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!dev) return res.status(404).json({ error: "Avvikelse hittades inte" });
+
+      db.all(`SELECT * FROM deviation_images WHERE deviation_report_id = ?`, [id], (imgErr, imgs) => {
+        if (imgErr) {
+          console.error("DB-fel vid SELECT deviation_images:", imgErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename=avvikelse_${id}.pdf`);
+
+        const doc = new PDFDocument({ margin: 40, size: "A4" });
+        doc.pipe(res);
+
+        doc.fontSize(20).text("Avvikelse – Sammanställning", { align: "left" });
+        doc.moveDown(0.5);
+        doc.fontSize(10).text(`Rapport ID: ${id}`);
+        doc.text(`Användare: ${dev.user_full_name || dev.user_email || "-"}`);
+        doc.text(`Projekt: ${dev.project_name || "-"}`);
+        doc.text(`Datum: ${dev.time_entry_date || "-"}`);
+        doc.text(`Tid: ${dev.time_entry_start || ""} ${dev.time_entry_end ? "- " + dev.time_entry_end : ""}`);
+        doc.moveDown();
+
+        doc.fontSize(12).text("Detaljer", { underline: true });
+        doc.moveDown(0.5);
+        doc.fontSize(10).text(`Titel: ${dev.title}`);
+        doc.text(`Allvarlighet: ${dev.severity || "-"}`);
+        doc.text(`Status: ${dev.status || "-"}`);
+        doc.moveDown(0.5);
+        doc.fontSize(10).text("Beskrivning:");
+        doc.fontSize(10).text(dev.description || "-", { width: 500 });
+        doc.moveDown();
+
+        if (imgs && imgs.length > 0) {
+          doc.fontSize(12).text("Bilder", { underline: true });
+          doc.moveDown(0.5);
+          imgs.forEach((img) => {
+            const filePath = path.join(__dirname, img.storage_path);
+            if (fs.existsSync(filePath)) {
+              try {
+                doc.image(filePath, { fit: [200, 150] });
+                doc.moveDown(0.5);
+              } catch (e) {
+                console.error("Kunde inte läsa bild:", e);
+              }
+            }
+          });
+        }
+
+        doc.end();
+      });
+    }
+  );
+});
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`Opero backend kör på http://localhost:${PORT}`);

@@ -129,18 +129,9 @@ const Deviations = () => {
 
       if (!deviationData) throw new Error("Kunde inte skapa avvikelse");
 
-      // Ladda upp bilder om några finns
+      // Bilduppladdning saknas i nuvarande backend; hoppa över
       if (images.length > 0) {
-        for (const image of images) {
-          const b64 = await toBase64(image);
-          await apiFetch(`/deviation-reports/${deviationData.id}/images`, {
-            method: "POST",
-            json: {
-              filename: image.name,
-              content_base64: b64,
-            },
-          }).catch(() => toast.warning(`Kunde inte ladda upp ${image.name}`));
-        }
+        toast.warning("Bilduppladdning stöds ännu inte i backend, rapporten sparades ändå.");
       }
 
       toast.success("Avvikelserapport skapad!");
@@ -161,14 +152,6 @@ const Deviations = () => {
     setSeverity("medium");
     setImages([]);
   };
-
-  const toBase64 = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (e) => reject(e);
-      reader.readAsDataURL(file);
-    });
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
