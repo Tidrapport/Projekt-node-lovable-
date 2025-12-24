@@ -9,9 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { format, addWeeks, startOfWeek, getISOWeek, getISOWeekYear, isWithinInterval } from "date-fns";
+import { format, addWeeks, startOfWeek, getISOWeek, getISOWeekYear, isWithinInterval, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
 import { CheckCircle, Lock, Unlock, Pencil, CheckCircle2, AlertCircle } from "lucide-react";
+import { useRef } from "react";
 
 type User = { id: string; full_name?: string; email?: string };
 type Project = { id: string; name: string };
@@ -73,6 +74,7 @@ export default function TimeAttestations() {
   const [toDate, setToDate] = useState<string>("");
   const [selectedWeek, setSelectedWeek] = useState<string>("all");
   const [loading, setLoading] = useState(false);
+  const filterRef = useRef<HTMLDivElement | null>(null);
 
   const [editEntry, setEditEntry] = useState<TimeEntry | null>(null);
   const [editDescription, setEditDescription] = useState("");
@@ -235,16 +237,16 @@ export default function TimeAttestations() {
 
     const grouped = new Map<
       string,
-      { label: string; attested: number; total: number; invoiced: number }
+      { label: string; attested: number; total: number; invoiced: number; week: number; year: number }
     >();
 
     inRange.forEach((e) => {
-      const d = new Date(e.date);
+      const d = e.date ? parseISO(e.date) : new Date(e.date || "");
       const wk = getISOWeek(d);
       const yr = getISOWeekYear(d);
       const key = `${yr}-W${String(wk).padStart(2, "0")}`;
       const label = `Vecka ${wk}`;
-      if (!grouped.has(key)) grouped.set(key, { label, attested: 0, total: 0, invoiced: 0 });
+      if (!grouped.has(key)) grouped.set(key, { label, attested: 0, total: 0, invoiced: 0, week: wk, year: yr });
       const g = grouped.get(key)!;
       g.total += 1;
       if (e.attested_by) g.attested += 1;
@@ -253,6 +255,53 @@ export default function TimeAttestations() {
 
     return Array.from(grouped.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [entries]);
+
+  const pendingByWeek = useMemo(() => {
+    const today = new Date();
+    const start = startOfWeek(addWeeks(today, -3), { weekStartsOn: 1 });
+    const end = addWeeks(start, 4);
+    const inRange = entries.filter((e) => {
+      const d = e.date ? new Date(e.date) : null;
+      return d && isWithinInterval(d, { start, end });
+    });
+
+    const grouped = new Map<
+      string,
+      { label: string; users: Map<string, { name: string; count: number }>; week: number; year: number; total: number; attested: number }
+    >();
+
+    inRange.forEach((e) => {
+      const d = e.date ? new Date(e.date) : null;
+      if (!d) return;
+      const wk = getISOWeek(d);
+      const yr = getISOWeekYear(d);
+      const key = `${yr}-W${String(wk).padStart(2, "0")}`;
+      const label = `Vecka ${wk}`;
+      if (!grouped.has(key)) grouped.set(key, { label, users: new Map(), week: wk, year: yr, total: 0, attested: 0 });
+      const g = grouped.get(key)!;
+      g.total += 1;
+      if (e.attested_by) {
+        g.attested += 1;
+      } else {
+        const name =
+          e.user_full_name ||
+          users.find((u) => u.id === e.user_id)?.full_name ||
+          e.user_email ||
+          e.user_id;
+        const keyUser = e.user_id;
+        const existing = g.users.get(keyUser);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          g.users.set(keyUser, { name, count: 1 });
+        }
+      }
+    });
+
+    return Array.from(grouped.entries())
+      .filter(([, g]) => g.total > g.attested) // only weeks with pending
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [entries, users]);
 
   const weekOptions = useMemo(() => {
     const set = new Set<string>();
@@ -266,6 +315,22 @@ export default function TimeAttestations() {
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [entries]);
 
+  const userLabel = (id: string, fallback?: string | null) => {
+    return (
+      users.find((u) => u.id === id)?.full_name ||
+      fallback ||
+      id
+    );
+  };
+
+  const jumpToUser = (userId: string) => {
+    setSelectedUser(userId);
+    // Scroll to filter section so admin ser att filtrering aktiverats
+    if (filterRef.current) {
+      filterRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   return (
     <div className="container mx-auto p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -275,33 +340,78 @@ export default function TimeAttestations() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4 mb-6">
-        {weeksOverview.length === 0 && (
-          <Card>
-            <CardContent className="py-4 text-sm text-muted-foreground">Inga rapporter senaste veckorna.</CardContent>
-          </Card>
-        )}
-        {weeksOverview.map(([key, data]) => {
-          const ready = data.attested === data.total && data.total > 0;
-          const color = ready ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50";
-          return (
-            <Card key={key} className={`shadow-card ${color}`}>
+      {/* Klart för fakturering */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Klart för fakturering</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 md:grid-cols-4">
+            {weeksOverview.slice(0, 4).map(([key, data]) => {
+              const ready = data.attested === data.total && data.total > 0;
+              const color = ready ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50";
+              return (
+                <Card key={key} className={`shadow-card ${color}`}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      {ready ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
+                      {data.label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground space-y-1">
+                    <div>{data.attested}/{data.total} attesterade</div>
+                    <div>{data.invoiced}/{data.total} fakturerade</div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+            {weeksOverview.length === 0 && (
+              <Card>
+                <CardContent className="py-4 text-sm text-muted-foreground">Inga rapporter senaste veckorna.</CardContent>
+              </Card>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Oattesterade senaste veckorna */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Oattesterade tidrapporter (senaste 4 veckorna)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {pendingByWeek.length === 0 && (
+            <div className="text-sm text-muted-foreground">Alla tidrapporter är attesterade för de senaste veckorna.</div>
+          )}
+          {pendingByWeek.map(([key, data]) => (
+            <Card key={key} className="border border-orange-200 bg-orange-50">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  {ready ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
-                  {data.label}
+                <CardTitle className="text-base flex items-center gap-2 text-orange-700">
+                  <AlertCircle className="h-4 w-4" />
+                  {data.label} <Badge variant="outline" className="border-orange-300 text-orange-700">{data.total - data.attested} rapporter</Badge>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="text-sm text-muted-foreground space-y-1">
-                <div>{data.attested}/{data.total} attesterade</div>
-                <div>{data.invoiced}/{data.total} fakturerade</div>
+              <CardContent className="space-y-2">
+                {Array.from(data.users.entries()).map(([userId, info]) => (
+                  <Badge
+                    key={userId}
+                    variant="secondary"
+                    className="bg-white text-orange-700 border-orange-200 cursor-pointer hover:bg-orange-100"
+                    onClick={() => jumpToUser(userId)}
+                  >
+                    {userLabel(userId, info.name)} · {info.count}
+                  </Badge>
+                ))}
+                {data.users.size === 0 && (
+                  <p className="text-sm text-muted-foreground">Inga oattesterade rapporter denna vecka.</p>
+                )}
               </CardContent>
             </Card>
-          );
-        })}
-      </div>
+          ))}
+        </CardContent>
+      </Card>
 
-      <Card className="mb-6">
+      <Card className="mb-6" ref={filterRef}>
         <CardHeader>
           <CardTitle>Filter</CardTitle>
         </CardHeader>

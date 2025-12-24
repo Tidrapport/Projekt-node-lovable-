@@ -310,6 +310,8 @@ db.serialize(() => {
       end_date TEXT NOT NULL,
       tentative INTEGER DEFAULT 0,
       notes TEXT,
+      first_shift_start_time TEXT,
+      work_address TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
@@ -326,6 +328,18 @@ db.serialize(() => {
     if (!hasSubproject) {
       db.run(`ALTER TABLE plans ADD COLUMN subproject TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till subproject:", e);
+      });
+    }
+    const hasFirstShift = columns.some((c) => c.name === "first_shift_start_time");
+    if (!hasFirstShift) {
+      db.run(`ALTER TABLE plans ADD COLUMN first_shift_start_time TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till first_shift_start_time:", e);
+      });
+    }
+    const hasWorkAddress = columns.some((c) => c.name === "work_address");
+    if (!hasWorkAddress) {
+      db.run(`ALTER TABLE plans ADD COLUMN work_address TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till work_address:", e);
       });
     }
   });

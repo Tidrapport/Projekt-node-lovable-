@@ -20,6 +20,8 @@ export default defineConfig(({ mode }) => ({
       "/material-types": "http://localhost:3000",
       "/admin": "http://localhost:3000",
       "/superadmin": "http://localhost:3000",
+      "/plans": "http://localhost:3000",
+      "/scheduled-assignments": "http://localhost:3000",
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

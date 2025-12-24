@@ -8,7 +8,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/api/client";
-import { getMe } from "@/api/auth";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
@@ -62,7 +61,7 @@ interface ScheduledAssignment {
 }
 
 export default function AdminPlanning() {
-  const { companyId } = useAuth();
+  const { companyId, user } = useAuth();
   const [assignments, setAssignments] = useState<ScheduledAssignment[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -102,9 +101,11 @@ export default function AdminPlanning() {
     setSelectedProject(projectMatch ? String(projectMatch.id) : "");
     const subMatch = subprojects.find((sp) => sp.name === assignment.subproject);
     setSelectedSubproject(subMatch ? String(subMatch.id) : "");
+    const safeStart = assignment.start_date ? parseISO(assignment.start_date) : undefined;
+    const safeEnd = assignment.end_date ? parseISO(assignment.end_date) : undefined;
     setDateRange({
-      from: parseISO(assignment.start_date),
-      to: parseISO(assignment.end_date),
+      from: safeStart && !isNaN(safeStart.getTime()) ? safeStart : undefined,
+      to: safeEnd && !isNaN(safeEnd.getTime()) ? safeEnd : undefined,
     });
     setNotes(assignment.notes || "");
     setFirstShiftStartTime(assignment.first_shift_start_time?.slice(0, 5) || "");
@@ -122,13 +123,16 @@ export default function AdminPlanning() {
 
   const fetchData = async () => {
     try {
-      // Använd token-scope för users/projects/subprojects (ingen extra query-param för company_id)
-      const [assignmentsRes, usersRes, projectsRes, subprojectsRes] = await Promise.all([
-        apiFetch(`/plans`),
-        apiFetch(`/admin/users`),
-        apiFetch(`/projects`),
-        apiFetch(`/subprojects`),
-      ]);
+      // Scope planer och användare till aktuellt företag
+      const plansUrl = companyId ? `/plans?company_id=${companyId}` : `/plans`;
+      const usersUrl = companyId ? `/admin/users?company_id=${companyId}` : `/admin/users`;
+      const projectsUrl = companyId ? `/projects?company_id=${companyId}` : `/projects`;
+      const subprojectsUrl = companyId ? `/subprojects?company_id=${companyId}` : `/subprojects`;
+
+      const assignmentsRes = await apiFetch(plansUrl).catch(() => []);
+      const usersRes = await apiFetch(usersUrl).catch(() => []);
+      const projectsRes = await apiFetch(projectsUrl).catch(() => []);
+      const subprojectsRes = await apiFetch(subprojectsUrl).catch(() => []);
 
       const normalizedAssignments = (assignmentsRes || []).map((a: any) => ({
         ...a,
@@ -162,9 +166,7 @@ export default function AdminPlanning() {
       toast.error("Vänligen fyll i alla obligatoriska fält");
       return;
     }
-
     try {
-      const userData = await getMe();
       const projectName = projects.find((p) => String(p.id) === String(selectedProject))?.name || selectedProject;
       const subprojectName =
         subprojects.find((sp) => String(sp.id) === String(selectedSubproject))?.name || selectedSubproject || "";
@@ -190,7 +192,7 @@ export default function AdminPlanning() {
             vehicle: selectedVehicle || null,
             work_address: workAddress || null,
             tentative: isTentative,
-            created_by: userData.user?.id,
+            created_by: user?.id,
             company_id: companyId,
           },
         });
@@ -242,7 +244,7 @@ export default function AdminPlanning() {
     <div className="container mx-auto py-8 px-4">
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Planering (Admin)</h1>
+          <h1 className="text-3xl font-bold mb-2">Resursplanering (Admin)</h1>
           <p className="text-muted-foreground">
             Hantera arbetsplanering för användare
           </p>
@@ -251,7 +253,7 @@ export default function AdminPlanning() {
           <DialogTrigger asChild>
             <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
               <Plus className="mr-2 h-4 w-4" />
-              Ny planering
+              Ny resursplan
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">

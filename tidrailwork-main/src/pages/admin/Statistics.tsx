@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { BarChart3, Users, Clock, TrendingUp, Briefcase } from "lucide-react";
 
 interface JobRoleStats {
@@ -53,20 +52,11 @@ const AdminStatistics = () => {
   const fetchStatistics = async () => {
     setLoading(true);
     try {
-      // Fetch all time entries with related data
-      const { data: timeEntries } = await supabase
-        .from("time_entries")
-        .select(`
-          *,
-          job_role:job_roles(id, name),
-          project:projects(id, name),
-          profiles:profiles!time_entries_user_id_fkey(id, full_name)
-        `);
-
-      if (!timeEntries) return;
+      // Hämta tidrapporter via backend-API
+      const timeEntries: any[] = await apiFetch("/time-entries").catch(() => []);
 
       // Calculate overall stats
-      const totalHours = timeEntries.reduce((sum, entry) => sum + Number(entry.total_hours), 0);
+      const totalHours = timeEntries.reduce((sum, entry) => sum + Number(entry.total_hours || 0), 0);
       const totalEntries = timeEntries.length;
       const uniqueUsers = new Set(timeEntries.map(e => e.user_id)).size;
       const avgHoursPerEntry = totalEntries > 0 ? totalHours / totalEntries : 0;
@@ -82,8 +72,8 @@ const AdminStatistics = () => {
       const jobRoleMap = new Map<string, JobRoleStats>();
       timeEntries.forEach(entry => {
         const roleId = entry.job_role_id;
-        const roleName = entry.job_role?.name || "Okänd";
-        const hours = Number(entry.total_hours);
+        const roleName = entry.job_role_name || entry.job_role?.name || "Okänd";
+        const hours = Number(entry.total_hours || 0);
 
         if (!jobRoleMap.has(roleId)) {
           jobRoleMap.set(roleId, {
@@ -111,8 +101,8 @@ const AdminStatistics = () => {
       const projectMap = new Map<string, ProjectStats>();
       timeEntries.forEach(entry => {
         const projectId = entry.project_id;
-        const projectName = entry.project?.name || "Okänt";
-        const hours = Number(entry.total_hours);
+        const projectName = entry.project_name || entry.project?.name || "Okänt";
+        const hours = Number(entry.total_hours || 0);
 
         if (!projectMap.has(projectId)) {
           projectMap.set(projectId, {
@@ -136,8 +126,8 @@ const AdminStatistics = () => {
       const userMap = new Map<string, UserStats>();
       timeEntries.forEach(entry => {
         const userId = entry.user_id;
-        const userName = entry.profiles?.full_name || "Okänd";
-        const hours = Number(entry.total_hours);
+        const userName = entry.user_full_name || entry.profiles?.full_name || "Okänd";
+        const hours = Number(entry.total_hours || 0);
 
         if (!userMap.has(userId)) {
           userMap.set(userId, {

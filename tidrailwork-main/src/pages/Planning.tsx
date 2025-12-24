@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { apiFetch } from "@/api/client";
 import { login, getMe, logout } from "@/api/auth";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { UserPlanningGantt } from "@/components/UserPlanningGantt";
 import { CalendarDays } from "lucide-react";
@@ -35,6 +36,7 @@ interface ScheduledAssignment {
 
 export default function Planning() {
   const { effectiveUserId, isImpersonating, impersonatedUserName } = useEffectiveUser();
+  const { companyId } = useAuth();
   const [assignments, setAssignments] = useState<ScheduledAssignment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -46,8 +48,27 @@ export default function Planning() {
 
   const fetchAssignments = async () => {
     try {
-      const data = await apiFetch(`/scheduled-assignments?user_id=${effectiveUserId}`);
-      setAssignments(data || []);
+      // Hämta endast aktuell användares planering
+      const companyParam = companyId ? `&company_id=${companyId}` : "";
+      const data = await apiFetch(`/plans?user_id=${effectiveUserId}${companyParam}`);
+      const filtered = (data || []).filter((p: any) => String(p.user_id) === String(effectiveUserId));
+      const mapped = filtered.map((p: any) => ({
+        id: String(p.id),
+        project_id: p.project || "",
+        subproject_id: p.subproject || null,
+        start_date: p.start_date,
+        end_date: p.end_date,
+        notes: p.notes || null,
+        first_shift_start_time: p.first_shift_start_time || null,
+        contact_person: p.contact_person || null,
+        contact_phone: p.contact_phone || null,
+        vehicle: p.vehicle || null,
+        work_address: p.work_address || null,
+        is_tentative: p.tentative === 1 || p.tentative === true,
+        projects: { name: p.project || "" },
+        subprojects: p.subproject ? { name: p.subproject } : null,
+      }));
+      setAssignments(mapped);
     } catch (error: any) {
       console.error("Error fetching assignments:", error);
       toast.error("Kunde inte hämta planeringar");

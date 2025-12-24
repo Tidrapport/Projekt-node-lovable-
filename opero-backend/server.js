@@ -44,6 +44,8 @@ function requireAuth(req, res, next) {
       company_id: decoded.company_id || null,
       impersonated: !!decoded.impersonated
     };
+    // Normera så både id och user_id finns (vissa endpoints använder id sedan tidigare)
+    req.user.id = req.user.user_id;
     return next();
   } catch (e) {
     return res.status(401).json({ error: "Invalid token" });
@@ -1136,18 +1138,38 @@ app.get("/auth/me", requireAuth, async (req, res) => {
 // ======================
 //   PLANERINGSUPPDRAG
 // ======================
-// Hämta planeringar: admin ser alla, övriga ser sina egna
+// Hämta planeringar: admin ser alla inom sitt företag, övriga ser sina egna
 app.get("/plans", requireAuth, (req, res) => {
   const admin = isAdminRole(req);
+  const companyId = getScopedCompanyId(req);
+  const requestedUserId = req.query.user_id ? Number(req.query.user_id) : null;
   const params = [];
+  const where = [];
+
   let sql = `
-    SELECT p.*, u.first_name, u.last_name, u.email
+    SELECT p.*, u.first_name, u.last_name, u.email, u.company_id
     FROM plans p
     JOIN users u ON u.id = p.user_id
   `;
-  if (!admin) {
-    sql += " WHERE p.user_id = ?";
-    params.push(req.user.id);
+
+  if (companyId) {
+    where.push("u.company_id = ?");
+    params.push(companyId);
+  }
+  if (requestedUserId) {
+    // Om specifik användare efterfrågas, säkerställ åtkomst
+    if (!admin && requestedUserId !== Number(getAuthUserId(req))) {
+      return res.status(403).json({ error: "Unauthorized to view andra användares planering" });
+    }
+    where.push("p.user_id = ?");
+    params.push(requestedUserId);
+  } else if (!admin) {
+    where.push("p.user_id = ?");
+    params.push(getAuthUserId(req));
+  }
+
+  if (where.length) {
+    sql += " WHERE " + where.join(" AND ");
   }
   sql += " ORDER BY p.start_date, p.end_date";
 
@@ -1160,8 +1182,58 @@ app.get("/plans", requireAuth, (req, res) => {
   });
 });
 
-// Skapa planering (endast admin)
-app.post("/plans", requireAdmin, (req, res) => {
+// Alias för användarnas egen vy (frontend förväntar sig /scheduled-assignments)
+app.get("/scheduled-assignments", requireAuth, (req, res) => {
+  const admin = isAdminRole(req);
+  const companyId = getScopedCompanyId(req);
+  const userId = req.query.user_id ? Number(req.query.user_id) : Number(getAuthUserId(req));
+
+  if (!admin && userId !== Number(getAuthUserId(req))) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+
+  const params = [userId];
+  let sql = `
+    SELECT p.*, u.company_id
+    FROM plans p
+    JOIN users u ON u.id = p.user_id
+    WHERE p.user_id = ?
+  `;
+  if (companyId) {
+    sql += " AND u.company_id = ?";
+    params.push(companyId);
+  }
+
+  sql += " ORDER BY p.start_date, p.end_date";
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /scheduled-assignments:", err);
+      return res.status(500).json({ error: "Kunde inte hämta planeringar." });
+    }
+    const mapped = (rows || []).map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      project_id: r.project || "",
+      subproject_id: r.subproject || null,
+      start_date: r.start_date,
+      end_date: r.end_date,
+      notes: r.notes,
+      first_shift_start_time: r.first_shift_start_time || null,
+      contact_person: r.contact_person || null,
+      contact_phone: r.contact_phone || null,
+      vehicle: r.vehicle || null,
+      work_address: r.work_address || null,
+      is_tentative: r.tentative === 1 || r.tentative === true,
+      projects: { name: r.project || "" },
+      subprojects: r.subproject ? { name: r.subproject } : null,
+    }));
+    res.json(mapped);
+  });
+});
+
+// Skapa planering (admin/super_admin eller användare för sig själv)
+app.post("/plans", requireAuth, (req, res) => {
   const {
     user_id,
     project,
@@ -1174,6 +1246,8 @@ app.post("/plans", requireAdmin, (req, res) => {
     end_date,
     tentative = false,
     notes = "",
+    first_shift_start_time = null,
+    work_address = null,
   } = req.body || {};
 
   if (!user_id || !project || !start_date || !end_date) {
@@ -1190,44 +1264,62 @@ app.post("/plans", requireAdmin, (req, res) => {
   }
 
   const cleanTentative = tentative ? 1 : 0;
-  const sql = `
-    INSERT INTO plans
-      (user_id, project, subproject, contact_person, contact_phone, vehicle, destination, start_date, end_date, tentative, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `;
-  const params = [
-    user_id,
-    String(project).trim(),
-    String(subproject || "").trim(),
-    String(contact_person || "").trim(),
-    String(contact_phone || "").trim(),
-    String(vehicle || "").trim(),
-    String(destination || "").trim(),
-    start_date,
-    end_date,
-    cleanTentative,
-    String(notes || "").trim(),
-  ];
-
-  db.run(sql, params, function (err) {
-    if (err) {
-      console.error("DB-fel vid POST /plans:", err);
-      return res.status(500).json({ error: "Kunde inte spara planeringen." });
+  db.get(`SELECT company_id FROM users WHERE id = ?`, [user_id], (uErr, uRow) => {
+    if (uErr) {
+      console.error("DB-fel vid SELECT user för plan:", uErr);
+      return res.status(500).json({ error: "DB error" });
     }
-    db.get(
-      `SELECT p.*, u.first_name, u.last_name, u.email
-       FROM plans p
-       JOIN users u ON u.id = p.user_id
-       WHERE p.id = ?`,
-      [this.lastID],
-      (gErr, row) => {
-        if (gErr) {
-          console.error("DB-fel vid GET ny planering:", gErr);
-          return res.status(201).json({ id: this.lastID });
-        }
-        res.status(201).json(row);
+    if (!uRow) return res.status(400).json({ error: "Okänd användare" });
+    const scopedCompanyId = getScopedCompanyId(req);
+    const isAdminUser = isAdminRole(req);
+    if (scopedCompanyId && String(scopedCompanyId) !== String(uRow.company_id)) {
+      return res.status(403).json({ error: "Användaren tillhör inte företaget" });
+    }
+    if (!isAdminUser && Number(user_id) !== Number(getAuthUserId(req))) {
+      return res.status(403).json({ error: "Endast admin eller användaren själv kan skapa plan" });
+    }
+
+    const sql = `
+      INSERT INTO plans
+        (user_id, project, subproject, contact_person, contact_phone, vehicle, destination, start_date, end_date, tentative, notes, first_shift_start_time, work_address, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `;
+    const params = [
+      user_id,
+      String(project).trim(),
+      String(subproject || "").trim(),
+      String(contact_person || "").trim(),
+      String(contact_phone || "").trim(),
+      String(vehicle || "").trim(),
+      String(destination || "").trim(),
+      start_date,
+      end_date,
+      cleanTentative,
+      String(notes || "").trim(),
+      first_shift_start_time ? String(first_shift_start_time) : null,
+      work_address ? String(work_address) : null,
+    ];
+
+    db.run(sql, params, function (err) {
+      if (err) {
+        console.error("DB-fel vid POST /plans:", err);
+        return res.status(500).json({ error: "Kunde inte spara planeringen." });
       }
-    );
+      db.get(
+        `SELECT p.*, u.first_name, u.last_name, u.email
+         FROM plans p
+         JOIN users u ON u.id = p.user_id
+         WHERE p.id = ?`,
+        [this.lastID],
+        (gErr, row) => {
+          if (gErr) {
+            console.error("DB-fel vid GET ny planering:", gErr);
+            return res.status(201).json({ id: this.lastID });
+          }
+          res.status(201).json(row);
+        }
+      );
+    });
   });
 });
 

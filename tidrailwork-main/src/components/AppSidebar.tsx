@@ -63,7 +63,7 @@ const adminMainItems = [
   { title: "Fakturering", url: "/admin/billing", icon: FileText },
   { title: "Löner", url: "/admin/salaries", icon: Wallet },
   { title: "Svetsrapporter", url: "/admin/welding-reports", icon: Briefcase },
-  { title: "Planering", url: "/admin/planning", icon: Calendar },
+  { title: "Resursplanering", url: "/admin/planning", icon: Calendar },
   { title: "Avvikelser", url: "/admin/deviations", icon: AlertCircle },
   { title: "Kunder", url: "/admin/customers", icon: Users },
   { title: "Offerter", url: "/admin/offers", icon: FileText },
