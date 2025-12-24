@@ -33,6 +33,8 @@ interface TimeEntry {
   id: string;
   date: string;
   project: { name: string };
+  start_time?: string | null;
+  end_time?: string | null;
 }
 
 const Deviations = () => {
@@ -58,13 +60,31 @@ const Deviations = () => {
     if (!effectiveUserId) return;
 
     // Fetch deviations
-    const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}`);
-    if (deviationsData) setDeviations(deviationsData);
+    try {
+      const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}`);
+      if (deviationsData) setDeviations(deviationsData);
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte hämta avvikelser");
+    }
 
-    // Fetch time entries for dropdown (only for real user, not impersonated)
-    if (!isImpersonating && user) {
-      const entriesData = await apiFetch(`/time-entries?user_id=${user.id}&limit=30`);
-      if (entriesData) setTimeEntries(entriesData);
+    // Fetch time entries for dropdown (för aktuell användare)
+    try {
+      const entriesData = await apiFetch(`/time-entries?limit=30`);
+      if (entriesData) {
+        const mapped = (entriesData || [])
+          .filter((e: any) => e.datum || e.date)
+          .map((e: any) => ({
+            id: String(e.id),
+            date: e.datum || e.date,
+            project: { name: e.project?.name || e.project_name || "Projekt" },
+            start_time: e.start_time || e.starttid || null,
+            end_time: e.end_time || e.sluttid || null,
+          }));
+        setTimeEntries(mapped);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte hämta tidrapporter");
+      setTimeEntries([]);
     }
   };
 
@@ -76,6 +96,15 @@ const Deviations = () => {
 
   const removeImage = (index: number) => {
     setImages(images.filter((_, i) => i !== index));
+  };
+
+  const safeFormat = (value: string | undefined | null, fmt: string) => {
+    if (!value) return "Okänt datum";
+    try {
+      return format(new Date(value), fmt, { locale: sv });
+    } catch {
+      return "Okänt datum";
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -100,16 +129,18 @@ const Deviations = () => {
 
       if (!deviationData) throw new Error("Kunde inte skapa avvikelse");
 
-      // Upload images via backend endpoint
-      for (const image of images) {
-        const form = new FormData();
-        form.append("file", image);
-        form.append("deviation_report_id", deviationData.id);
-
-        await fetch(`/api/uploads/deviation-images`, {
-          method: "POST",
-          body: form,
-        });
+      // Ladda upp bilder om några finns
+      if (images.length > 0) {
+        for (const image of images) {
+          const b64 = await toBase64(image);
+          await apiFetch(`/deviation-reports/${deviationData.id}/images`, {
+            method: "POST",
+            json: {
+              filename: image.name,
+              content_base64: b64,
+            },
+          }).catch(() => toast.warning(`Kunde inte ladda upp ${image.name}`));
+        }
       }
 
       toast.success("Avvikelserapport skapad!");
@@ -130,6 +161,14 @@ const Deviations = () => {
     setSeverity("medium");
     setImages([]);
   };
+
+  const toBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (e) => reject(e);
+      reader.readAsDataURL(file);
+    });
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -189,7 +228,7 @@ const Deviations = () => {
                     <div className="flex-1">
                       <h3 className="font-semibold text-lg">{deviation.title}</h3>
                       <p className="text-sm text-muted-foreground">
-                        {format(new Date(deviation.created_at), "d MMMM yyyy HH:mm", { locale: sv })}
+                        {safeFormat(deviation.created_at, "d MMMM yyyy HH:mm")}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -205,7 +244,7 @@ const Deviations = () => {
                   <div className="text-sm text-muted-foreground">
                     <span className="font-medium">Projekt:</span>{" "}
                     {deviation.time_entry?.project?.name} -{" "}
-                    {format(new Date(deviation.time_entry?.date), "d MMM yyyy", { locale: sv })}
+                    {safeFormat(deviation.time_entry?.date, "d MMM yyyy")}
                   </div>
                 </div>
               </CardContent>
@@ -227,11 +266,15 @@ const Deviations = () => {
                   <SelectValue placeholder="Välj tidrapport" />
                 </SelectTrigger>
                 <SelectContent>
-                  {timeEntries.map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {format(new Date(entry.date), "d MMM yyyy", { locale: sv })} - {entry.project?.name}
-                    </SelectItem>
-                  ))}
+                  {timeEntries.map((entry) => {
+                    const labelDate = safeFormat(entry.date, "d MMM yyyy");
+                    const timeRange = entry.start_time && entry.end_time ? ` • ${entry.start_time} - ${entry.end_time}` : "";
+                    return (
+                      <SelectItem key={entry.id} value={entry.id}>
+                        {labelDate}{timeRange} – {entry.project?.name}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

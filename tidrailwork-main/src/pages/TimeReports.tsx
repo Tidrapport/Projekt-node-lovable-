@@ -88,6 +88,9 @@ const TimeReports = () => {
   const [selectedMaterial, setSelectedMaterial] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [aoNumber, setAoNumber] = useState("");
+  const [deviationTitle, setDeviationTitle] = useState("");
+  const [deviationDescription, setDeviationDescription] = useState("");
+  const [deviationStatus, setDeviationStatus] = useState("none");
 
   useEffect(() => {
     fetchData();
@@ -249,6 +252,17 @@ const TimeReports = () => {
         description: workDescription,
         start_time: startTime,
         end_time: endTime,
+        status: "submitted",
+        allowance_type: perDiemType,
+        allowance_amount: perDiemType === "half" ? 145 : perDiemType === "full" ? 290 : 0,
+        travel_time_hours: parseFloat(travelTimeHours),
+        save_travel_compensation: saveTravelCompensation,
+        overtime_weekday_hours: parseFloat(overtimeWeekdayHours),
+        overtime_weekend_hours: parseFloat(overtimeWeekendHours),
+        ao_number: aoNumber || null,
+        deviation_title: deviationTitle || null,
+        deviation_description: deviationDescription || null,
+        deviation_status: deviationStatus === "none" ? null : deviationStatus,
       });
 
       // Insert material reports if any
@@ -306,6 +320,9 @@ const TimeReports = () => {
     setOvertimeWeekdayHours(entry.overtime_weekday_hours?.toString() || "0");
     setOvertimeWeekendHours(entry.overtime_weekend_hours?.toString() || "0");
     setAoNumber(entry.ao_number || "");
+    setDeviationTitle(entry.deviation_title || "");
+    setDeviationDescription(entry.deviation_description || "");
+    setDeviationStatus(entry.deviation_status || "none");
     setShowDialog(true);
   };
 
@@ -332,8 +349,19 @@ const TimeReports = () => {
         subproject_id: subprojectId || undefined,
         job_role_id: jobRoleId || undefined,
         description: workDescription,
+        status: "submitted",
         start_time: startTime,
         end_time: endTime,
+        allowance_type: perDiemType,
+        allowance_amount: perDiemType === "half" ? 145 : perDiemType === "full" ? 290 : 0,
+        travel_time_hours: parseFloat(travelTimeHours),
+        save_travel_compensation: saveTravelCompensation,
+        overtime_weekday_hours: parseFloat(overtimeWeekdayHours),
+        overtime_weekend_hours: parseFloat(overtimeWeekendHours),
+        ao_number: aoNumber || null,
+        deviation_title: deviationTitle || null,
+        deviation_description: deviationDescription || null,
+        deviation_status: deviationStatus === "none" ? null : deviationStatus,
       });
 
       toast.success("Tidrapport uppdaterad!");
@@ -363,6 +391,9 @@ const TimeReports = () => {
     setOvertimeWeekdayHours("0");
     setOvertimeWeekendHours("0");
     setAoNumber("");
+    setDeviationTitle("");
+    setDeviationDescription("");
+    setDeviationStatus("none");
     setMaterials([]);
     setSelectedMaterial("");
     setMaterialQuantity("");
@@ -387,6 +418,9 @@ const TimeReports = () => {
     setOvertimeWeekdayHours(lastEntry.overtime_weekday_hours?.toString() || "0");
     setOvertimeWeekendHours(lastEntry.overtime_weekend_hours?.toString() || "0");
     setAoNumber(lastEntry.ao_number || "");
+    setDeviationTitle(lastEntry.deviation_title || "");
+    setDeviationDescription(lastEntry.deviation_description || "");
+    setDeviationStatus(lastEntry.deviation_status || "none");
     toast.success("Kopierade från senaste tidrapporten");
   };
 
@@ -635,7 +669,7 @@ const TimeReports = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="project">Projekt</Label>
-                <Select value={projectId} onValueChange={setProjectId} required>
+                <Select value={projectId || undefined} onValueChange={setProjectId} required>
                   <SelectTrigger id="project" className="text-foreground">
                     <SelectValue placeholder="Välj projekt" className="text-foreground" />
                   </SelectTrigger>
@@ -650,7 +684,7 @@ const TimeReports = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="subproject">Underprojekt (valfritt)</Label>
-                <Select value={subprojectId} onValueChange={setSubprojectId}>
+                <Select value={subprojectId || undefined} onValueChange={setSubprojectId}>
                   <SelectTrigger id="subproject" className="text-foreground">
                     <SelectValue placeholder="Välj underprojekt" className="text-foreground" />
                   </SelectTrigger>
@@ -668,7 +702,7 @@ const TimeReports = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="jobRole">Yrkesroll</Label>
-                <Select value={jobRoleId} onValueChange={setJobRoleId} required>
+                <Select value={jobRoleId || undefined} onValueChange={setJobRoleId} required>
                   <SelectTrigger id="jobRole" className="text-foreground">
                     <SelectValue placeholder="Välj roll" className="text-foreground" />
                   </SelectTrigger>
@@ -706,7 +740,7 @@ const TimeReports = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="perDiem">Traktamente</Label>
-                <Select value={perDiemType} onValueChange={setPerDiemType}>
+                <Select value={perDiemType || undefined} onValueChange={setPerDiemType}>
                   <SelectTrigger id="perDiem">
                     <SelectValue placeholder="Välj traktamente" />
                   </SelectTrigger>
@@ -780,7 +814,7 @@ const TimeReports = () => {
             <div className="space-y-3 pt-2 border-t">
               <Label>Tillägg (valfritt)</Label>
               <div className="flex gap-2">
-                <Select value={selectedMaterial} onValueChange={setSelectedMaterial}>
+                <Select value={selectedMaterial || undefined} onValueChange={setSelectedMaterial}>
                   <SelectTrigger className="flex-1">
                     <SelectValue placeholder="Välj tillägg" />
                   </SelectTrigger>

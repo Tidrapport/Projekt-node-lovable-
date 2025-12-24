@@ -250,6 +250,9 @@ db.serialize(() => {
       subproject_id INTEGER,
       job_role_id INTEGER,
       comment TEXT,
+      deviation_title TEXT,
+      deviation_description TEXT,
+      deviation_status TEXT,
       restid REAL DEFAULT 0,
       status TEXT DEFAULT 'Ny',
       attested_by INTEGER,
@@ -268,6 +271,9 @@ db.serialize(() => {
     }
     const hasType = cols.some((c) => c.name === "traktamente_type");
     const hasAmount = cols.some((c) => c.name === "traktamente_amount");
+    const hasDevTitle = cols.some((c) => c.name === "deviation_title");
+    const hasDevDesc = cols.some((c) => c.name === "deviation_description");
+    const hasDevStatus = cols.some((c) => c.name === "deviation_status");
     if (!hasType) {
       db.run(`ALTER TABLE time_reports ADD COLUMN traktamente_type TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till traktamente_type:", e);
@@ -278,6 +284,21 @@ db.serialize(() => {
       db.run(`ALTER TABLE time_reports ADD COLUMN traktamente_amount REAL DEFAULT 0;`, (e) => {
         if (e) console.error("Kunde inte lägga till traktamente_amount:", e);
         else console.log('Kolumnen "traktamente_amount" har lagts till i time_reports.');
+      });
+    }
+    if (!hasDevTitle) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN deviation_title TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till deviation_title:", e);
+      });
+    }
+    if (!hasDevDesc) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN deviation_description TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till deviation_description:", e);
+      });
+    }
+    if (!hasDevStatus) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN deviation_status TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till deviation_status:", e);
       });
     }
   });
@@ -294,6 +315,68 @@ db.serialize(() => {
       FOREIGN KEY (material_type_id) REFERENCES material_types(id)
     );
   `);
+
+  // --- Deviation reports (linked to tidrapporter) ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS deviation_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      time_entry_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      severity TEXT,
+      status TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (time_entry_id) REFERENCES time_reports(id)
+    );
+  `);
+
+  db.all(`PRAGMA table_info(deviation_reports);`, (err, cols) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för deviation_reports:", err);
+      return;
+    }
+    const hasSeverity = cols.some((c) => c.name === "severity");
+    const hasStatus = cols.some((c) => c.name === "status");
+    const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
+    if (!hasSeverity) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN severity TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till severity i deviation_reports:", e);
+      });
+    }
+    if (!hasStatus) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN status TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till status i deviation_reports:", e);
+      });
+    }
+    if (!hasUpdatedAt) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN updated_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till updated_at i deviation_reports:", e);
+        else db.run(`UPDATE deviation_reports SET updated_at = COALESCE(updated_at, created_at, datetime('now'));`);
+      });
+    }
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_deviation_reports_company ON deviation_reports(company_id);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_deviation_reports_user ON deviation_reports(user_id);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_deviation_reports_entry ON deviation_reports(time_entry_id);`);
+
+  // --- Deviation images ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS deviation_images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      deviation_report_id INTEGER NOT NULL,
+      file_name TEXT,
+      storage_path TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (deviation_report_id) REFERENCES deviation_reports(id) ON DELETE CASCADE
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_deviation_images_report ON deviation_images(deviation_report_id);`);
 
   // --- Planneringsuppdrag (admin skapar)
   db.run(`

@@ -1,72 +1,63 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { format } from "date-fns";
-import { sv } from "date-fns/locale";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { AlertCircle, Edit, Image as ImageIcon } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+import { format } from "date-fns";
+import { sv } from "date-fns/locale";
+import { useAuth } from "@/contexts/AuthContext";
 
-interface DeviationReport {
+type DeviationReport = {
   id: string;
   title: string;
-  description: string;
-  severity: string;
-  status: string;
+  description: string | null;
+  severity: string | null;
+  status: string | null;
   created_at: string;
-  user_id: string;
-  time_entry_id: string;
-  profiles: {
-    full_name: string;
-  };
-  time_entries: {
-    date: string;
-    projects: {
-      name: string;
-    };
-  };
-}
+  user_full_name?: string | null;
+  user_email?: string | null;
+  time_entry_date?: string | null;
+  project_name?: string | null;
+  time_entry_start?: string | null;
+  time_entry_end?: string | null;
+  images?: { storage_path: string }[];
+};
 
-interface DeviationImage {
-  id: string;
-  storage_path: string;
-  created_at: string;
-}
+const severityLabel = (s?: string | null) => {
+  switch (s) {
+    case "low": return "Låg";
+    case "medium": return "Medel";
+    case "high": return "Hög";
+    case "critical": return "Kritisk";
+    default: return s || "Okänd";
+  }
+};
+
+const statusLabel = (s?: string | null) => {
+  switch (s) {
+    case "open": return "Öppen";
+    case "in_progress": return "Pågående";
+    case "resolved": return "Löst";
+    case "closed": return "Stängd";
+    default: return s || "Okänd";
+  }
+};
 
 export default function AdminDeviations() {
+  const { isAdmin } = useAuth();
   const [deviations, setDeviations] = useState<DeviationReport[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [imagesDialogOpen, setImagesDialogOpen] = useState(false);
-  const [selectedDeviation, setSelectedDeviation] = useState<DeviationReport | null>(null);
-  const [deviationImages, setDeviationImages] = useState<DeviationImage[]>([]);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
-  const [editForm, setEditForm] = useState({
-    title: "",
-    description: "",
-    severity: "",
-    status: "",
-  });
-  const [updating, setUpdating] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [selected, setSelected] = useState<DeviationReport | null>(null);
+  const [form, setForm] = useState({ title: "", description: "", severity: "medium", status: "open" });
+  const [saving, setSaving] = useState(false);
+  const [images, setImages] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     fetchDeviations();
@@ -75,284 +66,176 @@ export default function AdminDeviations() {
   const fetchDeviations = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("deviation_reports")
-        .select(`
-          *,
-          profiles!deviation_reports_user_id_fkey (
-            full_name
-          ),
-          time_entries (
-            date,
-            projects (
-              name
-            )
-          )
-        `)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setDeviations(data || []);
-    } catch (error: any) {
-      console.error("Error fetching deviations:", error);
-      toast.error("Kunde inte hämta avvikelser");
+      const data = await apiFetch<any[]>("/deviation-reports?include_images=true");
+      const mapped = (data || []).map((d) => ({
+        ...d,
+        id: String(d.id),
+        images: d.images || [],
+      }));
+      const imgs: Record<string, string[]> = {};
+      mapped.forEach((d) => {
+        imgs[d.id] = (d.images || []).map((img: any) => img.storage_path);
+      });
+      setImages(imgs);
+      setDeviations(mapped);
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte hämta avvikelser");
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchDeviationImages = async (deviationId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("deviation_images")
-        .select("*")
-        .eq("deviation_report_id", deviationId);
-
-      if (error) throw error;
-      
-      setDeviationImages(data || []);
-
-      // Fetch signed URLs for all images
-      const urls: Record<string, string> = {};
-      for (const image of data || []) {
-        const { data: urlData } = await supabase.storage
-          .from("deviation-images")
-          .createSignedUrl(image.storage_path, 3600); // 1 hour expiry
-        
-        if (urlData?.signedUrl) {
-          urls[image.id] = urlData.signedUrl;
-        }
-      }
-      setImageUrls(urls);
-    } catch (error: any) {
-      console.error("Error fetching images:", error);
-      toast.error("Kunde inte hämta bilder");
-    }
-  };
-
-  const handleEdit = (deviation: DeviationReport) => {
-    setSelectedDeviation(deviation);
-    setEditForm({
-      title: deviation.title,
-      description: deviation.description,
-      severity: deviation.severity,
-      status: deviation.status,
+  const openEdit = (d: DeviationReport) => {
+    setSelected(d);
+    setForm({
+      title: d.title,
+      description: d.description || "",
+      severity: d.severity || "medium",
+      status: d.status || "open",
     });
-    setEditDialogOpen(true);
+    setEditOpen(true);
   };
 
-  const handleViewImages = (deviation: DeviationReport) => {
-    setSelectedDeviation(deviation);
-    fetchDeviationImages(deviation.id);
-    setImagesDialogOpen(true);
-  };
-
-  const handleUpdate = async () => {
-    if (!selectedDeviation) return;
-
+  const saveEdit = async () => {
+    if (!selected) return;
     try {
-      setUpdating(true);
-      const { error } = await supabase
-        .from("deviation_reports")
-        .update({
-          title: editForm.title,
-          description: editForm.description,
-          severity: editForm.severity,
-          status: editForm.status,
-        })
-        .eq("id", selectedDeviation.id);
-
-      if (error) throw error;
-
+      setSaving(true);
+      await apiFetch(`/deviation-reports/${selected.id}`, {
+        method: "PUT",
+        json: {
+          title: form.title,
+          description: form.description,
+          severity: form.severity,
+          status: form.status,
+        },
+      });
       toast.success("Avvikelse uppdaterad");
-      setEditDialogOpen(false);
+      setEditOpen(false);
       fetchDeviations();
-    } catch (error: any) {
-      console.error("Error updating deviation:", error);
-      toast.error("Kunde inte uppdatera avvikelse");
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte uppdatera avvikelse");
     } finally {
-      setUpdating(false);
+      setSaving(false);
     }
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "low":
-        return "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20";
-      case "medium":
-        return "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20";
-      case "high":
-        return "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
+  const downloadPdf = (d: DeviationReport) => {
+    const w = window.open("", "_blank", "width=900,height=1100");
+    if (!w) return;
+    const dateStr = d.time_entry_date ? (() => { try { return format(new Date(d.time_entry_date), "d MMM yyyy", { locale: sv }); } catch { return d.time_entry_date; } })() : "";
+    const imgs = images[d.id] || [];
+    w.document.write(`
+      <html><head><title>Avvikelse ${d.id}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 16px; }
+        h1 { font-size: 20px; margin-bottom: 8px; }
+        .meta { margin-bottom: 8px; color: #444; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; border: 1px solid #ddd; margin-right: 6px; }
+        .images img { height: 120px; margin: 4px; border: 1px solid #ccc; border-radius: 4px; object-fit: cover; }
+      </style>
+      </head><body>
+        <h1>${d.title}</h1>
+        <div class="meta">
+          <div>Användare: ${d.user_full_name || d.user_email || "-"}</div>
+          <div>Projekt: ${d.project_name || "-"}</div>
+          <div>Datum: ${dateStr}</div>
+          <div>Skift: ${d.time_entry_start || ""} ${d.time_entry_end ? " - " + d.time_entry_end : ""}</div>
+          <div>Status: ${statusLabel(d.status)}</div>
+          <div>Allvarlighet: ${severityLabel(d.severity)}</div>
+        </div>
+        <div><strong>Beskrivning</strong><br/>${d.description || "-"}</div>
+        ${imgs.length ? `<div class="images"><strong>Bilder</strong><br/>${imgs.map(src => `<img src="${src}" />`).join("")}</div>` : ""}
+        <script>window.print();</script>
+      </body></html>
+    `);
+    w.document.close();
   };
 
-  const getSeverityLabel = (severity: string) => {
-    switch (severity) {
-      case "low":
-        return "Låg";
-      case "medium":
-        return "Medel";
-      case "high":
-        return "Hög";
-      default:
-        return severity;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "open":
-        return "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20";
-      case "in_progress":
-        return "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20";
-      case "resolved":
-        return "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20";
-      case "closed":
-        return "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "open":
-        return "Öppen";
-      case "in_progress":
-        return "Pågående";
-      case "resolved":
-        return "Löst";
-      case "closed":
-        return "Stängd";
-      default:
-        return status;
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="container mx-auto p-6">
-        <p>Laddar avvikelser...</p>
-      </div>
-    );
+  if (!isAdmin) {
+    return <div className="container mx-auto p-6">Behörighet saknas.</div>;
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Avvikelsehantering</h1>
-          <p className="text-muted-foreground mt-1">
-            Hantera och granska alla avvikelserapporter
-          </p>
-        </div>
+    <div className="container mx-auto p-6 space-y-4">
+      <div>
+        <h1 className="text-3xl font-bold">Avvikelser</h1>
+        <p className="text-muted-foreground">Översikt av rapporterade avvikelser kopplade till tidrapporter.</p>
       </div>
 
-      <div className="grid gap-4">
-        {deviations.length === 0 ? (
-          <Card>
-            <CardContent className="p-6">
-              <p className="text-muted-foreground text-center">Inga avvikelser rapporterade</p>
-            </CardContent>
-          </Card>
-        ) : (
-          deviations.map((deviation) => (
-            <Card key={deviation.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1 flex-1">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5 text-destructive" />
-                      <CardTitle className="text-xl">{deviation.title}</CardTitle>
-                    </div>
-                    <CardDescription>
-                      Rapporterad av: {deviation.profiles.full_name} | 
-                      Datum: {format(new Date(deviation.time_entries.date), "d MMMM yyyy", { locale: sv })} | 
-                      Projekt: {deviation.time_entries.projects.name}
-                    </CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Badge variant="outline" className={getSeverityColor(deviation.severity)}>
-                      {getSeverityLabel(deviation.severity)}
-                    </Badge>
-                    <Badge variant="outline" className={getStatusColor(deviation.status)}>
-                      {getStatusLabel(deviation.status)}
-                    </Badge>
-                  </div>
+      {loading ? (
+        <Card><CardContent className="py-6">Laddar...</CardContent></Card>
+      ) : deviations.length === 0 ? (
+        <Card><CardContent className="py-6 text-muted-foreground">Inga avvikelser att visa.</CardContent></Card>
+      ) : (
+        deviations.map((d) => (
+          <Card key={d.id} className="shadow-card">
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-lg">{d.title}</CardTitle>
+                <div className="text-sm text-muted-foreground flex flex-wrap gap-2">
+                  <span>{d.user_full_name || d.user_email}</span>
+                  {d.time_entry_date && (
+                    <span>
+                      {format(new Date(d.time_entry_date), "d MMM yyyy", { locale: sv })}
+                      {d.time_entry_start && d.time_entry_end ? ` • ${d.time_entry_start} - ${d.time_entry_end}` : ""}
+                    </span>
+                  )}
+                  {d.project_name && <span>Projekt: {d.project_name}</span>}
                 </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-4 whitespace-pre-wrap">
-                  {deviation.description}
-                </p>
+                {d.description && <p className="text-sm text-muted-foreground">{d.description}</p>}
                 <div className="flex gap-2">
-                  <Button onClick={() => handleEdit(deviation)} variant="outline" size="sm">
-                    <Edit className="h-4 w-4 mr-2" />
-                    Redigera
-                  </Button>
-                  <Button onClick={() => handleViewImages(deviation)} variant="outline" size="sm">
-                    <ImageIcon className="h-4 w-4 mr-2" />
-                    Visa bilder
-                  </Button>
+                  <Badge variant="outline">{severityLabel(d.severity)}</Badge>
+                  <Badge variant="secondary">{statusLabel(d.status)}</Badge>
                 </div>
-                <p className="text-xs text-muted-foreground mt-4">
-                  Skapad: {format(new Date(deviation.created_at), "d MMMM yyyy HH:mm", { locale: sv })}
-                </p>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
+                {images[d.id]?.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {images[d.id].map((src, idx) => (
+                      <img key={`${d.id}-${idx}`} src={src} alt="Avvikelsebild" className="h-20 w-20 object-cover rounded border" />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => openEdit(d)}>Redigera</Button>
+                <Button size="sm" variant="secondary" onClick={() => downloadPdf(d)}>Ladda ner PDF</Button>
+              </div>
+            </CardHeader>
+          </Card>
+        ))
+      )}
 
-      {/* Edit Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Redigera avvikelse</DialogTitle>
-            <DialogDescription>
-              Uppdatera information om avvikelsen
-            </DialogDescription>
+            <DialogDescription>Uppdatera status och detaljer.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="edit-title">Titel</Label>
-              <Input
-                id="edit-title"
-                value={editForm.title}
-                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-              />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Titel</Label>
+              <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
             </div>
-            <div>
-              <Label htmlFor="edit-description">Beskrivning</Label>
-              <Textarea
-                id="edit-description"
-                value={editForm.description}
-                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                rows={4}
-              />
+            <div className="space-y-1">
+              <Label>Beskrivning</Label>
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="edit-severity">Allvarlighetsgrad</Label>
-                <Select value={editForm.severity} onValueChange={(value) => setEditForm({ ...editForm, severity: value })}>
-                  <SelectTrigger id="edit-severity">
-                    <SelectValue />
-                  </SelectTrigger>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Allvarlighet</Label>
+                <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
+                  <SelectTrigger><SelectValue placeholder="Välj" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="low">Låg</SelectItem>
                     <SelectItem value="medium">Medel</SelectItem>
                     <SelectItem value="high">Hög</SelectItem>
+                    <SelectItem value="critical">Kritisk</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label htmlFor="edit-status">Status</Label>
-                <Select value={editForm.status} onValueChange={(value) => setEditForm({ ...editForm, status: value })}>
-                  <SelectTrigger id="edit-status">
-                    <SelectValue />
-                  </SelectTrigger>
+              <div className="space-y-1">
+                <Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger><SelectValue placeholder="Välj" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="open">Öppen</SelectItem>
                     <SelectItem value="in_progress">Pågående</SelectItem>
@@ -363,53 +246,9 @@ export default function AdminDeviations() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-                Avbryt
-              </Button>
-              <Button onClick={handleUpdate} disabled={updating}>
-                {updating ? "Uppdaterar..." : "Spara ändringar"}
-              </Button>
+              <Button variant="outline" onClick={() => setEditOpen(false)}>Avbryt</Button>
+              <Button onClick={saveEdit} disabled={saving}>{saving ? "Sparar..." : "Spara"}</Button>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Images Dialog */}
-      <Dialog open={imagesDialogOpen} onOpenChange={setImagesDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Uppladdade bilder</DialogTitle>
-            <DialogDescription>
-              Bilder kopplade till avvikelsen: {selectedDeviation?.title}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            {deviationImages.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">Inga bilder uppladdade</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {deviationImages.map((image) => (
-                  <div key={image.id} className="border rounded-lg overflow-hidden">
-                    {imageUrls[image.id] ? (
-                      <img
-                        src={imageUrls[image.id]}
-                        alt="Avvikelsebild"
-                        className="w-full h-64 object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-64 bg-muted flex items-center justify-center">
-                        <p className="text-muted-foreground">Laddar bild...</p>
-                      </div>
-                    )}
-                    <div className="p-2 bg-muted">
-                      <p className="text-xs text-muted-foreground">
-                        Uppladdad: {format(new Date(image.created_at), "d MMM yyyy HH:mm", { locale: sv })}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </DialogContent>
       </Dialog>

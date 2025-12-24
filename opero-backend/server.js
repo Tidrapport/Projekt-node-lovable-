@@ -5,6 +5,7 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
+const fs = require("fs");
 const db = require("./database");
 
 const app = express();
@@ -18,6 +19,7 @@ app.use(express.json());
 
 // ✅ servera alla .html, .js, .css osv från samma mapp som server.js
 app.use(express.static(__dirname));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("Missing JWT_SECRET in .env");
@@ -1522,7 +1524,8 @@ app.get("/time-entries", requireAuth, (req, res) => {
     status,
     project_id,
     customer_id,
-    include_materials
+    include_materials,
+    limit
   } = req.query || {};
 
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
@@ -1544,6 +1547,8 @@ app.get("/time-entries", requireAuth, (req, res) => {
 
   if (customer_id) { where.push("p.customer_id = ?"); params.push(customer_id); }
 
+  const limitNum = limit ? Math.min(500, Math.max(1, Number(limit))) : null;
+
   const sql = `
     SELECT
       tr.*,
@@ -1555,6 +1560,7 @@ app.get("/time-entries", requireAuth, (req, res) => {
     ${join}
     WHERE ${where.join(" AND ")}
     ORDER BY date(tr.datum) DESC, tr.id DESC
+    ${limitNum ? `LIMIT ${limitNum}` : ""}
   `;
 
   db.all(sql, params, async (err, rows) => {
@@ -1607,6 +1613,9 @@ app.post("/time-entries", requireAuth, (req, res) => {
     status,
     allowance_type, // maps to traktamente_type
     allowance_amount, // maps to traktamente_amount
+    deviation_title = null,
+    deviation_description = null,
+    deviation_status = null,
     km,
     km_compensation
   } = req.body || {};
@@ -1652,8 +1661,8 @@ app.post("/time-entries", requireAuth, (req, res) => {
     function performInsert() {
       db.run(
         `INSERT INTO time_reports (
-          user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, restid, status, traktamente_type, traktamente_amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, deviation_title, deviation_description, deviation_status, restid, status, traktamente_type, traktamente_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           userId,
           null,
@@ -1665,6 +1674,9 @@ app.post("/time-entries", requireAuth, (req, res) => {
           subproject_id || null,
           job_role_id || null,
           description || null,
+          deviation_title || null,
+          deviation_description || null,
+          deviation_status || null,
           0,
           status || "draft",
           allowance_type || null,
@@ -1804,33 +1816,39 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
 
       function performUpdate() {
         db.run(
-          `UPDATE time_reports SET
-            datum = COALESCE(?, datum),
-            starttid = COALESCE(?, starttid),
-            sluttid = COALESCE(?, sluttid),
-            timmar = COALESCE(?, timmar),
-            job_role_id = COALESCE(?, job_role_id),
-            project_id = COALESCE(?, project_id),
-            subproject_id = COALESCE(?, subproject_id),
-            comment = COALESCE(?, comment),
-            status = COALESCE(?, status),
-            traktamente_type = COALESCE(?, traktamente_type),
-            traktamente_amount = COALESCE(?, traktamente_amount)
-          WHERE id = ?`,
-          [
-            date ?? null,
-            start_time ?? null,
-            end_time ?? null,
-            normalizedHours ?? null,
-            job_role_id ?? null,
-            project_id ?? null,
-            subproject_id ?? null,
-            description ?? null,
-            status ?? null,
-            allowance_type ?? null,
-            allowance_amount ?? null,
-            id
-          ],
+        `UPDATE time_reports SET
+          datum = COALESCE(?, datum),
+          starttid = COALESCE(?, starttid),
+          sluttid = COALESCE(?, sluttid),
+          timmar = COALESCE(?, timmar),
+          job_role_id = COALESCE(?, job_role_id),
+          project_id = COALESCE(?, project_id),
+          subproject_id = COALESCE(?, subproject_id),
+          comment = COALESCE(?, comment),
+          deviation_title = COALESCE(?, deviation_title),
+          deviation_description = COALESCE(?, deviation_description),
+          deviation_status = COALESCE(?, deviation_status),
+          status = COALESCE(?, status),
+          traktamente_type = COALESCE(?, traktamente_type),
+          traktamente_amount = COALESCE(?, traktamente_amount)
+        WHERE id = ?`,
+        [
+          date ?? null,
+          start_time ?? null,
+          end_time ?? null,
+          normalizedHours ?? null,
+          job_role_id ?? null,
+          project_id ?? null,
+          subproject_id ?? null,
+          description ?? null,
+          deviation_title ?? null,
+          deviation_description ?? null,
+          deviation_status ?? null,
+          status ?? null,
+          allowance_type ?? null,
+          allowance_amount ?? null,
+          id
+        ],
           function (e2) {
             if (e2) {
               console.error("DB-fel vid UPDATE time_report:", e2);
@@ -2427,8 +2445,298 @@ app.post("/time-entries/:id/attest", requireAuth, requireAdmin, (req, res) => {
                 }
               );
             });
+  });
+});
+
+// ======================
+// DEVIATION REPORTS
+// ======================
+
+// GET /deviation-reports
+app.get("/deviation-reports", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const { user_id, include_images } = req.query || {};
+  const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
+  const effectiveUserId = isAdmin ? user_id : req.user.user_id;
+
+  const where = ["dr.company_id = ?"];
+  const params = [companyId];
+  if (effectiveUserId) {
+    where.push("dr.user_id = ?");
+    params.push(effectiveUserId);
+  }
+
+  const sql = `
+    SELECT
+      dr.*,
+      u.email AS user_email,
+      (u.first_name || ' ' || u.last_name) AS user_full_name,
+      tr.datum AS time_entry_date,
+      tr.starttid AS time_entry_start,
+      tr.sluttid AS time_entry_end,
+      p.name AS project_name
+    FROM deviation_reports dr
+    JOIN users u ON u.id = dr.user_id
+    JOIN time_reports tr ON tr.id = dr.time_entry_id
+    LEFT JOIN projects p ON p.id = tr.project_id
+    WHERE ${where.join(" AND ")}
+    ORDER BY datetime(dr.created_at) DESC, dr.id DESC
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /deviation-reports:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (String(include_images) === "true" && rows.length > 0) {
+      const ids = rows.map((r) => r.id);
+      const placeholders = ids.map(() => "?").join(",");
+      db.all(
+        `SELECT * FROM deviation_images WHERE deviation_report_id IN (${placeholders})`,
+        ids,
+        (imgErr, imgs) => {
+          if (imgErr) {
+            console.error("DB-fel vid SELECT deviation_images:", imgErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          const byId = new Map();
+          imgs.forEach((img) => {
+            if (!byId.has(img.deviation_report_id)) byId.set(img.deviation_report_id, []);
+            byId.get(img.deviation_report_id).push(img);
           });
-        });
+          const out = rows.map((r) => ({ ...r, images: byId.get(r.id) || [] }));
+          res.json(out);
+        }
+      );
+    } else {
+      res.json(rows || []);
+    }
+  });
+});
+
+// POST /deviation-reports
+app.post("/deviation-reports", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
+  const targetUserId = isAdmin && req.body.user_id ? req.body.user_id : req.user.user_id;
+
+  const { time_entry_id, title, description, severity = "medium", status = "open" } = req.body || {};
+  if (!time_entry_id) return res.status(400).json({ error: "time_entry_id required" });
+  if (!title) return res.status(400).json({ error: "title required" });
+
+  db.get(
+    `SELECT tr.id, tr.user_id
+     FROM time_reports tr
+     JOIN users u ON u.id = tr.user_id
+     WHERE tr.id = ? AND u.company_id = ?`,
+    [time_entry_id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid kontroll av time_entry:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Tidrapport hittades inte" });
+      if (!isAdmin && String(row.user_id) !== String(targetUserId)) {
+        return res.status(403).json({ error: "Kan inte koppla avvikelse till annan användare" });
+      }
+
+      db.run(
+        `INSERT INTO deviation_reports (company_id, user_id, time_entry_id, title, description, severity, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [companyId, targetUserId, time_entry_id, title, description || null, severity, status],
+        function (insErr) {
+          if (insErr) {
+            console.error("DB-fel vid POST /deviation-reports:", insErr);
+            return res.status(500).json({ error: "Kunde inte spara avvikelse" });
+          }
+          db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [this.lastID], (selErr, deviation) => {
+            if (selErr) {
+              console.error("DB-fel vid SELECT ny avvikelse:", selErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.json(deviation);
+          });
+        }
+      );
+    }
+  );
+});
+
+// PUT /deviation-reports/:id
+app.put("/deviation-reports/:id", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
+  const id = req.params.id;
+  const { time_entry_id, title, description, severity, status } = req.body || {};
+
+  db.get(
+    `SELECT dr.*, tr.user_id AS entry_user_id
+     FROM deviation_reports dr
+     JOIN time_reports tr ON tr.id = dr.time_entry_id
+     JOIN users u ON u.id = dr.user_id
+     WHERE dr.id = ? AND dr.company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid SELECT deviation:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
+      if (!isAdmin && String(row.user_id) !== String(req.user.user_id)) {
+        return res.status(403).json({ error: "Ingen behörighet" });
+      }
+
+      function performUpdate(validatedTimeEntryId) {
+        db.run(
+          `UPDATE deviation_reports
+           SET time_entry_id = COALESCE(?, time_entry_id),
+               title = COALESCE(?, title),
+               description = COALESCE(?, description),
+               severity = COALESCE(?, severity),
+               status = COALESCE(?, status),
+               updated_at = datetime('now')
+           WHERE id = ?`,
+          [
+            validatedTimeEntryId ?? row.time_entry_id,
+            title ?? null,
+            description ?? null,
+            severity ?? row.severity,
+            status ?? row.status,
+            id
+          ],
+          function (updErr) {
+            if (updErr) {
+              console.error("DB-fel vid UPDATE deviation:", updErr);
+              return res.status(500).json({ error: "Kunde inte uppdatera" });
+            }
+            db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [id], (selErr, updated) => {
+              if (selErr) {
+                console.error("DB-fel vid SELECT uppdaterad deviation:", selErr);
+                return res.status(500).json({ error: "DB error" });
+              }
+              res.json(updated);
+            });
+          }
+        );
+      }
+
+      if (time_entry_id) {
+        db.get(
+          `SELECT tr.id, tr.user_id
+           FROM time_reports tr
+           JOIN users u ON u.id = tr.user_id
+           WHERE tr.id = ? AND u.company_id = ?`,
+          [time_entry_id, companyId],
+          (teErr, teRow) => {
+            if (teErr) {
+              console.error("DB-fel vid kontroll av ny tidrapport för avvikelse:", teErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            if (!teRow) return res.status(400).json({ error: "Ogiltig tidrapport" });
+            if (!isAdmin && String(teRow.user_id) !== String(req.user.user_id)) {
+              return res.status(403).json({ error: "Kan inte koppla annan användares rapport" });
+            }
+            performUpdate(time_entry_id);
+          }
+        );
+      } else {
+        performUpdate(null);
+      }
+    }
+  );
+});
+
+// POST /deviation-reports/:id/images (expects { filename, content_base64 })
+app.post("/deviation-reports/:id/images", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const id = req.params.id;
+  const { filename, content_base64 } = req.body || {};
+  if (!filename || !content_base64) return res.status(400).json({ error: "filename och content_base64 krävs" });
+
+  db.get(
+    `SELECT dr.*, u.company_id FROM deviation_reports dr JOIN users u ON u.id = dr.user_id WHERE dr.id = ? AND dr.company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid SELECT deviation för bild:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
+
+      const uploadsDir = path.join(__dirname, "uploads", "deviation-images");
+      try {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      } catch (e) {
+        console.error("Kunde inte skapa upload-mapp:", e);
+      }
+
+      const safeName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
+      const filePath = path.join(uploadsDir, safeName);
+
+      try {
+        const data = content_base64.split(",").pop();
+        fs.writeFileSync(filePath, data, { encoding: "base64" });
+      } catch (e) {
+        console.error("Kunde inte skriva fil:", e);
+        return res.status(500).json({ error: "Kunde inte spara fil" });
+      }
+
+      const storagePath = `/uploads/deviation-images/${safeName}`;
+      db.run(
+        `INSERT INTO deviation_images (deviation_report_id, file_name, storage_path) VALUES (?, ?, ?)`,
+        [id, filename, storagePath],
+        function (insErr) {
+          if (insErr) {
+            console.error("DB-fel vid INSERT deviation_images:", insErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          db.get(`SELECT * FROM deviation_images WHERE id = ?`, [this.lastID], (selErr, imgRow) => {
+            if (selErr) {
+              console.error("DB-fel vid SELECT deviation_image:", selErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.json(imgRow);
+          });
+        }
+      );
+    }
+  );
+});
+
+// GET /deviation-reports/:id/images
+app.get("/deviation-reports/:id/images", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const id = req.params.id;
+
+  db.get(
+    `SELECT dr.id FROM deviation_reports dr WHERE dr.id = ? AND dr.company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid kontroll av avvikelse:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
+
+      db.all(`SELECT * FROM deviation_images WHERE deviation_report_id = ? ORDER BY id DESC`, [id], (imgErr, imgs) => {
+        if (imgErr) {
+          console.error("DB-fel vid SELECT deviation_images:", imgErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json(imgs || []);
+      });
+    }
+  );
+});
 
 const PORT = 3000;
 app.listen(PORT, () => {

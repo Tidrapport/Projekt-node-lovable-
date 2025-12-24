@@ -26,6 +26,9 @@ type RawTimeEntry = {
   break_minutes?: number | string | null;
   traktamente_type?: string | null;
   traktamente_amount?: number | string | null;
+  deviation_title?: string | null;
+  deviation_description?: string | null;
+  deviation_status?: string | null;
   comment?: string | null;
   status?: string | null;
   attested_by?: number | string | null;
@@ -47,6 +50,9 @@ export type TimeEntry = {
   shift_type?: string | null;
   per_diem_type?: string | null;
   per_diem_amount?: number | null;
+  deviation_title?: string | null;
+  deviation_description?: string | null;
+  deviation_status?: string | null;
   travel_time_hours?: number;
   project_id: string;
   subproject_id: string | null;
@@ -88,6 +94,9 @@ type CreatePayload = {
   allowance_amount?: number;
   start_time?: string;
   end_time?: string;
+  deviation_title?: string | null;
+  deviation_description?: string | null;
+  deviation_status?: string | null;
 };
 
 type UpdatePayload = Partial<CreatePayload>;
@@ -116,6 +125,9 @@ const toTimeEntry = (raw: RawTimeEntry): TimeEntry => ({
   shift_type: raw.shift_type ?? null,
   per_diem_type: raw.traktamente_type ?? null,
   per_diem_amount: raw.traktamente_amount != null ? Number(raw.traktamente_amount) : null,
+  deviation_title: raw.deviation_title ?? null,
+  deviation_description: raw.deviation_description ?? null,
+  deviation_status: raw.deviation_status ?? null,
   travel_time_hours: raw.restid != null ? Number(raw.restid) : 0,
   status: raw.status || null,
   attested_by: raw.attested_by != null ? String(raw.attested_by) : null,
@@ -154,6 +166,9 @@ export async function createTimeEntry(payload: CreatePayload) {
     status: payload.status || undefined,
     allowance_type: payload.allowance_type,
     allowance_amount: payload.allowance_amount,
+    deviation_title: payload.deviation_title || null,
+    deviation_description: payload.deviation_description || null,
+    deviation_status: payload.deviation_status || null,
   };
 
   const raw = await api.post<RawTimeEntry>("/time-entries", body);
@@ -178,6 +193,9 @@ export async function updateTimeEntry(id: string | number, payload: UpdatePayloa
     status: payload.status || undefined,
     allowance_type: payload.allowance_type,
     allowance_amount: payload.allowance_amount,
+    deviation_title: payload.deviation_title || null,
+    deviation_description: payload.deviation_description || null,
+    deviation_status: payload.deviation_status || null,
   };
 
   const raw = await api.put<RawTimeEntry>(`/time-entries/${id}`, body);

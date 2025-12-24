@@ -54,6 +54,9 @@ type TimeEntry = {
   save_travel_compensation?: boolean;
   overtime_weekday_hours?: number | null;
   overtime_weekend_hours?: number | null;
+  deviation_title?: string | null;
+  deviation_description?: string | null;
+  deviation_status?: string | null;
   materials?: { id?: string | number; material_type_id: string | number; quantity: number; place?: string | null }[];
 };
 
@@ -109,6 +112,9 @@ export default function TimeAttestations() {
   const [editMaterials, setEditMaterials] = useState<{ material_type_id: string; quantity: number; id?: string | number }[]>([]);
   const [selectedMaterialType, setSelectedMaterialType] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("0");
+  const [editDeviationTitle, setEditDeviationTitle] = useState("");
+  const [editDeviationDescription, setEditDeviationDescription] = useState("");
+  const [editDeviationStatus, setEditDeviationStatus] = useState("none");
 
   useEffect(() => {
     if (!isAdmin || !companyId) return;
@@ -180,6 +186,9 @@ export default function TimeAttestations() {
         save_travel_compensation: e.save_travel_compensation ?? false,
         overtime_weekday_hours: e.overtime_weekday_hours ?? null,
         overtime_weekend_hours: e.overtime_weekend_hours ?? null,
+        deviation_title: e.deviation_title || null,
+        deviation_description: e.deviation_description || null,
+        deviation_status: e.deviation_status || null,
         materials: (e.materials || []).map((m: any) => ({
           id: m.id,
           material_type_id: String(m.material_type_id),
@@ -267,6 +276,9 @@ export default function TimeAttestations() {
     );
     setSelectedMaterialType("");
     setMaterialQuantity("0");
+    setEditDeviationTitle(entry.deviation_title || "");
+    setEditDeviationDescription(entry.deviation_description || "");
+    setEditDeviationStatus(entry.deviation_status || "none");
   };
 
   const saveEdit = async () => {
@@ -294,6 +306,9 @@ export default function TimeAttestations() {
             quantity: m.quantity,
             id: m.id,
           })),
+          deviation_title: editDeviationTitle || null,
+          deviation_description: editDeviationDescription || null,
+          deviation_status: editDeviationStatus === "none" ? null : editDeviationStatus,
         },
       });
       toast.success("Uppdaterad");
@@ -776,7 +791,7 @@ export default function TimeAttestations() {
 
             <div className="space-y-1">
               <Label className="text-sm text-muted-foreground">Projekt</Label>
-              <Select value={editProjectId} onValueChange={(v) => { setEditProjectId(v); setEditSubprojectId(""); }}>
+              <Select value={editProjectId || undefined} onValueChange={(v) => { setEditProjectId(v); setEditSubprojectId(""); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Välj projekt" />
                 </SelectTrigger>
@@ -792,7 +807,7 @@ export default function TimeAttestations() {
 
             <div className="space-y-1">
               <Label className="text-sm text-muted-foreground">Underprojekt (valfritt)</Label>
-              <Select value={editSubprojectId} onValueChange={setEditSubprojectId} disabled={!editProjectId}>
+              <Select value={editSubprojectId || undefined} onValueChange={setEditSubprojectId} disabled={!editProjectId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Välj underprojekt" />
                 </SelectTrigger>
@@ -808,7 +823,7 @@ export default function TimeAttestations() {
 
             <div className="space-y-1">
               <Label className="text-sm text-muted-foreground">Yrkesroll</Label>
-              <Select value={editJobRoleId} onValueChange={setEditJobRoleId}>
+              <Select value={editJobRoleId || undefined} onValueChange={setEditJobRoleId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Välj yrkesroll" />
                 </SelectTrigger>
@@ -825,7 +840,7 @@ export default function TimeAttestations() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-sm text-muted-foreground">Traktamente</label>
-                <Select value={editPerDiem} onValueChange={setEditPerDiem}>
+                <Select value={editPerDiem || undefined} onValueChange={setEditPerDiem}>
                   <SelectTrigger>
                     <SelectValue placeholder="Traktamente" />
                   </SelectTrigger>
@@ -889,7 +904,7 @@ export default function TimeAttestations() {
             <div className="space-y-2">
               <Label className="text-sm text-muted-foreground">Lägg till tillägg</Label>
               <div className="flex gap-2">
-                <Select value={selectedMaterialType} onValueChange={setSelectedMaterialType}>
+                <Select value={selectedMaterialType || undefined} onValueChange={setSelectedMaterialType}>
                   <SelectTrigger className="flex-1">
                     <SelectValue placeholder="Välj material" />
                   </SelectTrigger>
