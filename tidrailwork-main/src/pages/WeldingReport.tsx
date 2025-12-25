@@ -16,6 +16,42 @@ import { Plus, Trash2, Save, FileText } from "lucide-react";
 import { WeldingEntry, WeldingReport, WORK_TYPES, WELDING_METHODS, RAIL_TYPES, MATERIAL_TYPES } from "@/types/weldingReport";
 import { format } from "date-fns";
 
+const WPS_OPTIONS = ["2014:0664"];
+const ADDITIVE_MATERIAL_OPTIONS = [
+  "SKV Z90",
+  "SKV Z120",
+  "SKV Z140",
+  "Oerlikon citorail",
+  "Castoline 3205",
+  "OK 83.27",
+  "OK 83.28",
+  "OK 83.29",
+  "OK 74.78",
+  "OK 68.82",
+  "OK 55.00",
+  "OK 48.00",
+  "OK 48.30",
+  "OK 38.65",
+  "OK 15.43",
+  "OK 15.65",
+  "PLA std D",
+  "PLA HT",
+];
+const MODEL_OPTIONS = [
+  "60 E1",
+  "50 E3",
+  "54 E3",
+  "49 E1",
+  "SJ 43",
+  "SJ 41",
+  "SJ 32",
+  "Gatu 56",
+  "Kranräl",
+];
+const BEFORE_MM_OPTIONS = Array.from({ length: 31 }, (_, i) => String(i));
+const AFTER_MM_OPTIONS = Array.from({ length: 31 }, (_, i) => String(i + 20));
+const TEMP_OPTIONS = Array.from({ length: 56 }, (_, i) => String(i - 10));
+
 const WeldingReport = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -186,6 +222,11 @@ const WeldingReport = () => {
     emptyText: string
   ) => (
     <div className="overflow-x-auto">
+      <datalist id="wps-options">
+        {WPS_OPTIONS.map((wps) => (
+          <option key={wps} value={wps} />
+        ))}
+      </datalist>
       <Table>
         <TableHeader>
           <TableRow>
@@ -240,32 +281,60 @@ const WeldingReport = () => {
                   />
                 </TableCell>
                 <TableCell>
-                  <Input
-                    value={entry.beforeMm}
-                    onChange={(e) => onUpdate(index, "beforeMm", e.target.value)}
-                    className="w-16"
-                  />
+                  <Select value={entry.beforeMm} onValueChange={(v) => onUpdate(index, "beforeMm", v)}>
+                    <SelectTrigger className="w-16">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BEFORE_MM_OPTIONS.map((mm) => (
+                        <SelectItem key={mm} value={mm}>
+                          {mm}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
-                  <Input
-                    value={entry.afterMm}
-                    onChange={(e) => onUpdate(index, "afterMm", e.target.value)}
-                    className="w-16"
-                  />
+                  <Select value={entry.afterMm} onValueChange={(v) => onUpdate(index, "afterMm", v)}>
+                    <SelectTrigger className="w-16">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AFTER_MM_OPTIONS.map((mm) => (
+                        <SelectItem key={mm} value={mm}>
+                          {mm}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
-                  <Input
-                    value={entry.temp}
-                    onChange={(e) => onUpdate(index, "temp", e.target.value)}
-                    className="w-16"
-                  />
+                  <Select value={entry.temp} onValueChange={(v) => onUpdate(index, "temp", v)}>
+                    <SelectTrigger className="w-16">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TEMP_OPTIONS.map((temp) => (
+                        <SelectItem key={temp} value={temp}>
+                          {temp}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
-                  <Input
-                    value={entry.model}
-                    onChange={(e) => onUpdate(index, "model", e.target.value)}
-                    className="w-24"
-                  />
+                  <Select value={entry.model} onValueChange={(v) => onUpdate(index, "model", v)}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODEL_OPTIONS.map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
                   <Select value={entry.material} onValueChange={(v) => onUpdate(index, "material", v)}>
@@ -324,11 +393,21 @@ const WeldingReport = () => {
                   </Select>
                 </TableCell>
                 <TableCell>
-                  <Input
+                  <Select
                     value={entry.additiveMaterial}
-                    onChange={(e) => onUpdate(index, "additiveMaterial", e.target.value)}
-                    className="w-28"
-                  />
+                    onValueChange={(v) => onUpdate(index, "additiveMaterial", v)}
+                  >
+                    <SelectTrigger className="w-28">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ADDITIVE_MATERIAL_OPTIONS.map((material) => (
+                        <SelectItem key={material} value={material}>
+                          {material}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell>
                   <Input
@@ -341,6 +420,7 @@ const WeldingReport = () => {
                   <Input
                     value={entry.wpsNr}
                     onChange={(e) => onUpdate(index, "wpsNr", e.target.value)}
+                    list="wps-options"
                     className="w-28"
                   />
                 </TableCell>
