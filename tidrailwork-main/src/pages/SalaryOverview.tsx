@@ -7,14 +7,78 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Wallet, Clock, DollarSign, TrendingUp, Coins, CalendarIcon, Download, PiggyBank } from "lucide-react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { sv } from "date-fns/locale";
-import { calculateOBDistribution } from "@/lib/obDistribution";
+import { DEFAULT_SHIFT_WINDOWS, ShiftWindowConfig } from "@/lib/obDistribution";
+import { summarizeObDistribution } from "@/lib/obSummary";
 import { calculateNetSalaryWithStateTax, STATE_TAX_MONTHLY_THRESHOLD } from "@/lib/taxCalculations";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
+import { listTimeEntries } from "@/api/timeEntries";
+
+type ObConfig = {
+  shift_type: string;
+  multiplier: number;
+  start_hour?: number | null;
+  end_hour?: number | null;
+};
+
+const DEFAULT_MULTIPLIERS = {
+  day: 1.0,
+  evening: 1.25,
+  night: 1.5,
+  weekend: 1.75,
+  overtime_day: 1.5,
+  overtime_weekend: 2.0,
+};
+
+const DEFAULT_TRAVEL_RATE = 170;
+const MONTHLY_SALARY_DIVISOR = 174;
+
+const normalizeHour = (value: number | null | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const buildShiftWindows = (configs: ObConfig[] | null): ShiftWindowConfig => {
+  const windows: ShiftWindowConfig = {
+    day: { ...DEFAULT_SHIFT_WINDOWS.day },
+    evening: { ...DEFAULT_SHIFT_WINDOWS.evening },
+    night: { ...DEFAULT_SHIFT_WINDOWS.night },
+    weekend: { ...DEFAULT_SHIFT_WINDOWS.weekend },
+  };
+
+  (configs || []).forEach((cfg) => {
+    if (cfg.shift_type === "day") {
+      windows.day = {
+        start: normalizeHour(cfg.start_hour, windows.day.start),
+        end: normalizeHour(cfg.end_hour, windows.day.end),
+      };
+    }
+    if (cfg.shift_type === "evening") {
+      windows.evening = {
+        start: normalizeHour(cfg.start_hour, windows.evening.start),
+        end: normalizeHour(cfg.end_hour, windows.evening.end),
+      };
+    }
+    if (cfg.shift_type === "night") {
+      windows.night = {
+        start: normalizeHour(cfg.start_hour, windows.night.start),
+        end: normalizeHour(cfg.end_hour, windows.night.end),
+      };
+    }
+    if (cfg.shift_type === "weekend") {
+      windows.weekend = {
+        start: normalizeHour(cfg.start_hour, windows.weekend.start),
+        end: normalizeHour(cfg.end_hour, windows.weekend.end),
+      };
+    }
+  });
+
+  return windows;
+};
 
 const SalaryOverview = () => {
   const { effectiveUserId, isImpersonating, impersonatedUserName } = useEffectiveUser();
@@ -26,35 +90,72 @@ const SalaryOverview = () => {
   const { data: profile } = useQuery({
     queryKey: ["profile", effectiveUserId],
     queryFn: async () => {
-      const data = await apiFetch(`/admin/users/${effectiveUserId}`).catch(() => null);
+      const data = await apiFetch(`/profiles/${effectiveUserId}`).catch(() => null);
       return data || { hourly_wage: 0, tax_table: 30, full_name: "" };
     },
     enabled: !!effectiveUserId,
   });
 
-  const { data: shiftMultipliers } = useQuery({
-    queryKey: ["shift-multipliers"],
+  const { data: shiftConfigs = [] } = useQuery({
+    queryKey: ["shift-configs"],
     queryFn: async () => {
-      // Node-backend har inte detta än: använd 1x för alla skift
-      return { day: 1, evening: 1, night: 1, weekend: 1 } as Record<string, number>;
+      try {
+        const data = await apiFetch<ObConfig[]>("/admin/ob-settings");
+        return Array.isArray(data) ? data : [];
+      } catch (error) {
+        console.warn("Could not load OB settings, using defaults", error);
+        return [];
+      }
     },
+    initialData: [],
+  });
+
+  const shiftMultipliers = useMemo(() => {
+    const multipliers = { ...DEFAULT_MULTIPLIERS };
+    shiftConfigs.forEach((config) => {
+      if (config.shift_type === "day") multipliers.day = config.multiplier ?? multipliers.day;
+      if (config.shift_type === "evening") multipliers.evening = config.multiplier ?? multipliers.evening;
+      if (config.shift_type === "night") multipliers.night = config.multiplier ?? multipliers.night;
+      if (config.shift_type === "weekend") multipliers.weekend = config.multiplier ?? multipliers.weekend;
+      if (config.shift_type === "overtime_day") multipliers.overtime_day = config.multiplier ?? multipliers.overtime_day;
+      if (config.shift_type === "overtime_weekend") {
+        multipliers.overtime_weekend = config.multiplier ?? multipliers.overtime_weekend;
+      }
+    });
+    return multipliers;
+  }, [shiftConfigs]);
+
+  const shiftWindows = useMemo(() => buildShiftWindows(shiftConfigs), [shiftConfigs]);
+
+  const { data: travelRate = DEFAULT_TRAVEL_RATE } = useQuery({
+    queryKey: ["travel-rate"],
+    queryFn: async () => {
+      try {
+        const data = await apiFetch<{ travel_rate: number }>("/admin/compensation-settings");
+        return Number(data?.travel_rate) || DEFAULT_TRAVEL_RATE;
+      } catch (error) {
+        console.warn("Could not load travel rate, using default", error);
+        return DEFAULT_TRAVEL_RATE;
+      }
+    },
+    initialData: DEFAULT_TRAVEL_RATE,
   });
 
   const { data: timeEntries = [] } = useQuery({
     queryKey: ["time-entries", effectiveUserId, startDate, endDate],
     queryFn: async () => {
-      const qs = new URLSearchParams();
-      qs.set("user_id", String(effectiveUserId));
-      qs.set("from", format(startDate, "yyyy-MM-dd"));
-      qs.set("to", format(endDate, "yyyy-MM-dd"));
-      const data = await apiFetch(`/time-entries?${qs.toString()}`).catch(() => []);
-      return data;
+      if (!effectiveUserId) return [];
+      return listTimeEntries({
+        user_id: effectiveUserId,
+        from: format(startDate, "yyyy-MM-dd"),
+        to: format(endDate, "yyyy-MM-dd"),
+      }).catch(() => []);
     },
     enabled: !!effectiveUserId,
   });
 
   const calculateSalaryData = () => {
-    if (!timeEntries || !profile?.hourly_wage || !shiftMultipliers) {
+    if (!timeEntries || !profile || !shiftMultipliers) {
       return {
         totalHours: 0,
         grossSalary: 0,
@@ -77,80 +178,49 @@ const SalaryOverview = () => {
       };
     }
 
-    const shiftBreakdown: Record<string, { hours: number; compensation: number }> = {
-      day: { hours: 0, compensation: 0 },
-      evening: { hours: 0, compensation: 0 },
-      night: { hours: 0, compensation: 0 },
-      weekend: { hours: 0, compensation: 0 },
-    };
-
     let travelCompensation = 0;
     let savedTravelCompensation = 0;
     let perDiemCompensation = 0;
-    let overtimeWeekdayHours = 0;
-    let overtimeWeekendHours = 0;
     
     // Track per diem by date (max one per day)
     const perDiemByDate: Record<string, string> = {};
 
+    const hourlyWage = Number(profile.hourly_wage) || 0;
+    const monthlySalary = Number(profile.monthly_salary) || 0;
+    const baseHourlyRate =
+      monthlySalary > 0 ? monthlySalary / MONTHLY_SALARY_DIVISOR : hourlyWage;
+    const obSummary = summarizeObDistribution(timeEntries, shiftWindows);
+    const shiftBreakdown: Record<string, { hours: number; compensation: number }> = {
+      day: {
+        hours: obSummary.day,
+        compensation: obSummary.day * baseHourlyRate * ((shiftMultipliers.day || 1) - 1),
+      },
+      evening: {
+        hours: obSummary.evening,
+        compensation: obSummary.evening * baseHourlyRate * ((shiftMultipliers.evening || 1) - 1),
+      },
+      night: {
+        hours: obSummary.night,
+        compensation: obSummary.night * baseHourlyRate * ((shiftMultipliers.night || 1) - 1),
+      },
+      weekend: {
+        hours: obSummary.weekend,
+        compensation: obSummary.weekend * baseHourlyRate * ((shiftMultipliers.weekend || 1) - 1),
+      },
+    };
+
     timeEntries.forEach((entry) => {
-      const distribution = calculateOBDistribution(
-        entry.date,
-        entry.start_time,
-        entry.end_time,
-        entry.break_minutes
-      );
-
-      const overtimeWeekend = (entry as any).overtime_weekend_hours || 0;
-      const overtimeWeekday = (entry as any).overtime_weekday_hours || 0;
-
-      // Subtract overtime weekend hours from weekend OB
-      const adjustedWeekend = Math.max(0, distribution.weekend - overtimeWeekend);
-      
-      // Subtract overtime weekday hours from day/evening/night proportionally
-      const weekdayTotal = distribution.day + distribution.evening + distribution.night;
-      let adjustedDay = distribution.day;
-      let adjustedEvening = distribution.evening;
-      let adjustedNight = distribution.night;
-      
-      if (weekdayTotal > 0 && overtimeWeekday > 0) {
-        const ratio = Math.max(0, (weekdayTotal - overtimeWeekday)) / weekdayTotal;
-        adjustedDay = distribution.day * ratio;
-        adjustedEvening = distribution.evening * ratio;
-        adjustedNight = distribution.night * ratio;
-      }
-
-      // Use adjusted values for OB calculation
-      const adjustedDistribution = {
-        day: adjustedDay,
-        evening: adjustedEvening,
-        night: adjustedNight,
-        weekend: adjustedWeekend,
-      };
-
-      (Object.keys(shiftBreakdown) as Array<keyof typeof shiftBreakdown>).forEach((shift) => {
-        const hours = adjustedDistribution[shift] || 0;
-        const obRate = (shiftMultipliers[shift] || 1) - 1;
-        const compensation = hours * profile.hourly_wage * obRate;
-
-        shiftBreakdown[shift].hours += hours;
-        shiftBreakdown[shift].compensation += compensation;
-      });
 
       // Calculate travel time compensation at 170 SEK/hour
       // Split between saved and paid based on save_travel_compensation flag
       if (entry.travel_time_hours) {
-        const amount = entry.travel_time_hours * 170;
+        const amount = entry.travel_time_hours * travelRate;
         if ((entry as any).save_travel_compensation) {
           savedTravelCompensation += amount;
         } else {
           travelCompensation += amount;
         }
       }
-
-      // Calculate overtime hours
-      overtimeWeekdayHours += overtimeWeekday;
-      overtimeWeekendHours += overtimeWeekend;
 
       // Calculate per diem (max one per day)
       if (entry.per_diem_type && entry.per_diem_type !== 'none') {
@@ -171,15 +241,15 @@ const SalaryOverview = () => {
       }
     });
 
-    // Calculate overtime compensation
-    // Övertid vardag: timlön + 64% = 164% av timlön
-    // Övertid helg: timlön + 124% = 224% av timlön
-    const overtimeWeekdayCompensation = overtimeWeekdayHours * profile.hourly_wage * 1.64;
-    const overtimeWeekendCompensation = overtimeWeekendHours * profile.hourly_wage * 2.24;
+    // Calculate overtime compensation (multiplier includes base pay)
+    const overtimeWeekdayCompensation =
+      obSummary.overtimeWeekday * baseHourlyRate * (shiftMultipliers.overtime_day || 1);
+    const overtimeWeekendCompensation =
+      obSummary.overtimeWeekend * baseHourlyRate * (shiftMultipliers.overtime_weekend || 1);
 
     const perDiemDays = Object.keys(perDiemByDate).length;
     const totalHours = Object.values(shiftBreakdown).reduce((sum, s) => sum + s.hours, 0);
-    const grossSalary = totalHours * profile.hourly_wage;
+    const grossSalary = monthlySalary > 0 ? monthlySalary : totalHours * hourlyWage;
     const obCompensation = Object.values(shiftBreakdown).reduce(
       (sum, s) => sum + s.compensation,
       0
@@ -196,15 +266,20 @@ const SalaryOverview = () => {
       perDiemCompensation,
       perDiemDays,
       totalGrossSalary,
-      overtimeWeekdayHours,
+      overtimeWeekdayHours: obSummary.overtimeWeekday,
       overtimeWeekdayCompensation,
-      overtimeWeekendHours,
+      overtimeWeekendHours: obSummary.overtimeWeekend,
       overtimeWeekendCompensation,
       shiftBreakdown,
     };
   };
 
   const salaryData = calculateSalaryData();
+  const monthlySalary = Number(profile?.monthly_salary || 0);
+  const hourlyWage = Number(profile?.hourly_wage || 0);
+  const showMonthlySalary = monthlySalary > 0;
+  const overtimeWeekdayPercent = ((shiftMultipliers.overtime_day - 1) * 100).toFixed(0);
+  const overtimeWeekendPercent = ((shiftMultipliers.overtime_weekend - 1) * 100).toFixed(0);
   // Beräkna skatt med statlig skatt på inkomst över brytpunkten
   const taxBreakdown = calculateNetSalaryWithStateTax(salaryData.totalGrossSalary, profile?.tax_table || 30);
   // Traktamente läggs till nettolönen eftersom det är skattefritt
@@ -246,8 +321,12 @@ const SalaryOverview = () => {
     
     // Employee info
     doc.setFontSize(11);
+    const salaryLabel = showMonthlySalary ? "Månadslön" : "Timlön";
+    const salaryValue = showMonthlySalary
+      ? `${monthlySalary.toLocaleString("sv-SE")} kr`
+      : `${hourlyWage} kr/h`;
     doc.text(`Anställd: ${profile.full_name}`, 14, 40);
-    doc.text(`Timlön: ${profile.hourly_wage} kr/h`, 14, 47);
+    doc.text(`${salaryLabel}: ${salaryValue}`, 14, 47);
     doc.text(`Skattetabell: ${profile.tax_table}%`, 14, 54);
     
     // Time entries table
@@ -288,15 +367,19 @@ const SalaryOverview = () => {
     doc.setFont("helvetica", "bold");
     doc.text("Lönesammanställning", 14, finalY);
     
+    const baseSalaryLabel = showMonthlySalary ? "Månadslön" : "Grundlön";
+    const baseSalaryDetail = showMonthlySalary
+      ? "Fast månadslön"
+      : `${salaryData.totalHours.toFixed(1)} h × ${hourlyWage} kr`;
     const salaryRows = [
-      ["Grundlön", `${salaryData.totalHours.toFixed(1)} h × ${profile.hourly_wage} kr`, `${salaryData.grossSalary.toLocaleString("sv-SE")} kr`],
+      [baseSalaryLabel, baseSalaryDetail, `${salaryData.grossSalary.toLocaleString("sv-SE")} kr`],
       ["OB-tillägg (Dag)", `${salaryData.shiftBreakdown.day.hours.toFixed(1)} h`, `${salaryData.shiftBreakdown.day.compensation.toFixed(0)} kr`],
       ["OB-tillägg (Kväll)", `${salaryData.shiftBreakdown.evening.hours.toFixed(1)} h`, `+${salaryData.shiftBreakdown.evening.compensation.toFixed(0)} kr`],
       ["OB-tillägg (Natt)", `${salaryData.shiftBreakdown.night.hours.toFixed(1)} h`, `+${salaryData.shiftBreakdown.night.compensation.toFixed(0)} kr`],
       ["OB-tillägg (Helg)", `${salaryData.shiftBreakdown.weekend.hours.toFixed(1)} h`, `+${salaryData.shiftBreakdown.weekend.compensation.toFixed(0)} kr`],
-      ["Övertid vardag", `${salaryData.overtimeWeekdayHours.toFixed(1)} h (+64%)`, `+${salaryData.overtimeWeekdayCompensation.toFixed(0)} kr`],
-      ["Övertid helg", `${salaryData.overtimeWeekendHours.toFixed(1)} h (+124%)`, `+${salaryData.overtimeWeekendCompensation.toFixed(0)} kr`],
-      ["Restidsersättning", `170 kr/h`, `${salaryData.travelCompensation.toLocaleString("sv-SE")} kr`],
+      ["Övertid vardag", `${salaryData.overtimeWeekdayHours.toFixed(1)} h (+${overtimeWeekdayPercent}%)`, `+${salaryData.overtimeWeekdayCompensation.toFixed(0)} kr`],
+      ["Övertid helg", `${salaryData.overtimeWeekendHours.toFixed(1)} h (+${overtimeWeekendPercent}%)`, `+${salaryData.overtimeWeekendCompensation.toFixed(0)} kr`],
+      ["Restidsersättning", `${travelRate} kr/h`, `${salaryData.travelCompensation.toLocaleString("sv-SE")} kr`],
       ["", "", ""],
       ["BRUTTOLÖN", "", `${salaryData.totalGrossSalary.toLocaleString("sv-SE")} kr`],
       ["Kommunalskatt", `${profile.tax_table}%`, `-${taxBreakdown.municipalTax.toLocaleString("sv-SE")} kr`],
@@ -335,7 +418,7 @@ const SalaryOverview = () => {
     
     const additionalRows = [
       ["Semesterersättning (13%)", `13% av ${vacationPayBase.toLocaleString("sv-SE")} kr`, `${vacationPay.toLocaleString("sv-SE")} kr`],
-      ["", "(Grundlön + OB, ej restid/trakt.)", ""],
+      ["", `(${baseSalaryLabel} + OB, ej restid/trakt.)`, ""],
       ["", "", ""],
       ["Arbetsgivaravgifter", `31,42% av bruttolön`, `${employerFees.toLocaleString("sv-SE")} kr`],
       ["", "(betalas av arbetsgivaren till Skatteverket)", ""],
@@ -431,12 +514,18 @@ const SalaryOverview = () => {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Timlön</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {showMonthlySalary ? "Månadslön" : "Timlön"}
+            </CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {profile?.hourly_wage ? `${profile.hourly_wage} kr` : "—"}
+              {showMonthlySalary
+                ? `${monthlySalary.toLocaleString("sv-SE")} kr`
+                : hourlyWage
+                ? `${hourlyWage} kr`
+                : "—"}
             </div>
           </CardContent>
         </Card>
@@ -527,7 +616,7 @@ const SalaryOverview = () => {
               {salaryData.overtimeWeekdayCompensation.toLocaleString("sv-SE")} kr
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {salaryData.overtimeWeekdayHours.toFixed(1)} h (+64%)
+              {salaryData.overtimeWeekdayHours.toFixed(1)} h (+{overtimeWeekdayPercent}%)
             </p>
           </CardContent>
         </Card>
@@ -542,7 +631,7 @@ const SalaryOverview = () => {
               {salaryData.overtimeWeekendCompensation.toLocaleString("sv-SE")} kr
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {salaryData.overtimeWeekendHours.toFixed(1)} h (+124%)
+              {salaryData.overtimeWeekendHours.toFixed(1)} h (+{overtimeWeekendPercent}%)
             </p>
           </CardContent>
         </Card>
@@ -610,7 +699,9 @@ const SalaryOverview = () => {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">Dag (0%)</p>
+                <p className="text-sm text-muted-foreground">
+                  Dag ({((shiftMultipliers.day - 1) * 100).toFixed(0)}%)
+                </p>
                 <p className="text-2xl font-bold font-heading">
                   {(salaryData.shiftBreakdown.day?.hours || 0).toFixed(1)} h
                 </p>

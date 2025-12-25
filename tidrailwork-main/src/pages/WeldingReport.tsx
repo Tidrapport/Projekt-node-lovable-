@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,19 +7,24 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
+import { getMe } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, Trash2, Save, FileText } from "lucide-react";
-import { WeldingEntry, WORK_TYPES, WELDING_METHODS, RAIL_TYPES, MATERIAL_TYPES } from "@/types/weldingReport";
+import { WeldingEntry, WeldingReport, WORK_TYPES, WELDING_METHODS, RAIL_TYPES, MATERIAL_TYPES } from "@/types/weldingReport";
 import { format } from "date-fns";
 
 const WeldingReport = () => {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [reportsLoading, setReportsLoading] = useState(false);
   const [profile, setProfile] = useState<{ full_name: string; company_id: string | null } | null>(null);
+  const [reports, setReports] = useState<WeldingReport[]>([]);
+  const [selectedReport, setSelectedReport] = useState<WeldingReport | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [appendEntries, setAppendEntries] = useState<WeldingEntry[]>([]);
 
   // Form state
   const [reportDate, setReportDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -65,25 +69,42 @@ const WeldingReport = () => {
     fetchProfile();
   }, [user]);
 
-  const addEntry = () => {
-    const newEntry: WeldingEntry = {
-      nr: entries.length + 1,
-      date: format(new Date(), "dd"),
-      location: "",
-      switchImage: "",
-      beforeMm: "",
-      afterMm: "",
-      temp: "",
-      model: "",
-      material: "",
-      rail: "",
-      workType: "",
-      weldingMethod: "",
-      additiveMaterial: "",
-      batchNr: "",
-      wpsNr: "",
+  useEffect(() => {
+    if (!user) return;
+    const fetchReports = async () => {
+      setReportsLoading(true);
+      try {
+        const data = await apiFetch<WeldingReport[]>("/welding_reports");
+        setReports(data || []);
+      } catch (err: any) {
+        toast.error(err.message || "Kunde inte hämta svetsrapporter");
+      } finally {
+        setReportsLoading(false);
+      }
     };
-    setEntries([...entries, newEntry]);
+    fetchReports();
+  }, [user]);
+
+  const createEmptyEntry = (nr: number): WeldingEntry => ({
+    nr,
+    date: format(new Date(), "dd"),
+    location: "",
+    switchImage: "",
+    beforeMm: "",
+    afterMm: "",
+    temp: "",
+    model: "",
+    material: "",
+    rail: "",
+    workType: "",
+    weldingMethod: "",
+    additiveMaterial: "",
+    batchNr: "",
+    wpsNr: "",
+  });
+
+  const addEntry = () => {
+    setEntries((prev) => [...prev, createEmptyEntry(prev.length + 1)]);
   };
 
   const updateEntry = (index: number, field: keyof WeldingEntry, value: string | number) => {
@@ -100,6 +121,241 @@ const WeldingReport = () => {
     });
     setEntries(updated);
   };
+
+  const addAppendEntry = () => {
+    setAppendEntries((prev) => [...prev, createEmptyEntry(prev.length + 1)]);
+  };
+
+  const updateAppendEntry = (index: number, field: keyof WeldingEntry, value: string | number) => {
+    const updated = [...appendEntries];
+    updated[index] = { ...updated[index], [field]: value };
+    setAppendEntries(updated);
+  };
+
+  const removeAppendEntry = (index: number) => {
+    const updated = appendEntries.filter((_, i) => i !== index);
+    updated.forEach((entry, i) => {
+      entry.nr = i + 1;
+    });
+    setAppendEntries(updated);
+  };
+
+  const openAddEntriesDialog = (report: WeldingReport) => {
+    setSelectedReport(report);
+    setAppendEntries([createEmptyEntry(1)]);
+    setShowAddDialog(true);
+  };
+
+  const handleAppendEntries = async () => {
+    if (!selectedReport) return;
+    if (appendEntries.length === 0) {
+      toast.error("Lägg till minst en svetsrad");
+      return;
+    }
+    setLoading(true);
+    try {
+      await apiFetch(`/welding_reports/${selectedReport.id}/entries`, {
+        method: "POST",
+        json: { welding_entries: appendEntries },
+      });
+      toast.success("Svetsrader tillagda");
+      setShowAddDialog(false);
+      setAppendEntries([]);
+      setSelectedReport(null);
+      const data = await apiFetch<WeldingReport[]>("/welding_reports");
+      setReports(data || []);
+    } catch (error: any) {
+      toast.error("Kunde inte uppdatera: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatReportDate = (report: WeldingReport) => {
+    if (report.report_date) return report.report_date;
+    if (report.report_year && report.report_month) {
+      return `${report.report_year}-${String(report.report_month).padStart(2, "0")}`;
+    }
+    return "Okänt datum";
+  };
+
+  const renderEntriesTable = (
+    tableEntries: WeldingEntry[],
+    onUpdate: (index: number, field: keyof WeldingEntry, value: string | number) => void,
+    onRemove: (index: number) => void,
+    emptyText: string
+  ) => (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-12">Nr</TableHead>
+            <TableHead className="w-16">Dat</TableHead>
+            <TableHead>Bandel-ort-växelnr/spår</TableHead>
+            <TableHead>Vxlbild</TableHead>
+            <TableHead className="w-16">Före mm</TableHead>
+            <TableHead className="w-16">Efter mm</TableHead>
+            <TableHead className="w-16">Temp</TableHead>
+            <TableHead>Modell</TableHead>
+            <TableHead>Material</TableHead>
+            <TableHead className="w-12">Räl</TableHead>
+            <TableHead>Typ av arbete</TableHead>
+            <TableHead>Svetsmetod</TableHead>
+            <TableHead>Tilläggsmaterial</TableHead>
+            <TableHead>Batch nr</TableHead>
+            <TableHead>WPS nr</TableHead>
+            <TableHead className="w-12"></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {tableEntries.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={16} className="text-center text-muted-foreground py-8">
+                {emptyText}
+              </TableCell>
+            </TableRow>
+          ) : (
+            tableEntries.map((entry, index) => (
+              <TableRow key={index}>
+                <TableCell>{entry.nr}</TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.date}
+                    onChange={(e) => onUpdate(index, "date", e.target.value)}
+                    className="w-16"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.location}
+                    onChange={(e) => onUpdate(index, "location", e.target.value)}
+                    className="min-w-[150px]"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.switchImage}
+                    onChange={(e) => onUpdate(index, "switchImage", e.target.value)}
+                    className="w-24"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.beforeMm}
+                    onChange={(e) => onUpdate(index, "beforeMm", e.target.value)}
+                    className="w-16"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.afterMm}
+                    onChange={(e) => onUpdate(index, "afterMm", e.target.value)}
+                    className="w-16"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.temp}
+                    onChange={(e) => onUpdate(index, "temp", e.target.value)}
+                    className="w-16"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.model}
+                    onChange={(e) => onUpdate(index, "model", e.target.value)}
+                    className="w-24"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Select value={entry.material} onValueChange={(v) => onUpdate(index, "material", v)}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MATERIAL_TYPES.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <Select value={entry.rail} onValueChange={(v) => onUpdate(index, "rail", v)}>
+                    <SelectTrigger className="w-14">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RAIL_TYPES.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {r}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <Select value={entry.workType} onValueChange={(v) => onUpdate(index, "workType", v)}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WORK_TYPES.map((w) => (
+                        <SelectItem key={w} value={w}>
+                          {w}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <Select value={entry.weldingMethod} onValueChange={(v) => onUpdate(index, "weldingMethod", v)}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue placeholder="Välj" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WELDING_METHODS.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.additiveMaterial}
+                    onChange={(e) => onUpdate(index, "additiveMaterial", e.target.value)}
+                    className="w-28"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.batchNr}
+                    onChange={(e) => onUpdate(index, "batchNr", e.target.value)}
+                    className="w-24"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={entry.wpsNr}
+                    onChange={(e) => onUpdate(index, "wpsNr", e.target.value)}
+                    className="w-28"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="icon" onClick={() => onRemove(index)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
 
   const handleSubmit = async () => {
     if (!user || !profile) {
@@ -152,6 +408,8 @@ const WeldingReport = () => {
       setEntries([]);
       setDeviations("");
       setComments("");
+      const data = await apiFetch<WeldingReport[]>("/welding_reports");
+      setReports(data || []);
     } catch (error: any) {
       toast.error("Kunde inte spara: " + error.message);
     } finally {
@@ -171,6 +429,42 @@ const WeldingReport = () => {
           Spara rapport
         </Button>
       </div>
+
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <FileText className="h-5 w-5" />
+            Mina svetsrapporter
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {reportsLoading ? (
+            <p className="text-sm text-muted-foreground">Laddar...</p>
+          ) : reports.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Inga svetsrapporter ännu.</p>
+          ) : (
+            <div className="space-y-3">
+              {reports.map((report) => (
+                <div key={report.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">{formatReportDate(report)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      AO: {report.own_ao_number || "-"} | Kund AO: {report.customer_ao_number || "-"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Svetsrader: {report.welding_entries?.length || 0}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => openAddEntriesDialog(report)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Lägg till svetsrader
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Header info */}
       <Card className="shadow-card">
@@ -261,184 +555,12 @@ const WeldingReport = () => {
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">Nr</TableHead>
-                  <TableHead className="w-16">Dat</TableHead>
-                  <TableHead>Bandel-ort-växelnr/spår</TableHead>
-                  <TableHead>Vxlbild</TableHead>
-                  <TableHead className="w-16">Före mm</TableHead>
-                  <TableHead className="w-16">Efter mm</TableHead>
-                  <TableHead className="w-16">Temp</TableHead>
-                  <TableHead>Modell</TableHead>
-                  <TableHead>Material</TableHead>
-                  <TableHead className="w-12">Räl</TableHead>
-                  <TableHead>Typ av arbete</TableHead>
-                  <TableHead>Svetsmetod</TableHead>
-                  <TableHead>Tilläggsmaterial</TableHead>
-                  <TableHead>Batch nr</TableHead>
-                  <TableHead>WPS nr</TableHead>
-                  <TableHead className="w-12"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {entries.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={16} className="text-center text-muted-foreground py-8">
-                      Inga svetsrader tillagda. Klicka "Lägg till rad" för att börja.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  entries.map((entry, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{entry.nr}</TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.date}
-                          onChange={(e) => updateEntry(index, "date", e.target.value)}
-                          className="w-16"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.location}
-                          onChange={(e) => updateEntry(index, "location", e.target.value)}
-                          className="min-w-[150px]"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.switchImage}
-                          onChange={(e) => updateEntry(index, "switchImage", e.target.value)}
-                          className="w-24"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.beforeMm}
-                          onChange={(e) => updateEntry(index, "beforeMm", e.target.value)}
-                          className="w-16"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.afterMm}
-                          onChange={(e) => updateEntry(index, "afterMm", e.target.value)}
-                          className="w-16"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.temp}
-                          onChange={(e) => updateEntry(index, "temp", e.target.value)}
-                          className="w-16"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.model}
-                          onChange={(e) => updateEntry(index, "model", e.target.value)}
-                          className="w-24"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={entry.material}
-                          onValueChange={(v) => updateEntry(index, "material", v)}
-                        >
-                          <SelectTrigger className="w-24">
-                            <SelectValue placeholder="Välj" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MATERIAL_TYPES.map((m) => (
-                              <SelectItem key={m} value={m}>{m}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={entry.rail}
-                          onValueChange={(v) => updateEntry(index, "rail", v)}
-                        >
-                          <SelectTrigger className="w-14">
-                            <SelectValue placeholder="Välj" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {RAIL_TYPES.map((r) => (
-                              <SelectItem key={r} value={r}>{r}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={entry.workType}
-                          onValueChange={(v) => updateEntry(index, "workType", v)}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue placeholder="Välj" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {WORK_TYPES.map((w) => (
-                              <SelectItem key={w} value={w}>{w}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={entry.weldingMethod}
-                          onValueChange={(v) => updateEntry(index, "weldingMethod", v)}
-                        >
-                          <SelectTrigger className="w-32">
-                            <SelectValue placeholder="Välj" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {WELDING_METHODS.map((m) => (
-                              <SelectItem key={m} value={m}>{m}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.additiveMaterial}
-                          onChange={(e) => updateEntry(index, "additiveMaterial", e.target.value)}
-                          className="w-28"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.batchNr}
-                          onChange={(e) => updateEntry(index, "batchNr", e.target.value)}
-                          className="w-24"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={entry.wpsNr}
-                          onChange={(e) => updateEntry(index, "wpsNr", e.target.value)}
-                          className="w-28"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeEntry(index)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          {renderEntriesTable(
+            entries,
+            updateEntry,
+            removeEntry,
+            'Inga svetsrader tillagda. Klicka "Lägg till rad" för att börja.'
+          )}
         </CardContent>
       </Card>
 
@@ -568,6 +690,43 @@ const WeldingReport = () => {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={showAddDialog}
+        onOpenChange={(open) => {
+          setShowAddDialog(open);
+          if (!open) {
+            setSelectedReport(null);
+            setAppendEntries([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>
+              Lägg till svetsrader {selectedReport ? `(${formatReportDate(selectedReport)})` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <Button onClick={addAppendEntry} size="sm" variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Lägg till rad
+              </Button>
+              <Button onClick={handleAppendEntries} disabled={loading}>
+                <Save className="h-4 w-4 mr-2" />
+                Spara rader
+              </Button>
+            </div>
+            {renderEntriesTable(
+              appendEntries,
+              updateAppendEntry,
+              removeAppendEntry,
+              "Inga nya svetsrader. Klicka 'Lägg till rad' för att börja."
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

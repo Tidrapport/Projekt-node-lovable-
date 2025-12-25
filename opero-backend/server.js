@@ -95,6 +95,99 @@ function getAuthUserId(req) {
   return req.user?.user_id ?? req.user?.id ?? null;
 }
 
+const DEFAULT_SHIFT_CONFIGS = [
+  {
+    shift_type: "day",
+    multiplier: 1.0,
+    start_hour: 7,
+    end_hour: 18,
+    description: "Dagtid måndag-fredag"
+  },
+  {
+    shift_type: "evening",
+    multiplier: 1.25,
+    start_hour: 18,
+    end_hour: 21,
+    description: "Kvällstid måndag-torsdag"
+  },
+  {
+    shift_type: "night",
+    multiplier: 1.5,
+    start_hour: 21,
+    end_hour: 7,
+    description: "Nattid måndag-torsdag"
+  },
+  {
+    shift_type: "weekend",
+    multiplier: 1.75,
+    start_hour: 18,
+    end_hour: 6,
+    description: "Helg fredag 18:00 - måndag 06:00"
+  },
+  {
+    shift_type: "overtime_day",
+    multiplier: 1.5,
+    start_hour: 0,
+    end_hour: 24,
+    description: "Övertid vardag"
+  },
+  {
+    shift_type: "overtime_weekend",
+    multiplier: 2.0,
+    start_hour: 0,
+    end_hour: 24,
+    description: "Övertid helg"
+  }
+];
+
+const DEFAULT_TRAVEL_RATE = 170;
+
+function ensureShiftConfigs(companyId, callback) {
+  db.all(
+    "SELECT shift_type FROM shift_types_config WHERE company_id = ?",
+    [companyId],
+    (err, rows) => {
+      if (err) return callback(err);
+      const existing = new Set((rows || []).map((r) => r.shift_type));
+      const missing = DEFAULT_SHIFT_CONFIGS.filter((cfg) => !existing.has(cfg.shift_type));
+      if (missing.length === 0) return callback(null);
+
+      const stmt = db.prepare(
+        `INSERT INTO shift_types_config (company_id, shift_type, multiplier, start_hour, end_hour, description)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      );
+      missing.forEach((cfg) => {
+        stmt.run([
+          companyId,
+          cfg.shift_type,
+          cfg.multiplier,
+          cfg.start_hour,
+          cfg.end_hour,
+          cfg.description
+        ]);
+      });
+      stmt.finalize(callback);
+    }
+  );
+}
+
+function ensureCompensationSettings(companyId, callback) {
+  db.get(
+    "SELECT id FROM compensation_settings WHERE company_id = ?",
+    [companyId],
+    (err, row) => {
+      if (err) return callback(err);
+      if (row) return callback(null);
+
+      db.run(
+        "INSERT INTO compensation_settings (company_id, travel_rate) VALUES (?, ?)",
+        [companyId, DEFAULT_TRAVEL_RATE],
+        callback
+      );
+    }
+  );
+}
+
 // Test-route
 app.get("/", (req, res) => {
   res.send("Opero backend är igång!");
@@ -805,6 +898,7 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
       last_name,
       phone,
       hourly_wage,
+      monthly_salary,
       emergency_contact,
       employee_type,
       employee_number,
@@ -826,20 +920,21 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
 
 // Skapa användare (admin)
 app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
-  const {
-    first_name,
-    last_name,
-    email,
-    phone = "",
-    role = "user",
-    password,
-    company_id,
-    hourly_wage = null,
-    emergency_contact = null,
-    employee_type = null,
-    employee_number = null,
-    tax_table = null
-  } = req.body;
+    const {
+      first_name,
+      last_name,
+      email,
+      phone = "",
+      role = "user",
+      password,
+      company_id,
+      hourly_wage = null,
+      monthly_salary = null,
+      emergency_contact = null,
+      employee_type = null,
+      employee_number = null,
+      tax_table = null
+    } = req.body;
 
   if (!first_name || !last_name || !email || !password) {
     return res.status(400).json({ error: "Förnamn, efternamn, e‑post och lösenord krävs." });
@@ -859,8 +954,8 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
 
   db.run(
     `INSERT INTO users
-      (username, email, password, role, company_id, first_name, last_name, phone, hourly_wage, emergency_contact, employee_type, employee_number, tax_table)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (username, email, password, role, company_id, first_name, last_name, phone, hourly_wage, monthly_salary, emergency_contact, employee_type, employee_number, tax_table)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       username,
       cleanEmail,
@@ -871,6 +966,7 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
       last_name.trim(),
       String(phone || "").trim(),
       hourly_wage !== undefined && hourly_wage !== null && hourly_wage !== "" ? Number(hourly_wage) : null,
+      monthly_salary !== undefined && monthly_salary !== null && monthly_salary !== "" ? Number(monthly_salary) : null,
       emergency_contact ? String(emergency_contact).trim() : null,
       employee_type ? String(employee_type).trim() : null,
       employee_number ? String(employee_number).trim() : null,
@@ -898,6 +994,10 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
           hourly_wage !== undefined && hourly_wage !== null && hourly_wage !== ""
             ? Number(hourly_wage)
             : null,
+        monthly_salary:
+          monthly_salary !== undefined && monthly_salary !== null && monthly_salary !== ""
+            ? Number(monthly_salary)
+            : null,
         emergency_contact: emergency_contact ? String(emergency_contact).trim() : null,
         employee_type: employee_type ? String(employee_type).trim() : null,
         employee_number: employee_number ? String(employee_number).trim() : null,
@@ -916,6 +1016,7 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     phone,
     role,
     hourly_wage,
+    monthly_salary,
     emergency_contact,
     employee_type,
     employee_number,
@@ -946,6 +1047,12 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     fields.push("hourly_wage = ?");
     params.push(
       hourly_wage !== null && hourly_wage !== "" ? Number(hourly_wage) : null
+    );
+  }
+  if (monthly_salary !== undefined) {
+    fields.push("monthly_salary = ?");
+    params.push(
+      monthly_salary !== null && monthly_salary !== "" ? Number(monthly_salary) : null
     );
   }
   if (emergency_contact !== undefined) {
@@ -1139,6 +1246,240 @@ app.get("/auth/me", requireAuth, async (req, res) => {
       });
     }
   );
+});
+
+// ======================
+//   PROFILES
+// ======================
+// GET /profiles (company-scoped)
+app.get("/profiles", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const isAdmin = isAdminRole(req);
+  const requestedCompanyId = req.query.company_id;
+  const targetCompanyId = isAdmin && requestedCompanyId ? requestedCompanyId : companyId;
+
+  const where = ["company_id = ?"];
+  const params = [targetCompanyId];
+
+  if (!isAdmin) {
+    where.push("id = ?");
+    params.push(req.user.user_id);
+  }
+
+  let orderSql = "";
+  if (req.query.order === "full_name") {
+    orderSql = "ORDER BY first_name, last_name";
+  } else if (req.query.order === "id") {
+    orderSql = "ORDER BY id";
+  }
+
+  const sql = `
+    SELECT
+      id,
+      email,
+      role,
+      company_id,
+      first_name,
+      last_name,
+      (first_name || ' ' || last_name) AS full_name,
+      phone,
+      hourly_wage,
+      monthly_salary,
+      tax_table,
+      employee_type,
+      employee_number
+    FROM users
+    WHERE ${where.join(" AND ")}
+    ${orderSql}
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /profiles:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json(rows || []);
+  });
+});
+
+// GET /profiles/:id (company-scoped)
+app.get("/profiles/:id", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const isAdmin = isAdminRole(req);
+  const id = req.params.id;
+
+  if (!isAdmin && Number(id) !== Number(req.user.user_id)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  db.get(
+    `SELECT
+      id,
+      email,
+      role,
+      company_id,
+      first_name,
+      last_name,
+      (first_name || ' ' || last_name) AS full_name,
+      phone,
+      hourly_wage,
+      monthly_salary,
+      tax_table,
+      employee_type,
+      employee_number
+     FROM users
+     WHERE id = ? AND company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid GET /profiles/:id:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    }
+  );
+});
+
+// ======================
+//   OB / ÖVERTID / RESTID INSTÄLLNINGAR
+// ======================
+// GET /admin/ob-settings (read for all authenticated users)
+app.get("/admin/ob-settings", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  ensureShiftConfigs(companyId, (seedErr) => {
+    if (seedErr) {
+      console.error("DB-fel vid seed shift_types_config:", seedErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    db.all(
+      `SELECT * FROM shift_types_config
+       WHERE company_id = ?
+       ORDER BY CASE shift_type
+         WHEN 'day' THEN 1
+         WHEN 'evening' THEN 2
+         WHEN 'night' THEN 3
+         WHEN 'weekend' THEN 4
+         WHEN 'overtime_day' THEN 5
+         WHEN 'overtime_weekend' THEN 6
+         ELSE 99
+       END`,
+      [companyId],
+      (err, rows) => {
+        if (err) {
+          console.error("DB-fel vid GET /admin/ob-settings:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json(rows || []);
+      }
+    );
+  });
+});
+
+// PATCH /admin/ob-settings/:id (admin)
+app.patch("/admin/ob-settings/:id", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const { id } = req.params;
+  const { multiplier, start_hour, end_hour } = req.body || {};
+
+  db.run(
+    `UPDATE shift_types_config
+     SET multiplier = COALESCE(?, multiplier),
+         start_hour = COALESCE(?, start_hour),
+         end_hour = COALESCE(?, end_hour)
+     WHERE id = ? AND company_id = ?`,
+    [
+      multiplier ?? null,
+      start_hour ?? null,
+      end_hour ?? null,
+      id,
+      companyId
+    ],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid PATCH /admin/ob-settings:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (this.changes === 0) return res.status(404).json({ error: "Not found" });
+      db.get(
+        "SELECT * FROM shift_types_config WHERE id = ? AND company_id = ?",
+        [id, companyId],
+        (e2, row) => {
+          if (e2 || !row) return res.status(404).json({ error: "Not found" });
+          res.json(row);
+        }
+      );
+    }
+  );
+});
+
+// GET /admin/compensation-settings (restid)
+app.get("/admin/compensation-settings", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  ensureCompensationSettings(companyId, (seedErr) => {
+    if (seedErr) {
+      console.error("DB-fel vid seed compensation_settings:", seedErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+    db.get(
+      "SELECT travel_rate FROM compensation_settings WHERE company_id = ?",
+      [companyId],
+      (err, row) => {
+        if (err || !row) {
+          console.error("DB-fel vid GET /admin/compensation-settings:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json(row);
+      }
+    );
+  });
+});
+
+// PATCH /admin/compensation-settings (admin)
+app.patch("/admin/compensation-settings", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const { travel_rate } = req.body || {};
+  if (travel_rate == null || Number.isNaN(Number(travel_rate))) {
+    return res.status(400).json({ error: "travel_rate required" });
+  }
+
+  ensureCompensationSettings(companyId, (seedErr) => {
+    if (seedErr) {
+      console.error("DB-fel vid seed compensation_settings:", seedErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+    db.run(
+      "UPDATE compensation_settings SET travel_rate = ? WHERE company_id = ?",
+      [Number(travel_rate), companyId],
+      function (err) {
+        if (err) {
+          console.error("DB-fel vid PATCH /admin/compensation-settings:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        db.get(
+          "SELECT travel_rate FROM compensation_settings WHERE company_id = ?",
+          [companyId],
+          (e2, row) => {
+            if (e2 || !row) return res.status(500).json({ error: "DB error" });
+            res.json(row);
+          }
+        );
+      }
+    );
+  });
 });
 
 // ======================
@@ -1926,19 +2267,26 @@ app.delete("/time-entries/:id", requireAuth, (req, res) => {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      // Delete materials then the report
+      // Delete materials and deviations, then the report
       db.run(`DELETE FROM report_materials WHERE report_id = ?`, [id], (e2) => {
         if (e2) {
           console.error("DB-fel vid DELETE report_materials:", e2);
           return res.status(500).json({ error: "DB error" });
         }
 
-        db.run(`DELETE FROM time_reports WHERE id = ?`, [id], function (e3) {
+        db.run(`DELETE FROM deviation_reports WHERE time_entry_id = ?`, [id], (e3) => {
           if (e3) {
-            console.error("DB-fel vid DELETE time_report:", e3);
+            console.error("DB-fel vid DELETE deviation_reports:", e3);
             return res.status(500).json({ error: "DB error" });
           }
-          res.status(204).end();
+
+          db.run(`DELETE FROM time_reports WHERE id = ?`, [id], function (e4) {
+            if (e4) {
+              console.error("DB-fel vid DELETE time_report:", e4);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.status(204).end();
+          });
         });
       });
     });
@@ -2860,6 +3208,24 @@ const mapWeldingRow = (row) => {
   };
 };
 
+const sanitizeWeldingEntry = (entry) => ({
+  nr: Number(entry?.nr) || 0,
+  date: entry?.date || "",
+  location: entry?.location || "",
+  switchImage: entry?.switchImage || "",
+  beforeMm: entry?.beforeMm || "",
+  afterMm: entry?.afterMm || "",
+  temp: entry?.temp || "",
+  model: entry?.model || "",
+  material: entry?.material || "",
+  rail: entry?.rail || "",
+  workType: entry?.workType || "",
+  weldingMethod: entry?.weldingMethod || "",
+  additiveMaterial: entry?.additiveMaterial || "",
+  batchNr: entry?.batchNr || "",
+  wpsNr: entry?.wpsNr || "",
+});
+
 // Create (hyphen endpoint used by frontend form)
 app.post("/welding-reports", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
@@ -2985,6 +3351,57 @@ app.get("/welding_reports", requireAuth, (req, res) => {
     }
 
     res.json(mapped);
+  });
+});
+
+// Append welding entries (owner or admin)
+app.post("/welding_reports/:id/entries", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const id = req.params.id;
+  const isAdmin = isAdminRole(req);
+  const { welding_entries } = req.body || {};
+
+  if (!Array.isArray(welding_entries) || welding_entries.length === 0) {
+    return res.status(400).json({ error: "welding_entries required" });
+  }
+
+  db.get(`SELECT id, user_id, company_id, welding_entries FROM welding_reports WHERE id = ?`, [id], (err, row) => {
+    if (err) return res.status(500).json({ error: "DB error" });
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (String(row.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+    if (!isAdmin && Number(row.user_id) !== Number(req.user.user_id)) return res.status(403).json({ error: "Forbidden" });
+
+    let existingEntries = [];
+    try {
+      existingEntries = row.welding_entries ? JSON.parse(row.welding_entries) : [];
+    } catch (parseErr) {
+      console.error("Kunde inte parsa welding_entries:", parseErr);
+      existingEntries = [];
+    }
+
+    const startNr = existingEntries.length;
+    const appended = welding_entries.map(sanitizeWeldingEntry).map((entry, idx) => ({
+      ...entry,
+      nr: startNr + idx + 1,
+    }));
+    const updatedEntries = existingEntries.concat(appended);
+
+    db.run(
+      `UPDATE welding_reports SET welding_entries = ?, updated_at = datetime('now') WHERE id = ?`,
+      [JSON.stringify(updatedEntries), id],
+      function (updErr) {
+        if (updErr) {
+          console.error("DB-fel vid UPDATE welding_entries:", updErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        db.get(`SELECT * FROM welding_reports WHERE id = ?`, [id], (selErr, updated) => {
+          if (selErr || !updated) return res.status(500).json({ error: "DB error" });
+          res.json(mapWeldingRow(updated));
+        });
+      }
+    );
   });
 });
 

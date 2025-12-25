@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { toast } from "sonner";
 import { Loader2, Percent, Clock } from "lucide-react";
 
@@ -17,10 +16,16 @@ interface OBConfig {
   end_hour: number;
 }
 
+interface CompensationSettings {
+  travel_rate: number;
+}
+
 const OBSettings = () => {
   const [configs, setConfigs] = useState<OBConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [travelRate, setTravelRate] = useState(170);
+  const [savingTravelRate, setSavingTravelRate] = useState(false);
 
   useEffect(() => {
     fetchConfigs();
@@ -28,39 +33,57 @@ const OBSettings = () => {
 
   const fetchConfigs = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("shift_types_config")
-      .select("*")
-      .order("shift_type");
-
-    if (error) {
+    try {
+      const [shiftData, travelData] = await Promise.all([
+        apiFetch<OBConfig[]>("/admin/ob-settings"),
+        apiFetch<CompensationSettings>("/admin/compensation-settings"),
+      ]);
+      setConfigs(shiftData || []);
+      if (travelData?.travel_rate != null) {
+        setTravelRate(Number(travelData.travel_rate) || 170);
+      }
+    } catch (error) {
       toast.error("Kunde inte hämta OB-inställningar");
       console.error(error);
-    } else {
-      setConfigs(data || []);
     }
     setLoading(false);
   };
 
   const handleUpdate = async (id: string, config: OBConfig) => {
     setSaving(true);
-    const { error } = await supabase
-      .from("shift_types_config")
-      .update({ 
-        multiplier: config.multiplier,
-        start_hour: config.start_hour,
-        end_hour: config.end_hour
-      })
-      .eq("id", id);
-
-    if (error) {
+    try {
+      const updated = await apiFetch<OBConfig>(`/admin/ob-settings/${id}`, {
+        method: "PATCH",
+        json: {
+          multiplier: config.multiplier,
+          start_hour: config.start_hour,
+          end_hour: config.end_hour,
+        },
+      });
+      setConfigs((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      toast.success("OB-inställningar uppdaterade");
+    } catch (error) {
       toast.error("Kunde inte uppdatera OB-inställningar");
       console.error(error);
-    } else {
-      toast.success("OB-inställningar uppdaterade");
-      fetchConfigs();
     }
     setSaving(false);
+  };
+
+  const handleTravelRateSave = async () => {
+    setSavingTravelRate(true);
+    try {
+      const updated = await apiFetch<CompensationSettings>("/admin/compensation-settings", {
+        method: "PATCH",
+        json: { travel_rate: travelRate },
+      });
+      setTravelRate(Number(updated.travel_rate) || travelRate);
+      toast.success("Restidsersättning uppdaterad");
+    } catch (error) {
+      toast.error("Kunde inte uppdatera restidsersättning");
+      console.error(error);
+    } finally {
+      setSavingTravelRate(false);
+    }
   };
 
   const getShiftTypeName = (type: string) => {
@@ -198,6 +221,46 @@ const OBSettings = () => {
             </CardContent>
           </Card>
         ))}
+
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-primary" />
+              Restidsersättning
+            </CardTitle>
+            <CardDescription>Timersättning för restid</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="travelRate">Belopp (kr per timme)</Label>
+              <Input
+                id="travelRate"
+                type="number"
+                step="1"
+                min="0"
+                value={travelRate}
+                onChange={(e) => setTravelRate(parseFloat(e.target.value))}
+              />
+            </div>
+
+            <Button
+              onClick={handleTravelRateSave}
+              disabled={savingTravelRate}
+              className="w-full"
+            >
+              {savingTravelRate ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Spara ändringar"
+              )}
+            </Button>
+
+            <div className="bg-muted p-3 rounded-md space-y-1">
+              <p className="text-sm font-medium">Ersättning: {travelRate} kr/h</p>
+              <p className="text-sm text-muted-foreground">Gäller all restid som registreras</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card className="mt-6 shadow-card">

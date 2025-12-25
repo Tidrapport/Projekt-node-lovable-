@@ -5,11 +5,31 @@ export type ShiftDistribution = {
   weekend: number;
 };
 
+export type ShiftWindow = {
+  start: number;
+  end: number;
+};
+
+export type ShiftWindowConfig = {
+  day: ShiftWindow;
+  evening: ShiftWindow;
+  night: ShiftWindow;
+  weekend: ShiftWindow;
+};
+
+export const DEFAULT_SHIFT_WINDOWS: ShiftWindowConfig = {
+  day: { start: 7, end: 18 },
+  evening: { start: 18, end: 21 },
+  night: { start: 21, end: 7 },
+  weekend: { start: 18, end: 6 },
+};
+
 export const calculateOBDistribution = (
   dateStr: string,
   startTimeStr: string,
   endTimeStr: string,
-  breakMinutes: number | null | undefined
+  breakMinutes: number | null | undefined,
+  shiftWindows: ShiftWindowConfig = DEFAULT_SHIFT_WINDOWS
 ): ShiftDistribution => {
   const distribution: ShiftDistribution = { day: 0, evening: 0, night: 0, weekend: 0 };
 
@@ -39,35 +59,18 @@ export const calculateOBDistribution = (
 
   if (totalWorkMinutes <= 0) return distribution;
 
-  /**
-   * Check if a minute falls within the weekend OB period for employee salary
-   * Weekend OB: Friday 18:00 - Monday 06:00
-   */
-  const isWeekendMinute = (d: Date): boolean => {
-    const dow = d.getDay(); // 0=Sunday, 1=Monday, ..., 5=Friday, 6=Saturday
-    const minutesSinceMidnight = d.getHours() * 60 + d.getMinutes();
-
-    // Friday from 18:00 onwards
-    if (dow === 5 && minutesSinceMidnight >= 18 * 60) return true;
-
-    // All of Saturday
-    if (dow === 6) return true;
-
-    // All of Sunday
-    if (dow === 0) return true;
-
-    // Monday before 06:00
-    if (dow === 1 && minutesSinceMidnight < 6 * 60) return true;
-
-    return false;
+  const inWindow = (minutesSinceMidnight: number, window: ShiftWindow) => {
+    const start = window.start * 60;
+    const end = window.end * 60;
+    if (start === end) return false;
+    if (start < end) return minutesSinceMidnight >= start && minutesSinceMidnight < end;
+    return minutesSinceMidnight >= start || minutesSinceMidnight < end;
   };
   let remainingMinutes = totalWorkMinutes;
   let current = new Date(start);
 
   while (current < end && remainingMinutes > 0) {
-    const currentHour = current.getHours();
-    const currentMinute = current.getMinutes();
-    const minutesSinceMidnight = currentHour * 60 + currentMinute;
+    const minutesSinceMidnight = current.getHours() * 60 + current.getMinutes();
     const minutesToNextHour = 60 - (minutesSinceMidnight % 60);
     const minutesToEnd = Math.round((end.getTime() - current.getTime()) / (1000 * 60));
     const minutesInThisChunk = Math.min(minutesToNextHour, minutesToEnd, remainingMinutes);
@@ -75,23 +78,25 @@ export const calculateOBDistribution = (
     // Get day of week directly from current Date object
     const dow = current.getDay(); // 0=Sunday, 1=Monday, ..., 5=Friday, 6=Saturday
 
-    // Check weekend first: Friday 18:00 - Monday 06:00
-    const isWeekend = 
-      (dow === 5 && minutesSinceMidnight >= 18 * 60) || // Friday 18:00+
-      (dow === 6) || // Saturday (all day)
-      (dow === 0) || // Sunday (all day)
-      (dow === 1 && minutesSinceMidnight < 6 * 60); // Monday before 06:00
+    // Check weekend first: Friday start_hour -> Monday end_hour
+    const weekendStart = shiftWindows.weekend.start * 60;
+    const weekendEnd = shiftWindows.weekend.end * 60;
+    const isWeekend =
+      (dow === 5 && minutesSinceMidnight >= weekendStart) || // Friday start_hour+
+      dow === 6 || // Saturday (all day)
+      dow === 0 || // Sunday (all day)
+      (dow === 1 && minutesSinceMidnight < weekendEnd); // Monday before end_hour
 
     if (isWeekend) {
       distribution.weekend += minutesInThisChunk / 60;
-    } else if (currentHour >= 21 || currentHour < 7) {
-      // Night: 21:00-07:00 (Mon-Thu only, weekend already handled)
+    } else if (inWindow(minutesSinceMidnight, shiftWindows.night)) {
+      // Night (Mon-Thu only, weekend already handled)
       distribution.night += minutesInThisChunk / 60;
-    } else if (currentHour >= 18 && currentHour < 21 && dow >= 1 && dow <= 4) {
-      // Evening: 18:00-21:00 (Mon-Thu ONLY - dow 1-4)
+    } else if (dow >= 1 && dow <= 4 && inWindow(minutesSinceMidnight, shiftWindows.evening)) {
+      // Evening (Mon-Thu only)
       distribution.evening += minutesInThisChunk / 60;
     } else {
-      // Day: 07:00-18:00 (Mon-Fri)
+      // Day (fallback)
       distribution.day += minutesInThisChunk / 60;
     }
 

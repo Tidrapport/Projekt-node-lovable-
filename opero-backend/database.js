@@ -58,6 +58,7 @@ db.serialize(() => {
       last_name  TEXT,
       phone      TEXT,
       hourly_wage REAL,
+      monthly_salary REAL,
       emergency_contact TEXT,
       employee_type TEXT,
       employee_number TEXT,
@@ -80,6 +81,16 @@ db.serialize(() => {
           console.error("Kunde inte lägga till kolumnen hourly_wage:", alterErr);
         } else {
           console.log('Kolumnen "hourly_wage" har lagts till i users.');
+        }
+      });
+    }
+    const hasMonthlySalary = columns.some((col) => col.name === "monthly_salary");
+    if (!hasMonthlySalary) {
+      db.run(`ALTER TABLE users ADD COLUMN monthly_salary REAL;`, (alterErr) => {
+        if (alterErr) {
+          console.error("Kunde inte lägga till kolumnen monthly_salary:", alterErr);
+        } else {
+          console.log('Kolumnen "monthly_salary" har lagts till i users.');
         }
       });
     }
@@ -546,6 +557,31 @@ db.serialize(() => {
       contact_email TEXT,
       contact_phone TEXT,
       notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // --- Shift type configs (OB/övertid) ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS shift_types_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      shift_type TEXT NOT NULL,
+      multiplier REAL DEFAULT 1.0,
+      start_hour INTEGER,
+      end_hour INTEGER,
+      description TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(company_id, shift_type)
+    )
+  `);
+
+  // --- Compensation settings (restid) ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS compensation_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL UNIQUE,
+      travel_rate REAL DEFAULT 170,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);

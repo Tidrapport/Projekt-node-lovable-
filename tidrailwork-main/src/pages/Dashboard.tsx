@@ -3,11 +3,75 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, AlertTriangle, Briefcase, Calendar } from "lucide-react";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { format, startOfMonth, startOfWeek, endOfWeek, endOfMonth } from "date-fns";
-import { calculateOBDistribution } from "@/lib/obDistribution";
+import { DEFAULT_SHIFT_WINDOWS, ShiftWindowConfig } from "@/lib/obDistribution";
+import { summarizeObDistribution } from "@/lib/obSummary";
 import { apiFetch } from "@/api/client";
+import { listTimeEntries } from "@/api/timeEntries";
+
+type ObConfig = {
+  shift_type: string;
+  multiplier: number;
+  start_hour?: number | null;
+  end_hour?: number | null;
+};
+
+const DEFAULT_MULTIPLIERS = {
+  day: 1.0,
+  evening: 1.25,
+  night: 1.5,
+  weekend: 1.75,
+  overtime_day: 1.5,
+  overtime_weekend: 2.0,
+};
+
+const DEFAULT_TRAVEL_RATE = 170;
+const MONTHLY_SALARY_DIVISOR = 174;
+
+const normalizeHour = (value: number | null | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const buildShiftWindows = (configs: ObConfig[] | null): ShiftWindowConfig => {
+  const windows: ShiftWindowConfig = {
+    day: { ...DEFAULT_SHIFT_WINDOWS.day },
+    evening: { ...DEFAULT_SHIFT_WINDOWS.evening },
+    night: { ...DEFAULT_SHIFT_WINDOWS.night },
+    weekend: { ...DEFAULT_SHIFT_WINDOWS.weekend },
+  };
+
+  (configs || []).forEach((cfg) => {
+    if (cfg.shift_type === "day") {
+      windows.day = {
+        start: normalizeHour(cfg.start_hour, windows.day.start),
+        end: normalizeHour(cfg.end_hour, windows.day.end),
+      };
+    }
+    if (cfg.shift_type === "evening") {
+      windows.evening = {
+        start: normalizeHour(cfg.start_hour, windows.evening.start),
+        end: normalizeHour(cfg.end_hour, windows.evening.end),
+      };
+    }
+    if (cfg.shift_type === "night") {
+      windows.night = {
+        start: normalizeHour(cfg.start_hour, windows.night.start),
+        end: normalizeHour(cfg.end_hour, windows.night.end),
+      };
+    }
+    if (cfg.shift_type === "weekend") {
+      windows.weekend = {
+        start: normalizeHour(cfg.start_hour, windows.weekend.start),
+        end: normalizeHour(cfg.end_hour, windows.weekend.end),
+      };
+    }
+  });
+
+  return windows;
+};
 
 const Dashboard = () => {
-  const { effectiveUserId, isImpersonating, impersonatedUserName } = useEffectiveUser();
+  const { effectiveUserId } = useEffectiveUser();
   const [stats, setStats] = useState({
     todayHours: 0,
     weekHours: 0,
@@ -16,12 +80,8 @@ const Dashboard = () => {
   });
 
   const [hourlyWage, setHourlyWage] = useState<number>(0);
-  const [obMultipliers, setObMultipliers] = useState({
-    day: 1.0,
-    evening: 1.29,
-    night: 1.63,
-    weekend: 2.13,
-  });
+  const [obMultipliers, setObMultipliers] = useState(DEFAULT_MULTIPLIERS);
+  const [travelRate, setTravelRate] = useState(DEFAULT_TRAVEL_RATE);
 
   const [shiftStats, setShiftStats] = useState({
     day: 0,
@@ -49,45 +109,47 @@ const Dashboard = () => {
 
       // Fetch user profile with hourly wage
       const profileData = await apiFetch(`/profiles/${effectiveUserId}`).catch(() => null);
-      if (profileData) setHourlyWage(profileData.hourly_wage || 0);
+      if (profileData) {
+        const monthlySalary = Number(profileData.monthly_salary) || 0;
+        const fallbackHourly = Number(profileData.hourly_wage) || 0;
+        const baseHourlyRate = monthlySalary > 0 ? monthlySalary / MONTHLY_SALARY_DIVISOR : fallbackHourly;
+        setHourlyWage(baseHourlyRate);
+      }
 
-      // Fetch OB multipliers
-      const obData = await apiFetch(`/shift_types_config`).catch(() => null);
+      // Fetch OB multipliers (fallback to defaults if endpoint is unavailable)
+      const obData = await apiFetch<ObConfig[]>("/admin/ob-settings").catch(() => null);
+      const shiftWindows = buildShiftWindows(obData);
       if (obData && Array.isArray(obData)) {
         const multipliers = {
-          day: obData.find((o: any) => o.shift_type === "day")?.multiplier || 1.0,
-          evening: obData.find((o: any) => o.shift_type === "evening")?.multiplier || 1.29,
-          night: obData.find((o: any) => o.shift_type === "night")?.multiplier || 1.63,
-          weekend: obData.find((o: any) => o.shift_type === "weekend")?.multiplier || 2.13,
+          day: obData.find((o) => o.shift_type === "day")?.multiplier ?? DEFAULT_MULTIPLIERS.day,
+          evening: obData.find((o) => o.shift_type === "evening")?.multiplier ?? DEFAULT_MULTIPLIERS.evening,
+          night: obData.find((o) => o.shift_type === "night")?.multiplier ?? DEFAULT_MULTIPLIERS.night,
+          weekend: obData.find((o) => o.shift_type === "weekend")?.multiplier ?? DEFAULT_MULTIPLIERS.weekend,
+          overtime_day: obData.find((o) => o.shift_type === "overtime_day")?.multiplier ?? DEFAULT_MULTIPLIERS.overtime_day,
+          overtime_weekend:
+            obData.find((o) => o.shift_type === "overtime_weekend")?.multiplier ?? DEFAULT_MULTIPLIERS.overtime_weekend,
         };
         setObMultipliers(multipliers);
       }
 
-      const todayQs = `user_id=${effectiveUserId}&from=${today}&to=${today}`;
-      const weekQs = `user_id=${effectiveUserId}&from=${weekStart}&to=${weekEnd}`;
-      const monthQs = `user_id=${effectiveUserId}&from=${monthStart}&to=${monthEnd}`;
+      const travelData = await apiFetch<{ travel_rate: number }>("/admin/compensation-settings").catch(() => null);
+      setTravelRate(Number(travelData?.travel_rate) || DEFAULT_TRAVEL_RATE);
 
-      const todayData = await apiFetch(`/time-entries?${todayQs}`).catch(() => []);
-      const weekData = await apiFetch(`/time-entries?${weekQs}`).catch(() => []);
-      const monthData = await apiFetch(`/time-entries?${monthQs}`).catch(() => []);
+      const todayData = await listTimeEntries({ user_id: effectiveUserId, from: today, to: today }).catch(() => []);
+      const weekData = await listTimeEntries({ user_id: effectiveUserId, from: weekStart, to: weekEnd }).catch(() => []);
+      const monthData = await listTimeEntries({ user_id: effectiveUserId, from: monthStart, to: monthEnd }).catch(() => []);
 
       const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}&status=open`).catch(
         () => []
       );
       const count = Array.isArray(deviationsData) ? deviationsData.length : 0;
 
-      const allTimeEntries = await apiFetch(`/time-entries?${monthQs}`).catch(() => []);
+      const allTimeEntries = (monthData || []).filter(
+        (entry: any) => String(entry.user_id) === String(effectiveUserId)
+      );
 
       // Calculate shift type distribution, travel compensation, and per diem
-      const shiftTotals = {
-        day: 0,
-        evening: 0,
-        night: 0,
-        weekend: 0,
-        total: 0,
-        overtimeWeekday: 0,
-        overtimeWeekend: 0,
-      };
+      const shiftTotals = summarizeObDistribution(allTimeEntries || [], shiftWindows);
 
       let totalTravelCompensation = 0;
       let savedTravelCompensation = 0;
@@ -97,41 +159,9 @@ const Dashboard = () => {
       const perDiemByDate: Record<string, string> = {};
 
       (allTimeEntries || []).forEach((entry: any) => {
-        const distribution = calculateOBDistribution(
-          entry.date || today,
-          entry.start_time || "00:00",
-          entry.end_time || "00:00",
-          entry.break_minutes || 0
-        );
-
-        const overtimeWeekend = (entry as any).overtime_weekend_hours || 0;
-        const overtimeWeekday = (entry as any).overtime_weekday_hours || 0;
-
-        // Subtract overtime weekend hours from weekend OB
-        const adjustedWeekend = Math.max(0, distribution.weekend - overtimeWeekend);
-        
-        // Subtract overtime weekday hours from day/evening/night proportionally
-        const weekdayTotal = distribution.day + distribution.evening + distribution.night;
-        let adjustedDay = distribution.day;
-        let adjustedEvening = distribution.evening;
-        let adjustedNight = distribution.night;
-        
-        if (weekdayTotal > 0 && overtimeWeekday > 0) {
-          const ratio = Math.max(0, (weekdayTotal - overtimeWeekday)) / weekdayTotal;
-          adjustedDay = distribution.day * ratio;
-          adjustedEvening = distribution.evening * ratio;
-          adjustedNight = distribution.night * ratio;
-        }
-
-        shiftTotals.day += adjustedDay;
-        shiftTotals.evening += adjustedEvening;
-        shiftTotals.night += adjustedNight;
-        shiftTotals.weekend += adjustedWeekend;
-        shiftTotals.total += adjustedDay + adjustedEvening + adjustedNight + adjustedWeekend;
-
-        // Calculate travel compensation at 170 SEK/hour (split saved vs paid)
+        // Calculate travel compensation (split saved vs paid)
         if (entry.travel_time_hours) {
-          const amount = entry.travel_time_hours * 170;
+          const amount = entry.travel_time_hours * travelRate;
           if ((entry as any).save_travel_compensation) {
             savedTravelCompensation += amount;
           } else {
@@ -139,14 +169,10 @@ const Dashboard = () => {
           }
         }
 
-        // Calculate overtime
-        shiftTotals.overtimeWeekday += overtimeWeekday;
-        shiftTotals.overtimeWeekend += overtimeWeekend;
-        
         // Track per diem (max one per day)
-        if (entry.per_diem_type && entry.per_diem_type !== 'none') {
+        if (entry.per_diem_type && entry.per_diem_type !== "none") {
           const existingPerDiem = perDiemByDate[entry.date];
-          if (!existingPerDiem || (entry.per_diem_type === 'full' && existingPerDiem === 'half')) {
+          if (!existingPerDiem || (entry.per_diem_type === "full" && existingPerDiem === "half")) {
             perDiemByDate[entry.date] = entry.per_diem_type;
           }
         }
@@ -161,8 +187,10 @@ const Dashboard = () => {
         }
       });
 
-      const safeReduce = (arr: any[] | undefined) =>
-        (arr || []).reduce((sum, entry: any) => sum + (Number(entry.total_hours) || 0), 0);
+      const safeReduce = (arr: { total_hours?: number; user_id?: string | number }[] | undefined) =>
+        (arr || [])
+          .filter((entry) => String(entry.user_id) === String(effectiveUserId))
+          .reduce((sum, entry) => sum + (Number(entry.total_hours) || 0), 0);
 
       setStats({
         todayHours: safeReduce(todayData),
@@ -214,10 +242,10 @@ const Dashboard = () => {
     <div className="container mx-auto p-6">
       <div className="mb-6">
         <h2 className="text-3xl font-bold font-heading">
-          Översikt {isImpersonating && <span className="text-lg font-normal text-muted-foreground">- {impersonatedUserName}</span>}
+          Översikt
         </h2>
         <p className="text-muted-foreground">
-          {isImpersonating ? `Visar ${impersonatedUserName}s data` : "Sammanfattning av dina timmar och avvikelser"}
+          Sammanfattning av dina timmar och avvikelser
         </p>
       </div>
 
@@ -249,7 +277,9 @@ const Dashboard = () => {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">Dag (0%)</p>
+                <p className="text-sm text-muted-foreground">
+                  Dag ({((obMultipliers.day - 1) * 100).toFixed(0)}%)
+                </p>
                 <p className="text-2xl font-bold font-heading">{shiftStats.day.toFixed(1)} h</p>
                 <p className="text-xs text-muted-foreground">
                   {(shiftStats.day * hourlyWage * (obMultipliers.day - 1)).toFixed(2)} kr
@@ -292,21 +322,25 @@ const Dashboard = () => {
               {(shiftStats.overtimeWeekday > 0 || shiftStats.overtimeWeekend > 0) && (
                 <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-border">
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Övertid vardag (164%)</p>
+                    <p className="text-sm text-muted-foreground">
+                      Övertid vardag ({((obMultipliers.overtime_day - 1) * 100).toFixed(0)}%)
+                    </p>
                     <p className="text-2xl font-bold font-heading text-orange-500">
                       {shiftStats.overtimeWeekday.toFixed(1)} h
                     </p>
                     <p className="text-xs text-orange-500 font-medium">
-                      {(shiftStats.overtimeWeekday * hourlyWage * 1.64).toFixed(2)} kr
+                      {(shiftStats.overtimeWeekday * hourlyWage * obMultipliers.overtime_day).toFixed(2)} kr
                     </p>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Övertid helg (224%)</p>
+                    <p className="text-sm text-muted-foreground">
+                      Övertid helg ({((obMultipliers.overtime_weekend - 1) * 100).toFixed(0)}%)
+                    </p>
                     <p className="text-2xl font-bold font-heading text-purple-500">
                       {shiftStats.overtimeWeekend.toFixed(1)} h
                     </p>
                     <p className="text-xs text-purple-500 font-medium">
-                      {(shiftStats.overtimeWeekend * hourlyWage * 2.24).toFixed(2)} kr
+                      {(shiftStats.overtimeWeekend * hourlyWage * obMultipliers.overtime_weekend).toFixed(2)} kr
                     </p>
                   </div>
                 </div>

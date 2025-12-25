@@ -22,6 +22,7 @@ type UserRow = {
   first_name?: string | null;
   last_name?: string | null;
   hourly_wage?: number | null;
+  monthly_salary?: number | null;
   tax_table?: number | null;
   created_at?: string | null;
   phone?: string | null;
@@ -62,6 +63,7 @@ const AdminUsers = () => {
   const [newEmployeeNumber, setNewEmployeeNumber] = useState("");
   const [newRole, setNewRole] = useState<string>("user");
   const [newHourlyWage, setNewHourlyWage] = useState("");
+  const [newMonthlySalary, setNewMonthlySalary] = useState("");
   const [newTaxTable, setNewTaxTable] = useState("");
   const [generatedPassword, setGeneratedPassword] = useState<string>("");
 
@@ -74,6 +76,7 @@ const AdminUsers = () => {
   const [editEmployeeNumber, setEditEmployeeNumber] = useState("");
   const [editRole, setEditRole] = useState<string>("user");
   const [editHourlyWage, setEditHourlyWage] = useState("");
+  const [editMonthlySalary, setEditMonthlySalary] = useState("");
   const [editTaxTable, setEditTaxTable] = useState("");
 
   const targetCompanyId = useMemo(() => {
@@ -167,6 +170,7 @@ const AdminUsers = () => {
           password,
           company_id: Number(targetCompanyId),
           hourly_wage: newHourlyWage ? Number(newHourlyWage) : null,
+          monthly_salary: newMonthlySalary ? Number(newMonthlySalary) : null,
           tax_table: newTaxTable ? Number(newTaxTable) : null,
         },
       });
@@ -181,6 +185,7 @@ const AdminUsers = () => {
       setNewEmployeeNumber("");
       setNewRole("user");
       setNewHourlyWage("");
+      setNewMonthlySalary("");
       setNewTaxTable("");
       fetchUsers();
     } catch (err: any) {
@@ -200,6 +205,7 @@ const AdminUsers = () => {
     setEditEmployeeNumber(user.employee_number || "");
     setEditRole((user.role || "user").toLowerCase());
     setEditHourlyWage(user.hourly_wage != null ? String(user.hourly_wage) : "");
+    setEditMonthlySalary(user.monthly_salary != null ? String(user.monthly_salary) : "");
     setEditTaxTable(user.tax_table != null ? String(user.tax_table) : "");
     setIsEditDialogOpen(true);
   };
@@ -221,6 +227,7 @@ const AdminUsers = () => {
           phone: editPhone.trim() || null,
           role: editRole,
           hourly_wage: editHourlyWage ? Number(editHourlyWage) : null,
+          monthly_salary: editMonthlySalary ? Number(editMonthlySalary) : null,
           emergency_contact: editEmergency.trim() || null,
           employee_type: editEmployeeType,
           employee_number: editEmployeeNumber.trim() || null,
@@ -347,6 +354,10 @@ const AdminUsers = () => {
                   <Input type="number" value={newHourlyWage} onChange={(e) => setNewHourlyWage(e.target.value)} placeholder="0.00" />
                 </div>
                 <div className="space-y-2">
+                  <Label>Fast månadslön (kr)</Label>
+                  <Input type="number" value={newMonthlySalary} onChange={(e) => setNewMonthlySalary(e.target.value)} placeholder="0" />
+                </div>
+                <div className="space-y-2">
                   <Label>Skattetabell</Label>
                   <Input type="number" value={newTaxTable} onChange={(e) => setNewTaxTable(e.target.value)} placeholder="t.ex. 30" />
                 </div>
@@ -434,6 +445,7 @@ const AdminUsers = () => {
                           )}
                           {user.emergency_contact && <span>Närmast anhörig: {user.emergency_contact}</span>}
                           {user.hourly_wage != null && <span>Timlön: {user.hourly_wage} kr/h</span>}
+                          {user.monthly_salary != null && <span>Månadslön: {user.monthly_salary} kr</span>}
                           {user.tax_table != null && <span>Skattetabell: {user.tax_table}</span>}
                         </div>
                       </div>
@@ -498,6 +510,8 @@ const AdminUsers = () => {
             <Input value={editEmployeeNumber} onChange={(e) => setEditEmployeeNumber(e.target.value)} />
             <Label>Timlön (kr/h)</Label>
             <Input type="number" value={editHourlyWage} onChange={(e) => setEditHourlyWage(e.target.value)} />
+            <Label>Fast månadslön (kr)</Label>
+            <Input type="number" value={editMonthlySalary} onChange={(e) => setEditMonthlySalary(e.target.value)} />
             <Label>Skattetabell</Label>
             <Input type="number" value={editTaxTable} onChange={(e) => setEditTaxTable(e.target.value)} />
             <Label>Roll</Label>
