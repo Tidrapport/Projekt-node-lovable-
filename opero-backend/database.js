@@ -327,6 +327,7 @@ db.serialize(() => {
       description TEXT,
       severity TEXT,
       status TEXT,
+      resolved_at TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (company_id) REFERENCES companies(id),
@@ -342,6 +343,7 @@ db.serialize(() => {
     }
     const hasSeverity = cols.some((c) => c.name === "severity");
     const hasStatus = cols.some((c) => c.name === "status");
+    const hasResolvedAt = cols.some((c) => c.name === "resolved_at");
     const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
     if (!hasSeverity) {
       db.run(`ALTER TABLE deviation_reports ADD COLUMN severity TEXT;`, (e) => {
@@ -351,6 +353,11 @@ db.serialize(() => {
     if (!hasStatus) {
       db.run(`ALTER TABLE deviation_reports ADD COLUMN status TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till status i deviation_reports:", e);
+      });
+    }
+    if (!hasResolvedAt) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN resolved_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till resolved_at i deviation_reports:", e);
       });
     }
     if (!hasUpdatedAt) {

@@ -531,7 +531,7 @@ const TimeReports = () => {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                       <div>
                         <span className="text-muted-foreground">Projekt:</span>{" "}
-                        <span className="font-medium">{entry.project?.name}</span>
+                        <span className="font-medium">{entry.project?.name || "-"}</span>
                       </div>
                       {entry.subproject && (
                         <div>
@@ -541,28 +541,38 @@ const TimeReports = () => {
                       )}
                       <div>
                         <span className="text-muted-foreground">Roll:</span>{" "}
-                        <span className="font-medium">{entry.job_role?.name}</span>
+                        <span className="font-medium">{entry.job_role?.name || "-"}</span>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Skift:</span>{" "}
-                        <span className="font-medium">{entry.shift_type}</span>
+                        <span className="font-medium">{entry.shift_type || "-"}</span>
                       </div>
+                    </div>
+                    <div className="text-sm text-muted-foreground mt-2">
+                      <span className="font-medium">Traktamente:</span>{" "}
+                      {entry.per_diem_type === "full"
+                        ? "Hel"
+                        : entry.per_diem_type === "half"
+                        ? "Halv"
+                        : "Ingen"}
                     </div>
                     {entry.work_description && (
                       <p className="text-sm text-muted-foreground mt-2 pt-2 border-t">
                         {entry.work_description}
                       </p>
                     )}
-                    {entry.material_reports && entry.material_reports.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
-                        <span className="text-sm text-muted-foreground mr-1">Tillägg:</span>
-                        {entry.material_reports.map((material) => (
+                    <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
+                      <span className="text-sm text-muted-foreground mr-1">Tillägg:</span>
+                      {entry.material_reports && entry.material_reports.length > 0 ? (
+                        entry.material_reports.map((material) => (
                           <Badge key={material.id} variant="secondary" className="text-xs">
                             {material.material_type.name}: {material.quantity} {material.material_type.unit}
                           </Badge>
-                        ))}
-                      </div>
-                    )}
+                        ))
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Inga</span>
+                      )}
+                    </div>
                   </div>
                   {!entry.attested_by && !isImpersonating && (
                     <div className="flex gap-1">

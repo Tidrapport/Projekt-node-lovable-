@@ -12,7 +12,7 @@ import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { toast } from "sonner";
-import { AlertTriangle, Plus, Upload, X } from "lucide-react";
+import { AlertTriangle, Plus, Upload, X, Pencil, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 
@@ -22,7 +22,9 @@ interface Deviation {
   description: string;
   severity: string;
   status: string;
+  resolved_at?: string | null;
   created_at: string;
+  time_entry_id?: string;
   time_entry: {
     date: string;
     project: { name: string };
@@ -43,6 +45,8 @@ const Deviations = () => {
   const [deviations, setDeviations] = useState<Deviation[]>([]);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [showDialog, setShowDialog] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
 
@@ -51,6 +55,8 @@ const Deviations = () => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState("medium");
+  const [status, setStatus] = useState("open");
+  const [resolvedAt, setResolvedAt] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -62,7 +68,23 @@ const Deviations = () => {
     // Fetch deviations
     try {
       const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}`);
-      if (deviationsData) setDeviations(deviationsData);
+      if (deviationsData) {
+        const mapped = (deviationsData || []).map((d: any) => ({
+          id: String(d.id),
+          title: d.title,
+          description: d.description || "",
+          severity: d.severity || "medium",
+          status: d.status || "open",
+          resolved_at: d.resolved_at || null,
+          created_at: d.created_at || "",
+          time_entry_id: d.time_entry_id ? String(d.time_entry_id) : undefined,
+          time_entry: {
+            date: d.time_entry_date || d.datum || d.date,
+            project: { name: d.project_name || d.project?.name || "Projekt" },
+          },
+        }));
+        setDeviations(mapped);
+      }
     } catch (err: any) {
       toast.error(err.message || "Kunde inte hämta avvikelser");
     }
@@ -113,28 +135,37 @@ const Deviations = () => {
 
     setLoading(true);
     try {
-      // Insert deviation report
-      const deviationData = await apiFetch("/deviation-reports", {
-        method: "POST",
-        json: {
-          user_id: user.id,
-          time_entry_id: timeEntryId,
-          title,
-          description,
-          severity,
-          status: "open",
-          company_id: companyId,
-        },
-      });
+      const payload = {
+        user_id: user.id,
+        time_entry_id: timeEntryId,
+        title,
+        description,
+        severity,
+        status,
+        resolved_at: resolvedAt ? new Date(resolvedAt).toISOString() : null,
+        company_id: companyId,
+      };
 
-      if (!deviationData) throw new Error("Kunde inte skapa avvikelse");
+      let deviationData;
+      if (isEditing && editingId) {
+        deviationData = await apiFetch(`/deviation-reports/${editingId}`, {
+          method: "PUT",
+          json: payload,
+        });
+      } else {
+        deviationData = await apiFetch("/deviation-reports", {
+          method: "POST",
+          json: payload,
+        });
+      }
 
-      // Bilduppladdning saknas i nuvarande backend; hoppa över
-      if (images.length > 0) {
+      if (!deviationData) throw new Error("Kunde inte spara avvikelse");
+
+      if (!isEditing && images.length > 0) {
         toast.warning("Bilduppladdning stöds ännu inte i backend, rapporten sparades ändå.");
       }
 
-      toast.success("Avvikelserapport skapad!");
+      toast.success(isEditing ? "Avvikelsen uppdaterades" : "Avvikelserapport skapad!");
       setShowDialog(false);
       resetForm();
       fetchData();
@@ -150,7 +181,36 @@ const Deviations = () => {
     setTitle("");
     setDescription("");
     setSeverity("medium");
+    setStatus("open");
+    setResolvedAt("");
+    setEditingId(null);
+    setIsEditing(false);
     setImages([]);
+  };
+
+  const openEditDialog = (deviation: Deviation) => {
+    setIsEditing(true);
+    setEditingId(deviation.id);
+    setTimeEntryId(deviation.time_entry_id || "");
+    setTitle(deviation.title);
+    setDescription(deviation.description);
+    setSeverity(deviation.severity || "medium");
+    setStatus(deviation.status || "open");
+    setResolvedAt(deviation.resolved_at ? deviation.resolved_at.slice(0, 10) : "");
+    setShowDialog(true);
+  };
+
+  const markResolvedToday = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    setStatus("resolved");
+    setResolvedAt(today);
+  };
+
+  const quickResolve = (deviation: Deviation) => {
+    openEditDialog(deviation);
+    const today = new Date().toISOString().slice(0, 10);
+    setStatus("resolved");
+    setResolvedAt(today);
   };
 
   const getSeverityColor = (severity: string) => {
@@ -173,6 +233,26 @@ const Deviations = () => {
     }
   };
 
+  const severityLabel = (value: string) => {
+    switch (value) {
+      case "critical": return "Kritisk";
+      case "high": return "Hög";
+      case "medium": return "Medel";
+      case "low": return "Låg";
+      default: return value;
+    }
+  };
+
+  const statusLabel = (value: string) => {
+    switch (value) {
+      case "open": return "Öppen";
+      case "in_progress": return "Pågår";
+      case "resolved": return "Åtgärdad";
+      case "closed": return "Stängd";
+      default: return value;
+    }
+  };
+
   return (
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
@@ -185,7 +265,13 @@ const Deviations = () => {
           </p>
         </div>
         {!isImpersonating && (
-          <Button onClick={() => setShowDialog(true)} className="bg-gradient-accent">
+          <Button
+            onClick={() => {
+              resetForm();
+              setShowDialog(true);
+            }}
+            className="bg-gradient-accent"
+          >
             <Plus className="mr-2 h-4 w-4" />
             Ny avvikelse
           </Button>
@@ -216,10 +302,10 @@ const Deviations = () => {
                     </div>
                     <div className="flex gap-2">
                       <Badge className={getSeverityColor(deviation.severity)}>
-                        {deviation.severity}
+                        {severityLabel(deviation.severity)}
                       </Badge>
                       <Badge className={getStatusColor(deviation.status)}>
-                        {deviation.status}
+                        {statusLabel(deviation.status)}
                       </Badge>
                     </div>
                   </div>
@@ -229,6 +315,23 @@ const Deviations = () => {
                     {deviation.time_entry?.project?.name} -{" "}
                     {safeFormat(deviation.time_entry?.date, "d MMM yyyy")}
                   </div>
+                  {deviation.resolved_at && (
+                    <div className="text-sm text-muted-foreground">
+                      Åtgärdad: {safeFormat(deviation.resolved_at, "d MMM yyyy")}
+                    </div>
+                  )}
+                  {!isImpersonating && (
+                    <div className="flex gap-2 pt-2">
+                      <Button variant="outline" size="sm" onClick={() => openEditDialog(deviation)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Redigera
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => quickResolve(deviation)}>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Markera åtgärdad
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -236,15 +339,21 @@ const Deviations = () => {
         )}
       </div>
 
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          setShowDialog(open);
+          if (!open) resetForm();
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Ny avvikelserapport</DialogTitle>
+            <DialogTitle>{isEditing ? "Redigera avvikelse" : "Ny avvikelserapport"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="timeEntry">Tidrapport</Label>
-              <Select value={timeEntryId} onValueChange={setTimeEntryId} required>
+              <Select value={timeEntryId} onValueChange={setTimeEntryId} required disabled={isImpersonating}>
                 <SelectTrigger id="timeEntry">
                   <SelectValue placeholder="Välj tidrapport" />
                 </SelectTrigger>
@@ -277,7 +386,7 @@ const Deviations = () => {
               <Label htmlFor="severity">Allvarlighetsgrad</Label>
               <Select value={severity} onValueChange={setSeverity} required>
                 <SelectTrigger id="severity">
-                  <SelectValue />
+                  <SelectValue placeholder="Välj" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="low">Låg</SelectItem>
@@ -286,6 +395,38 @@ const Deviations = () => {
                   <SelectItem value="critical">Kritisk</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger id="status">
+                  <SelectValue placeholder="Välj status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">Öppen</SelectItem>
+                  <SelectItem value="in_progress">Pågår</SelectItem>
+                  <SelectItem value="resolved">Åtgärdad</SelectItem>
+                  <SelectItem value="closed">Stängd</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="resolvedAt">Åtgärdad datum (om åtgärdad)</Label>
+              <Input
+                id="resolvedAt"
+                type="date"
+                value={resolvedAt}
+                onChange={(e) => setResolvedAt(e.target.value)}
+                disabled={status !== "resolved" && resolvedAt === ""}
+              />
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={markResolvedToday}>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Sätt till åtgärdad idag
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">

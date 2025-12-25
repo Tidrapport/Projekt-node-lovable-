@@ -1547,6 +1547,8 @@ app.get("/time-entries", requireAuth, (req, res) => {
 
   let join = `JOIN users u ON u.id = tr.user_id`;
   join += ` LEFT JOIN projects p ON p.id = tr.project_id AND p.company_id = u.company_id`;
+  join += ` LEFT JOIN subprojects sp ON sp.id = tr.subproject_id AND sp.company_id = u.company_id`;
+  join += ` LEFT JOIN job_roles jr ON jr.id = tr.job_role_id AND jr.company_id = u.company_id`;
   join += ` LEFT JOIN customers c ON c.id = p.customer_id AND c.company_id = u.company_id`;
 
   if (customer_id) { where.push("p.customer_id = ?"); params.push(customer_id); }
@@ -1559,6 +1561,8 @@ app.get("/time-entries", requireAuth, (req, res) => {
       u.email AS user_email,
       (u.first_name || ' ' || u.last_name) AS user_full_name,
       p.name AS project_name,
+      sp.name AS subproject_name,
+      jr.name AS job_role_name,
       c.name AS customer_name
     FROM time_reports tr
     ${join}
@@ -1620,6 +1624,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
     deviation_title = null,
     deviation_description = null,
     deviation_status = null,
+    travel_time_hours = 0,
     km,
     km_compensation
   } = req.body || {};
@@ -1681,7 +1686,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
           deviation_title || null,
           deviation_description || null,
           deviation_status || null,
-          0,
+          Number(travel_time_hours) || 0,
           status || "draft",
           allowance_type || null,
           allowance_amount || null
@@ -1798,7 +1803,8 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         description,
         status,
         allowance_type,
-        allowance_amount
+        allowance_amount,
+        travel_time_hours
       } = req.body || {};
 
       // If hours missing but start/end provided, calculate hours
@@ -1832,6 +1838,7 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
           deviation_title = COALESCE(?, deviation_title),
           deviation_description = COALESCE(?, deviation_description),
           deviation_status = COALESCE(?, deviation_status),
+          restid = COALESCE(?, restid),
           status = COALESCE(?, status),
           traktamente_type = COALESCE(?, traktamente_type),
           traktamente_amount = COALESCE(?, traktamente_amount)
@@ -1848,6 +1855,7 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
           deviation_title ?? null,
           deviation_description ?? null,
           deviation_status ?? null,
+          travel_time_hours ?? null,
           status ?? null,
           allowance_type ?? null,
           allowance_amount ?? null,
@@ -2524,7 +2532,7 @@ app.post("/deviation-reports", requireAuth, (req, res) => {
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
   const targetUserId = isAdmin && req.body.user_id ? req.body.user_id : req.user.user_id;
 
-  const { time_entry_id, title, description, severity = "medium", status = "open" } = req.body || {};
+  const { time_entry_id, title, description, severity = "medium", status = "open", resolved_at = null } = req.body || {};
   if (!time_entry_id) return res.status(400).json({ error: "time_entry_id required" });
   if (!title) return res.status(400).json({ error: "title required" });
 
@@ -2545,9 +2553,9 @@ app.post("/deviation-reports", requireAuth, (req, res) => {
       }
 
       db.run(
-        `INSERT INTO deviation_reports (company_id, user_id, time_entry_id, title, description, severity, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [companyId, targetUserId, time_entry_id, title, description || null, severity, status],
+        `INSERT INTO deviation_reports (company_id, user_id, time_entry_id, title, description, severity, status, resolved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [companyId, targetUserId, time_entry_id, title, description || null, severity, status, resolved_at],
         function (insErr) {
           if (insErr) {
             console.error("DB-fel vid POST /deviation-reports:", insErr);
@@ -2573,7 +2581,7 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
 
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
   const id = req.params.id;
-  const { time_entry_id, title, description, severity, status } = req.body || {};
+  const { time_entry_id, title, description, severity, status, resolved_at } = req.body || {};
 
   db.get(
     `SELECT dr.*, tr.user_id AS entry_user_id
@@ -2600,6 +2608,7 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
                description = COALESCE(?, description),
                severity = COALESCE(?, severity),
                status = COALESCE(?, status),
+               resolved_at = COALESCE(?, resolved_at),
                updated_at = datetime('now')
            WHERE id = ?`,
           [
@@ -2608,6 +2617,7 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
             description ?? null,
             severity ?? row.severity,
             status ?? row.status,
+            resolved_at ?? (status === "resolved" && !row.resolved_at ? new Date().toISOString() : null),
             id
           ],
           function (updErr) {

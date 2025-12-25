@@ -97,6 +97,7 @@ type CreatePayload = {
   deviation_title?: string | null;
   deviation_description?: string | null;
   deviation_status?: string | null;
+  travel_time_hours?: number;
 };
 
 type UpdatePayload = Partial<CreatePayload>;
@@ -169,6 +170,7 @@ export async function createTimeEntry(payload: CreatePayload) {
     deviation_title: payload.deviation_title || null,
     deviation_description: payload.deviation_description || null,
     deviation_status: payload.deviation_status || null,
+    travel_time_hours: payload.travel_time_hours ?? null,
   };
 
   const raw = await api.post<RawTimeEntry>("/time-entries", body);
@@ -196,6 +198,7 @@ export async function updateTimeEntry(id: string | number, payload: UpdatePayloa
     deviation_title: payload.deviation_title || null,
     deviation_description: payload.deviation_description || null,
     deviation_status: payload.deviation_status || null,
+    travel_time_hours: payload.travel_time_hours ?? null,
   };
 
   const raw = await api.put<RawTimeEntry>(`/time-entries/${id}`, body);

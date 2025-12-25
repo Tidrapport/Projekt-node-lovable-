@@ -160,20 +160,20 @@ const WeldingReport = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto p-4 md:p-6 space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Svetsrapport</h1>
+          <h1 className="text-3xl font-bold font-heading">Svetsrapport</h1>
           <p className="text-muted-foreground">Trafikverket TMALL 0435</p>
         </div>
-        <Button onClick={handleSubmit} disabled={loading}>
+        <Button onClick={handleSubmit} disabled={loading} className="self-start sm:self-auto">
           <Save className="h-4 w-4 mr-2" />
           Spara rapport
         </Button>
       </div>
 
       {/* Header info */}
-      <Card>
+      <Card className="shadow-card">
         <CardHeader>
           <CardTitle className="text-lg">Grunduppgifter</CardTitle>
         </CardHeader>
@@ -252,7 +252,7 @@ const WeldingReport = () => {
       </Card>
 
       {/* Welding entries table */}
-      <Card>
+      <Card className="shadow-card">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-lg">Svetsrader</CardTitle>
           <Button onClick={addEntry} size="sm">
@@ -443,7 +443,7 @@ const WeldingReport = () => {
       </Card>
 
       {/* Self-control checklist */}
-      <Card>
+      <Card className="shadow-card">
         <CardHeader>
           <CardTitle className="text-lg">Egenkontroll</CardTitle>
         </CardHeader>
@@ -508,7 +508,7 @@ const WeldingReport = () => {
       </Card>
 
       {/* Responsible and notes */}
-      <Card>
+      <Card className="shadow-card">
         <CardHeader>
           <CardTitle className="text-lg">Svetsansvarig & Anteckningar</CardTitle>
         </CardHeader>
