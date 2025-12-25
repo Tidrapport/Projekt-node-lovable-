@@ -2818,6 +2818,200 @@ app.get("/deviation-reports/:id/pdf", requireAuth, (req, res) => {
     }
   );
 });
+
+// ======================
+// WELDING REPORTS
+// ======================
+
+const mapWeldingRow = (row) => {
+  let entries = [];
+  try {
+    entries = row.welding_entries ? JSON.parse(row.welding_entries) : [];
+  } catch (e) {
+    console.error("Kunde inte parsa welding_entries:", e);
+    entries = [];
+  }
+  return {
+    id: String(row.id),
+    user_id: row.user_id ? String(row.user_id) : null,
+    company_id: row.company_id ? String(row.company_id) : null,
+    report_date: row.report_date || null,
+    own_ao_number: row.own_ao_number || null,
+    customer_ao_number: row.customer_ao_number || null,
+    welder_name: row.welder_name || "",
+    welder_id: row.welder_id || "",
+    report_year: row.report_year || null,
+    report_month: row.report_month || null,
+    bessy_anm_ofelia: row.bessy_anm_ofelia || null,
+    welding_entries: entries,
+    id_marked_weld: !!row.id_marked_weld,
+    geometry_control: !!row.geometry_control,
+    cleaned_workplace: !!row.cleaned_workplace,
+    restored_rail_quantity: !!row.restored_rail_quantity,
+    welded_in_cold_climate: !!row.welded_in_cold_climate,
+    ensured_gas_flow: !!row.ensured_gas_flow,
+    protected_cooling: !!row.protected_cooling,
+    welding_supervisor: row.welding_supervisor || null,
+    supervisor_phone: row.supervisor_phone || null,
+    deviations: row.deviations || null,
+    comments: row.comments || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+};
+
+// Create (hyphen endpoint used by frontend form)
+app.post("/welding-reports", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const {
+    user_id,
+    report_date,
+    own_ao_number,
+    customer_ao_number,
+    welder_name,
+    welder_id,
+    report_year,
+    report_month,
+    bessy_anm_ofelia,
+    welding_entries = [],
+    id_marked_weld = false,
+    geometry_control = false,
+    cleaned_workplace = false,
+    restored_rail_quantity = false,
+    welded_in_cold_climate = false,
+    ensured_gas_flow = false,
+    protected_cooling = false,
+    welding_supervisor,
+    supervisor_phone,
+    deviations,
+    comments,
+  } = req.body || {};
+
+  const targetUserId = user_id || req.user.user_id;
+
+  // verify user belongs to company
+  db.get(`SELECT company_id FROM users WHERE id = ?`, [targetUserId], (err, uRow) => {
+    if (err) return res.status(500).json({ error: "DB error" });
+    if (!uRow || String(uRow.company_id) !== String(companyId)) {
+      return res.status(403).json({ error: "User not in company" });
+    }
+
+    db.run(
+      `INSERT INTO welding_reports (
+        user_id, company_id, report_date, own_ao_number, customer_ao_number,
+        welder_name, welder_id, report_year, report_month, bessy_anm_ofelia,
+        welding_entries, id_marked_weld, geometry_control, cleaned_workplace,
+        restored_rail_quantity, welded_in_cold_climate, ensured_gas_flow, protected_cooling,
+        welding_supervisor, supervisor_phone, deviations, comments
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        targetUserId,
+        companyId,
+        report_date || null,
+        own_ao_number || null,
+        customer_ao_number || null,
+        welder_name || null,
+        welder_id || null,
+        report_year || null,
+        report_month || null,
+        bessy_anm_ofelia || null,
+        JSON.stringify(welding_entries || []),
+        id_marked_weld ? 1 : 0,
+        geometry_control ? 1 : 0,
+        cleaned_workplace ? 1 : 0,
+        restored_rail_quantity ? 1 : 0,
+        welded_in_cold_climate ? 1 : 0,
+        ensured_gas_flow ? 1 : 0,
+        protected_cooling ? 1 : 0,
+        welding_supervisor || null,
+        supervisor_phone || null,
+        deviations || null,
+        comments || null,
+      ],
+      function (insErr) {
+        if (insErr) {
+          console.error("DB-fel vid INSERT welding_report:", insErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        db.get(`SELECT * FROM welding_reports WHERE id = ?`, [this.lastID], (selErr, row) => {
+          if (selErr) return res.status(500).json({ error: "DB error" });
+          res.json(mapWeldingRow(row));
+        });
+      }
+    );
+  });
+});
+
+// List (underscore endpoint used by admin)
+app.get("/welding_reports", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const { report_year, report_month, user_id, include } = req.query || {};
+  const isAdmin = isAdminRole(req);
+  const effectiveUserId = isAdmin ? user_id : req.user.user_id;
+
+  const where = ["wr.company_id = ?"];
+  const params = [companyId];
+  if (report_year) { where.push("wr.report_year = ?"); params.push(report_year); }
+  if (report_month) { where.push("wr.report_month = ?"); params.push(report_month); }
+  if (effectiveUserId) { where.push("wr.user_id = ?"); params.push(effectiveUserId); }
+
+  const sql = `
+    SELECT wr.*,
+      (u.first_name || ' ' || u.last_name) AS user_full_name,
+      u.email AS user_email
+    FROM welding_reports wr
+    JOIN users u ON u.id = wr.user_id
+    WHERE ${where.join(" AND ")}
+    ORDER BY datetime(wr.created_at) DESC, wr.id DESC
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /welding_reports:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    let mapped = rows.map(mapWeldingRow);
+
+    if (String(include).includes("profiles")) {
+      mapped = mapped.map((r, idx) => ({
+        ...r,
+        profiles: { full_name: rows[idx].user_full_name || null },
+      }));
+    }
+
+    res.json(mapped);
+  });
+});
+
+// DELETE
+app.delete("/welding_reports/:id", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const id = req.params.id;
+  const isAdmin = isAdminRole(req);
+
+  db.get(`SELECT id, user_id, company_id FROM welding_reports WHERE id = ?`, [id], (err, row) => {
+    if (err) return res.status(500).json({ error: "DB error" });
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (String(row.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+    if (!isAdmin && Number(row.user_id) !== Number(req.user.user_id)) return res.status(403).json({ error: "Forbidden" });
+
+    db.run(`DELETE FROM welding_reports WHERE id = ?`, [id], function (delErr) {
+      if (delErr) {
+        console.error("DB-fel vid DELETE welding_report:", delErr);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.status(204).end();
+    });
+  });
+});
+
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`Opero backend kör på http://localhost:${PORT}`);

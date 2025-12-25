@@ -531,12 +531,31 @@ const WeldingReport = () => {
           </div>
           <div className="space-y-2">
             <Label>Avvikelser</Label>
-            <Textarea
+            <Select
               value={deviations}
-              onChange={(e) => setDeviations(e.target.value)}
-              placeholder="Beskriv eventuella avvikelser"
-              rows={3}
-            />
+              onValueChange={(v) => setDeviations(v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Välj avvikelse" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Solkurva">Solkurva</SelectItem>
+                <SelectItem value="Räl höjdsliten">Räl höjdsliten</SelectItem>
+                <SelectItem value="Räl sidosliten">Räl sidosliten</SelectItem>
+                <SelectItem value="Isolerskarv sliten">Isolerskarv sliten</SelectItem>
+                <SelectItem value="Sliprar dåliga">Sliprar dåliga</SelectItem>
+                <SelectItem value="Befästningar, dåliga">Befästningar, dåliga</SelectItem>
+                <SelectItem value="Befästningar, mellanlägg slitna (gummi)">Befästningar, mellanlägg slitna (gummi)</SelectItem>
+                <SelectItem value="Befästningar, isolatorer slitna (plast)">Befästningar, isolatorer slitna (plast)</SelectItem>
+                <SelectItem value="Spår ostoppad">Spår ostoppad</SelectItem>
+                <SelectItem value="Korsning ostoppad">Korsning ostoppad</SelectItem>
+                <SelectItem value="Växel ostoppad">Växel ostoppad</SelectItem>
+                <SelectItem value="Ballast saknas">Ballast saknas</SelectItem>
+                <SelectItem value="Ballast dålig">Ballast dålig</SelectItem>
+                <SelectItem value="Spårvidd stor">Spårvidd stor</SelectItem>
+                <SelectItem value="Spårvidd liten">Spårvidd liten</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <Label>Kommentarer</Label>

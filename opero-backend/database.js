@@ -372,6 +372,42 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_deviation_reports_user ON deviation_reports(user_id);`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_deviation_reports_entry ON deviation_reports(time_entry_id);`);
 
+  // --- Welding reports ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS welding_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      company_id INTEGER,
+      report_date TEXT,
+      own_ao_number TEXT,
+      customer_ao_number TEXT,
+      welder_name TEXT,
+      welder_id TEXT,
+      report_year INTEGER,
+      report_month INTEGER,
+      bessy_anm_ofelia TEXT,
+      welding_entries TEXT, -- JSON-array
+      id_marked_weld INTEGER DEFAULT 0,
+      geometry_control INTEGER DEFAULT 0,
+      cleaned_workplace INTEGER DEFAULT 0,
+      restored_rail_quantity INTEGER DEFAULT 0,
+      welded_in_cold_climate INTEGER DEFAULT 0,
+      ensured_gas_flow INTEGER DEFAULT 0,
+      protected_cooling INTEGER DEFAULT 0,
+      welding_supervisor TEXT,
+      supervisor_phone TEXT,
+      deviations TEXT,
+      comments TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_welding_reports_user ON welding_reports(user_id);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_welding_reports_company ON welding_reports(company_id);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_welding_reports_year_month ON welding_reports(report_year, report_month);`);
+
   // --- Deviation images ---
   db.run(`
     CREATE TABLE IF NOT EXISTS deviation_images (
