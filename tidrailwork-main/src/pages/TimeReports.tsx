@@ -82,6 +82,8 @@ const TimeReports = () => {
   const [perDiemType, setPerDiemType] = useState("none");
   const [travelTimeHours, setTravelTimeHours] = useState("0");
   const [saveTravelCompensation, setSaveTravelCompensation] = useState(false);
+  const [compTimeAction, setCompTimeAction] = useState<"none" | "save" | "take">("none");
+  const [compTimeHours, setCompTimeHours] = useState("0");
   const [overtimeWeekdayHours, setOvertimeWeekdayHours] = useState("0");
   const [overtimeWeekendHours, setOvertimeWeekendHours] = useState("0");
   const [materials, setMaterials] = useState<MaterialEntry[]>([]);
@@ -239,6 +241,12 @@ const TimeReports = () => {
     try {
       const totalHours = calculateHours(startTime, endTime, parseInt(breakMinutes));
       const calculatedShiftType = determineShiftType(date, startTime, endTime);
+      const overtimeWeekdayValue = Number(overtimeWeekdayHours) || 0;
+      const overtimeWeekendValue = Number(overtimeWeekendHours) || 0;
+      const compTimeHoursValue = Number(compTimeHours) || 0;
+      const saveCompTime = compTimeAction === "save" && compTimeHoursValue > 0;
+      const compTimeSavedValue = compTimeAction === "save" ? compTimeHoursValue : 0;
+      const compTimeTakenValue = compTimeAction === "take" ? compTimeHoursValue : 0;
 
       // Use effectiveUserId so admin can create entries for selected user
       const timeEntryData = await createTimeEntry({
@@ -257,8 +265,11 @@ const TimeReports = () => {
         allowance_amount: perDiemType === "half" ? 145 : perDiemType === "full" ? 290 : 0,
         travel_time_hours: parseFloat(travelTimeHours),
         save_travel_compensation: saveTravelCompensation,
-        overtime_weekday_hours: parseFloat(overtimeWeekdayHours),
-        overtime_weekend_hours: parseFloat(overtimeWeekendHours),
+        overtime_weekday_hours: overtimeWeekdayValue,
+        overtime_weekend_hours: overtimeWeekendValue,
+        save_comp_time: saveCompTime,
+        comp_time_saved_hours: compTimeSavedValue,
+        comp_time_taken_hours: compTimeTakenValue,
         ao_number: aoNumber || null,
         deviation_title: deviationTitle || null,
         deviation_description: deviationDescription || null,
@@ -317,6 +328,20 @@ const TimeReports = () => {
     setPerDiemType(entry.per_diem_type || "none");
     setTravelTimeHours(entry.travel_time_hours?.toString() || "0");
     setSaveTravelCompensation(entry.save_travel_compensation || false);
+    if ((entry.comp_time_taken_hours || 0) > 0) {
+      setCompTimeAction("take");
+      setCompTimeHours(entry.comp_time_taken_hours?.toString() || "0");
+    } else if ((entry.comp_time_saved_hours || 0) > 0 || entry.save_comp_time) {
+      const fallbackSaved =
+        (entry.comp_time_saved_hours || 0) > 0
+          ? entry.comp_time_saved_hours
+          : (entry.overtime_weekday_hours || 0) + (entry.overtime_weekend_hours || 0);
+      setCompTimeAction("save");
+      setCompTimeHours(fallbackSaved.toString());
+    } else {
+      setCompTimeAction("none");
+      setCompTimeHours("0");
+    }
     setOvertimeWeekdayHours(entry.overtime_weekday_hours?.toString() || "0");
     setOvertimeWeekendHours(entry.overtime_weekend_hours?.toString() || "0");
     setAoNumber(entry.ao_number || "");
@@ -334,6 +359,12 @@ const TimeReports = () => {
     try {
       const totalHours = calculateHours(startTime, endTime, parseInt(breakMinutes));
       const calculatedShiftType = determineShiftType(date, startTime, endTime);
+      const overtimeWeekdayValue = Number(overtimeWeekdayHours) || 0;
+      const overtimeWeekendValue = Number(overtimeWeekendHours) || 0;
+      const compTimeHoursValue = Number(compTimeHours) || 0;
+      const saveCompTime = compTimeAction === "save" && compTimeHoursValue > 0;
+      const compTimeSavedValue = compTimeAction === "save" ? compTimeHoursValue : 0;
+      const compTimeTakenValue = compTimeAction === "take" ? compTimeHoursValue : 0;
 
       if (totalHours <= 0) {
         toast.error("Ogiltiga tider - kontrollera att start- och sluttid är korrekta");
@@ -356,8 +387,11 @@ const TimeReports = () => {
         allowance_amount: perDiemType === "half" ? 145 : perDiemType === "full" ? 290 : 0,
         travel_time_hours: parseFloat(travelTimeHours),
         save_travel_compensation: saveTravelCompensation,
-        overtime_weekday_hours: parseFloat(overtimeWeekdayHours),
-        overtime_weekend_hours: parseFloat(overtimeWeekendHours),
+        overtime_weekday_hours: overtimeWeekdayValue,
+        overtime_weekend_hours: overtimeWeekendValue,
+        save_comp_time: saveCompTime,
+        comp_time_saved_hours: compTimeSavedValue,
+        comp_time_taken_hours: compTimeTakenValue,
         ao_number: aoNumber || null,
         deviation_title: deviationTitle || null,
         deviation_description: deviationDescription || null,
@@ -388,6 +422,8 @@ const TimeReports = () => {
     setPerDiemType("none");
     setTravelTimeHours("0");
     setSaveTravelCompensation(false);
+    setCompTimeAction("none");
+    setCompTimeHours("0");
     setOvertimeWeekdayHours("0");
     setOvertimeWeekendHours("0");
     setAoNumber("");
@@ -415,6 +451,20 @@ const TimeReports = () => {
     setPerDiemType(lastEntry.per_diem_type || "none");
     setTravelTimeHours(lastEntry.travel_time_hours?.toString() || "0");
     setSaveTravelCompensation(lastEntry.save_travel_compensation || false);
+    if ((lastEntry.comp_time_taken_hours || 0) > 0) {
+      setCompTimeAction("take");
+      setCompTimeHours(lastEntry.comp_time_taken_hours?.toString() || "0");
+    } else if ((lastEntry.comp_time_saved_hours || 0) > 0 || lastEntry.save_comp_time) {
+      const fallbackSaved =
+        (lastEntry.comp_time_saved_hours || 0) > 0
+          ? lastEntry.comp_time_saved_hours
+          : (lastEntry.overtime_weekday_hours || 0) + (lastEntry.overtime_weekend_hours || 0);
+      setCompTimeAction("save");
+      setCompTimeHours(fallbackSaved.toString());
+    } else {
+      setCompTimeAction("none");
+      setCompTimeHours("0");
+    }
     setOvertimeWeekdayHours(lastEntry.overtime_weekday_hours?.toString() || "0");
     setOvertimeWeekendHours(lastEntry.overtime_weekend_hours?.toString() || "0");
     setAoNumber(lastEntry.ao_number || "");
@@ -819,6 +869,48 @@ const TimeReports = () => {
                   {(parseFloat(travelTimeHours) * 170).toLocaleString("sv-SE")} kr {saveTravelCompensation ? "sparas" : ""}
                 </span>
               )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="compTimeAction">Komptid</Label>
+                <Select
+                  value={compTimeAction}
+                  onValueChange={(value) => {
+                    const next = value as "none" | "save" | "take";
+                    setCompTimeAction(next);
+                    if (next === "none") setCompTimeHours("0");
+                  }}
+                >
+                  <SelectTrigger id="compTimeAction">
+                    <SelectValue placeholder="Välj" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ingen</SelectItem>
+                    <SelectItem value="save">Spara komptid</SelectItem>
+                    <SelectItem value="take">Uttag komptid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="compTimeHours">
+                  {compTimeAction === "take"
+                    ? "Uttag komptid (timmar)"
+                    : compTimeAction === "save"
+                    ? "Spara komptid (timmar)"
+                    : "Komptid (timmar)"}
+                </Label>
+                <Input
+                  id="compTimeHours"
+                  type="number"
+                  value={compTimeHours}
+                  onChange={(e) => setCompTimeHours(e.target.value)}
+                  min="0"
+                  step="0.5"
+                  placeholder="0"
+                  disabled={compTimeAction === "none"}
+                />
+              </div>
             </div>
 
             <div className="space-y-3 pt-2 border-t">

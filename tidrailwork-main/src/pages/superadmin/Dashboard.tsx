@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/api/client";
 import { toast } from "sonner";
 import { Building2, Copy, Eye, Plus, Trash2, Users } from "lucide-react";
@@ -34,9 +36,19 @@ const SuperAdminDashboard = () => {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const aiEndRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     fetchCompanies();
   }, []);
+
+  useEffect(() => {
+    if (!aiMessages.length) return;
+    aiEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [aiMessages]);
 
   const fetchCompanies = async () => {
     try {
@@ -135,6 +147,36 @@ const SuperAdminDashboard = () => {
   const copyCode = (code: string) => {
     navigator.clipboard.writeText(code);
     toast.success("Företagskod kopierad");
+  };
+
+  const sendAi = async () => {
+    const content = aiInput.trim();
+    if (!content || aiLoading) return;
+
+    const nextMessages = [...aiMessages, { role: "user", content }];
+    setAiMessages(nextMessages);
+    setAiInput("");
+    setAiLoading(true);
+
+    try {
+      const res = await apiFetch<{ reply?: string }>("/superadmin/ai", {
+        method: "POST",
+        json: { messages: nextMessages },
+      });
+      const reply = String(res?.reply || "").trim() || "Inget svar från AI.";
+      setAiMessages([...nextMessages, { role: "assistant", content: reply }]);
+    } catch (err: any) {
+      toast.error(err.message || "AI-felsökning misslyckades");
+      setAiMessages([
+        ...nextMessages,
+        {
+          role: "assistant",
+          content: "Kunde inte nå AI-tjänsten. Kontrollera nyckel och server.",
+        },
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   if (loading) {
@@ -327,6 +369,61 @@ const SuperAdminDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>AI-felsökare</CardTitle>
+          <CardDescription>Klistra in felkod/logg för snabb hjälp (endast Super Admin).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <ScrollArea className="h-56 rounded-md border bg-muted/30">
+            <div className="space-y-3 p-3">
+              {aiMessages.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Ingen historik ännu. Lägg in en felkod eller beskrivning.
+                </p>
+              )}
+              {aiMessages.map((message, index) => (
+                <div key={`${message.role}-${index}`} className="rounded-md bg-background p-3 shadow-sm">
+                  <p className="text-xs uppercase text-muted-foreground">
+                    {message.role === "user" ? "Du" : "AI"}
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                </div>
+              ))}
+              <div ref={aiEndRef} />
+            </div>
+          </ScrollArea>
+
+          <div className="space-y-2">
+            <Label>Felkod eller problem</Label>
+            <Textarea
+              value={aiInput}
+              onChange={(e) => setAiInput(e.target.value)}
+              placeholder="Ex: 404 Not Found på /auth/me efter lösenordsbyte..."
+              rows={4}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              AI svarar utifrån det du klistrar in – dela inte känsliga uppgifter.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setAiMessages([])}
+                disabled={aiLoading || aiMessages.length === 0}
+              >
+                Rensa
+              </Button>
+              <Button onClick={sendAi} disabled={aiLoading || !aiInput.trim()}>
+                {aiLoading ? "Analyserar..." : "Analysera"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

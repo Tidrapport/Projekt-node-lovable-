@@ -265,6 +265,12 @@ db.serialize(() => {
       deviation_description TEXT,
       deviation_status TEXT,
       restid REAL DEFAULT 0,
+      save_travel_compensation INTEGER DEFAULT 0,
+      overtime_weekday_hours REAL DEFAULT 0,
+      overtime_weekend_hours REAL DEFAULT 0,
+      save_comp_time INTEGER DEFAULT 0,
+      comp_time_saved_hours REAL DEFAULT 0,
+      comp_time_taken_hours REAL DEFAULT 0,
       status TEXT DEFAULT 'Ny',
       attested_by INTEGER,
       attested_at TEXT,
@@ -285,6 +291,12 @@ db.serialize(() => {
     const hasDevTitle = cols.some((c) => c.name === "deviation_title");
     const hasDevDesc = cols.some((c) => c.name === "deviation_description");
     const hasDevStatus = cols.some((c) => c.name === "deviation_status");
+    const hasSaveTravel = cols.some((c) => c.name === "save_travel_compensation");
+    const hasOvertimeWeekday = cols.some((c) => c.name === "overtime_weekday_hours");
+    const hasOvertimeWeekend = cols.some((c) => c.name === "overtime_weekend_hours");
+    const hasSaveCompTime = cols.some((c) => c.name === "save_comp_time");
+    const hasCompTimeSaved = cols.some((c) => c.name === "comp_time_saved_hours");
+    const hasCompTimeTaken = cols.some((c) => c.name === "comp_time_taken_hours");
     if (!hasType) {
       db.run(`ALTER TABLE time_reports ADD COLUMN traktamente_type TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till traktamente_type:", e);
@@ -310,6 +322,36 @@ db.serialize(() => {
     if (!hasDevStatus) {
       db.run(`ALTER TABLE time_reports ADD COLUMN deviation_status TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till deviation_status:", e);
+      });
+    }
+    if (!hasSaveTravel) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN save_travel_compensation INTEGER DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till save_travel_compensation:", e);
+      });
+    }
+    if (!hasOvertimeWeekday) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN overtime_weekday_hours REAL DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till overtime_weekday_hours:", e);
+      });
+    }
+    if (!hasOvertimeWeekend) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN overtime_weekend_hours REAL DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till overtime_weekend_hours:", e);
+      });
+    }
+    if (!hasSaveCompTime) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN save_comp_time INTEGER DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till save_comp_time:", e);
+      });
+    }
+    if (!hasCompTimeSaved) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN comp_time_saved_hours REAL DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till comp_time_saved_hours:", e);
+      });
+    }
+    if (!hasCompTimeTaken) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN comp_time_taken_hours REAL DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till comp_time_taken_hours:", e);
       });
     }
   });

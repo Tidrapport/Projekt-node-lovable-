@@ -154,6 +154,19 @@ const SalaryOverview = () => {
     enabled: !!effectiveUserId,
   });
 
+  const { data: compTimeBalance } = useQuery({
+    queryKey: ["comp-time-balance", effectiveUserId],
+    queryFn: async () => {
+      if (!effectiveUserId) return { saved_hours: 0, taken_hours: 0, balance_hours: 0 };
+      const data = await apiFetch<{ saved_hours: number; taken_hours: number; balance_hours: number }>(
+        `/comp-time-balance?user_id=${effectiveUserId}`
+      ).catch(() => null);
+      return data || { saved_hours: 0, taken_hours: 0, balance_hours: 0 };
+    },
+    enabled: !!effectiveUserId,
+    initialData: { saved_hours: 0, taken_hours: 0, balance_hours: 0 },
+  });
+
   const calculateSalaryData = () => {
     if (!timeEntries || !profile || !shiftMultipliers) {
       return {
@@ -169,6 +182,8 @@ const SalaryOverview = () => {
         overtimeWeekdayCompensation: 0,
         overtimeWeekendHours: 0,
         overtimeWeekendCompensation: 0,
+        compTimeSavedHours: 0,
+        compTimeDeduction: 0,
         shiftBreakdown: {
           day: { hours: 0, compensation: 0 },
           evening: { hours: 0, compensation: 0 },
@@ -189,7 +204,38 @@ const SalaryOverview = () => {
     const monthlySalary = Number(profile.monthly_salary) || 0;
     const baseHourlyRate =
       monthlySalary > 0 ? monthlySalary / MONTHLY_SALARY_DIVISOR : hourlyWage;
-    const obSummary = summarizeObDistribution(timeEntries, shiftWindows);
+
+    let compTimeSavedHours = 0;
+    let compTimeSavedWeekday = 0;
+    let compTimeSavedWeekend = 0;
+
+    const adjustedEntries = timeEntries.map((entry) => {
+      const overtimeWeekday = Number(entry.overtime_weekday_hours || 0);
+      const overtimeWeekend = Number(entry.overtime_weekend_hours || 0);
+      const totalOvertime = overtimeWeekday + overtimeWeekend;
+      const savedHoursRaw = Number(entry.comp_time_saved_hours || 0);
+      const savedHours = savedHoursRaw > 0 ? savedHoursRaw : entry.save_comp_time ? totalOvertime : 0;
+
+      compTimeSavedHours += savedHours;
+
+      if (savedHours <= 0 || totalOvertime <= 0) return entry;
+
+      const savedOvertime = Math.min(savedHours, totalOvertime);
+      const weekdayShare = totalOvertime > 0 ? overtimeWeekday / totalOvertime : 0;
+      const savedWeekday = savedOvertime * weekdayShare;
+      const savedWeekend = savedOvertime - savedWeekday;
+
+      compTimeSavedWeekday += savedWeekday;
+      compTimeSavedWeekend += savedWeekend;
+
+      return {
+        ...entry,
+        overtime_weekday_hours: Math.max(0, overtimeWeekday - savedWeekday),
+        overtime_weekend_hours: Math.max(0, overtimeWeekend - savedWeekend),
+      };
+    });
+
+    const obSummary = summarizeObDistribution(adjustedEntries, shiftWindows);
     const shiftBreakdown: Record<string, { hours: number; compensation: number }> = {
       day: {
         hours: obSummary.day,
@@ -215,7 +261,7 @@ const SalaryOverview = () => {
       // Split between saved and paid based on save_travel_compensation flag
       if (entry.travel_time_hours) {
         const amount = entry.travel_time_hours * travelRate;
-        if ((entry as any).save_travel_compensation) {
+        if (entry.save_travel_compensation) {
           savedTravelCompensation += amount;
         } else {
           travelCompensation += amount;
@@ -246,6 +292,9 @@ const SalaryOverview = () => {
       obSummary.overtimeWeekday * baseHourlyRate * (shiftMultipliers.overtime_day || 1);
     const overtimeWeekendCompensation =
       obSummary.overtimeWeekend * baseHourlyRate * (shiftMultipliers.overtime_weekend || 1);
+    const compTimeDeduction =
+      compTimeSavedWeekday * baseHourlyRate * ((shiftMultipliers.overtime_day || 1) - 1) +
+      compTimeSavedWeekend * baseHourlyRate * ((shiftMultipliers.overtime_weekend || 1) - 1);
 
     const perDiemDays = Object.keys(perDiemByDate).length;
     const totalHours = Object.values(shiftBreakdown).reduce((sum, s) => sum + s.hours, 0);
@@ -270,11 +319,14 @@ const SalaryOverview = () => {
       overtimeWeekdayCompensation,
       overtimeWeekendHours: obSummary.overtimeWeekend,
       overtimeWeekendCompensation,
+      compTimeSavedHours,
+      compTimeDeduction,
       shiftBreakdown,
     };
   };
 
   const salaryData = calculateSalaryData();
+  const compTimeBalanceHours = Number(compTimeBalance?.balance_hours || 0);
   const monthlySalary = Number(profile?.monthly_salary || 0);
   const hourlyWage = Number(profile?.hourly_wage || 0);
   const showMonthlySalary = monthlySalary > 0;
@@ -313,7 +365,7 @@ const SalaryOverview = () => {
     // Header
     doc.setFontSize(20);
     doc.setFont("helvetica", "bold");
-    doc.text("LÖNESPECIFIKATION", pageWidth / 2, 20, { align: "center" });
+    doc.text("PRELIMINÄR LÖNESPECIFIKATION", pageWidth / 2, 20, { align: "center" });
     
     doc.setFontSize(12);
     doc.setFont("helvetica", "normal");
@@ -371,6 +423,10 @@ const SalaryOverview = () => {
     const baseSalaryDetail = showMonthlySalary
       ? "Fast månadslön"
       : `${salaryData.totalHours.toFixed(1)} h × ${hourlyWage} kr`;
+    const compTimeDeductionLabel =
+      salaryData.compTimeDeduction > 0
+        ? `-${salaryData.compTimeDeduction.toFixed(0)} kr`
+        : "0 kr";
     const salaryRows = [
       [baseSalaryLabel, baseSalaryDetail, `${salaryData.grossSalary.toLocaleString("sv-SE")} kr`],
       ["OB-tillägg (Dag)", `${salaryData.shiftBreakdown.day.hours.toFixed(1)} h`, `${salaryData.shiftBreakdown.day.compensation.toFixed(0)} kr`],
@@ -380,6 +436,10 @@ const SalaryOverview = () => {
       ["Övertid vardag", `${salaryData.overtimeWeekdayHours.toFixed(1)} h (+${overtimeWeekdayPercent}%)`, `+${salaryData.overtimeWeekdayCompensation.toFixed(0)} kr`],
       ["Övertid helg", `${salaryData.overtimeWeekendHours.toFixed(1)} h (+${overtimeWeekendPercent}%)`, `+${salaryData.overtimeWeekendCompensation.toFixed(0)} kr`],
       ["Restidsersättning", `${travelRate} kr/h`, `${salaryData.travelCompensation.toLocaleString("sv-SE")} kr`],
+      ...(salaryData.compTimeSavedHours > 0
+        ? [["Sparad komptid", `${salaryData.compTimeSavedHours.toFixed(1)} h`, compTimeDeductionLabel]]
+        : []),
+      ["Totalt sparad komptid (saldo)", `${compTimeBalanceHours.toFixed(1)} h`, ""],
       ["", "", ""],
       ["BRUTTOLÖN", "", `${salaryData.totalGrossSalary.toLocaleString("sv-SE")} kr`],
       ["Kommunalskatt", `${profile.tax_table}%`, `-${taxBreakdown.municipalTax.toLocaleString("sv-SE")} kr`],
@@ -400,9 +460,9 @@ const SalaryOverview = () => {
         2: { cellWidth: 50, halign: "right" },
       },
       didParseCell: (data) => {
-        // BRUTTOLÖN is at index 9 (after adding 2 overtime rows), NETTOLÖN is at the last row
-        const nettoRowIndex = taxBreakdown.stateTax > 0 ? 14 : 13;
-        if (data.row.index === 9 || data.row.index === nettoRowIndex) {
+        const grossRowIndex = salaryRows.findIndex((row) => row[0] === "BRUTTOLÖN");
+        const netRowIndex = salaryRows.findIndex((row) => row[0] === "NETTOLÖN (utbetalas)");
+        if (data.row.index === grossRowIndex || data.row.index === netRowIndex) {
           data.cell.styles.fontStyle = "bold";
           data.cell.styles.fillColor = [240, 240, 240];
         }
@@ -419,6 +479,7 @@ const SalaryOverview = () => {
     const additionalRows = [
       ["Semesterersättning (13%)", `13% av ${vacationPayBase.toLocaleString("sv-SE")} kr`, `${vacationPay.toLocaleString("sv-SE")} kr`],
       ["", `(${baseSalaryLabel} + OB, ej restid/trakt.)`, ""],
+      ["Totalt sparad komptid (saldo)", `${compTimeBalanceHours.toFixed(1)} h`, ""],
       ["", "", ""],
       ["Arbetsgivaravgifter", `31,42% av bruttolön`, `${employerFees.toLocaleString("sv-SE")} kr`],
       ["", "(betalas av arbetsgivaren till Skatteverket)", ""],
@@ -443,6 +504,7 @@ const SalaryOverview = () => {
     doc.setTextColor(128, 128, 128);
     doc.text(`Genererad: ${format(new Date(), "d MMMM yyyy HH:mm", { locale: sv })}`, 14, footerY);
     doc.text("Detta är en preliminär lönespecifikation", pageWidth - 14, footerY, { align: "right" });
+    doc.text("Korrigeringar kan förekomma.", pageWidth - 14, footerY + 5, { align: "right" });
     
     // Save
     const fileName = `lonespec_${format(startDate, "yyyy-MM")}_${profile.full_name.replace(/\s+/g, '_')}.pdf`;
@@ -468,7 +530,7 @@ const SalaryOverview = () => {
         <div className="flex items-center gap-2">
           <Button onClick={generateSalaryPDF} variant="outline" className="gap-2">
             <Download className="h-4 w-4" />
-            Ladda ner lönespec
+            Ladda ner preliminär lönespec
           </Button>
           
           <Popover>
@@ -576,21 +638,6 @@ const SalaryOverview = () => {
           </CardContent>
         </Card>
 
-        <Card className={salaryData.savedTravelCompensation > 0 ? "border-primary/50 bg-primary/5" : ""}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Sparad restidsersättning</CardTitle>
-            <PiggyBank className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-primary">
-              {salaryData.savedTravelCompensation.toLocaleString("sv-SE")} kr
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Ej utbetald (sparas)
-            </p>
-          </CardContent>
-        </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Traktamente</CardTitle>
@@ -612,7 +659,7 @@ const SalaryOverview = () => {
             <Clock className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold pl-0.5">
               {salaryData.overtimeWeekdayCompensation.toLocaleString("sv-SE")} kr
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -627,7 +674,7 @@ const SalaryOverview = () => {
             <Clock className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-2xl font-bold pl-0.5">
               {salaryData.overtimeWeekendCompensation.toLocaleString("sv-SE")} kr
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -679,6 +726,48 @@ const SalaryOverview = () => {
             {taxBreakdown.stateTax > 0 && (
               <p className="text-xs text-accent-foreground/60 mt-1">
                 Statlig skatt på inkomst över {STATE_TAX_MONTHLY_THRESHOLD.toLocaleString("sv-SE")} kr/mån
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className={salaryData.savedTravelCompensation > 0 ? "border-primary/50 bg-primary/5" : ""}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Sparad restidsersättning</CardTitle>
+            <PiggyBank className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-primary">
+              {salaryData.savedTravelCompensation.toLocaleString("sv-SE")} kr
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Ej utbetald (sparas)
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className={compTimeBalanceHours !== 0 ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/30" : ""}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Sparad komptid</CardTitle>
+            <Clock className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
+              {compTimeBalanceHours.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Saldo (sparat - uttag)
+            </p>
+            {salaryData.compTimeSavedHours > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Denna period: {salaryData.compTimeSavedHours.toFixed(1)} h
+              </p>
+            )}
+            {salaryData.compTimeDeduction > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Avdrag: -{salaryData.compTimeDeduction.toLocaleString("sv-SE")} kr
               </p>
             )}
           </CardContent>

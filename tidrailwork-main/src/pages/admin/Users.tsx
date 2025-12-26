@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -66,6 +66,10 @@ const AdminUsers = () => {
   const [newMonthlySalary, setNewMonthlySalary] = useState("");
   const [newTaxTable, setNewTaxTable] = useState("");
   const [generatedPassword, setGeneratedPassword] = useState<string>("");
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [passwordDialogTitle, setPasswordDialogTitle] = useState("");
+  const [passwordDialogDescription, setPasswordDialogDescription] = useState("");
+  const [passwordDialogValue, setPasswordDialogValue] = useState("");
 
   // Edit form state
   const [editName, setEditName] = useState("");
@@ -175,7 +179,11 @@ const AdminUsers = () => {
         },
       });
       setGeneratedPassword(password);
-      toast.success(`Användare skapad. Tillfälligt lösenord: ${password}`);
+      setPasswordDialogTitle("Tillfälligt lösenord");
+      setPasswordDialogDescription(`Användare: ${newName.trim() || newEmail.trim()}`);
+      setPasswordDialogValue(password);
+      setPasswordDialogOpen(true);
+      toast.success("Användare skapad");
       setIsAddDialogOpen(false);
       setNewName("");
       setNewEmail("");
@@ -263,7 +271,11 @@ const AdminUsers = () => {
         method: "POST",
         json: { password: pwd },
       });
-      toast.success(`Nytt lösenord: ${pwd}`);
+      setPasswordDialogTitle("Nytt lösenord");
+      setPasswordDialogDescription(`Användare: ${user.full_name || user.email}`);
+      setPasswordDialogValue(pwd);
+      setPasswordDialogOpen(true);
+      toast.success("Lösenord återställt");
       setGeneratedPassword(pwd);
       setResetUser(null);
       setIsResetDialogOpen(false);
@@ -396,11 +408,6 @@ const AdminUsers = () => {
                 <Button onClick={handleCreate} className="w-full" disabled={loading}>
                   {loading ? "Skapar..." : "Skapa användare"}
                 </Button>
-                {generatedPassword && (
-                  <p className="text-xs text-muted-foreground">
-                    Senast genererat lösenord: <span className="font-mono">{generatedPassword}</span>
-                  </p>
-                )}
               </div>
             </DialogContent>
           </Dialog>
@@ -555,11 +562,36 @@ const AdminUsers = () => {
               {loading ? "Genererar..." : "Generera nytt lösenord"}
             </Button>
           </DialogFooter>
-          {generatedPassword && (
-            <p className="text-xs text-muted-foreground">
-              Senast genererat lösenord: <span className="font-mono">{generatedPassword}</span>
-            </p>
-          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={passwordDialogOpen}
+        onOpenChange={(open) => {
+          if (open) setPasswordDialogOpen(true);
+        }}
+      >
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <DialogTitle>{passwordDialogTitle}</DialogTitle>
+            <DialogDescription>{passwordDialogDescription}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="generated-password">Genererat lösenord</Label>
+            <Input id="generated-password" value={passwordDialogValue} readOnly className="font-mono" />
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setPasswordDialogOpen(false);
+                setPasswordDialogValue("");
+                setPasswordDialogDescription("");
+                setPasswordDialogTitle("");
+              }}
+            >
+              Jag har sparat lösenord
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

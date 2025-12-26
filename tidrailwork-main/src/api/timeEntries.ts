@@ -31,6 +31,12 @@ type RawTimeEntry = {
   deviation_status?: string | null;
   comment?: string | null;
   status?: string | null;
+  save_travel_compensation?: number | boolean | null;
+  overtime_weekday_hours?: number | string | null;
+  overtime_weekend_hours?: number | string | null;
+  save_comp_time?: number | boolean | null;
+  comp_time_saved_hours?: number | string | null;
+  comp_time_taken_hours?: number | string | null;
   attested_by?: number | string | null;
   attested_at?: string | null;
   project_name?: string | null;
@@ -54,6 +60,12 @@ export type TimeEntry = {
   deviation_description?: string | null;
   deviation_status?: string | null;
   travel_time_hours?: number;
+  save_travel_compensation?: boolean;
+  overtime_weekday_hours?: number;
+  overtime_weekend_hours?: number;
+  save_comp_time?: boolean;
+  comp_time_saved_hours?: number;
+  comp_time_taken_hours?: number;
   project_id: string;
   subproject_id: string | null;
   job_role_id: string | null;
@@ -98,9 +110,20 @@ type CreatePayload = {
   deviation_description?: string | null;
   deviation_status?: string | null;
   travel_time_hours?: number;
+  save_travel_compensation?: boolean;
+  overtime_weekday_hours?: number;
+  overtime_weekend_hours?: number;
+  save_comp_time?: boolean;
+  comp_time_saved_hours?: number;
+  comp_time_taken_hours?: number;
 };
 
 type UpdatePayload = Partial<CreatePayload>;
+
+const toBoolean = (value: unknown) => {
+  if (value === true || value === 1 || value === "1") return true;
+  return false;
+};
 
 const toMaterial = (raw: RawMaterial) => ({
   id: String(raw.id),
@@ -130,6 +153,12 @@ const toTimeEntry = (raw: RawTimeEntry): TimeEntry => ({
   deviation_description: raw.deviation_description ?? null,
   deviation_status: raw.deviation_status ?? null,
   travel_time_hours: raw.restid != null ? Number(raw.restid) : 0,
+  save_travel_compensation: toBoolean(raw.save_travel_compensation),
+  overtime_weekday_hours: raw.overtime_weekday_hours != null ? Number(raw.overtime_weekday_hours) : 0,
+  overtime_weekend_hours: raw.overtime_weekend_hours != null ? Number(raw.overtime_weekend_hours) : 0,
+  save_comp_time: toBoolean(raw.save_comp_time),
+  comp_time_saved_hours: raw.comp_time_saved_hours != null ? Number(raw.comp_time_saved_hours) : 0,
+  comp_time_taken_hours: raw.comp_time_taken_hours != null ? Number(raw.comp_time_taken_hours) : 0,
   status: raw.status || null,
   attested_by: raw.attested_by != null ? String(raw.attested_by) : null,
   attested_at: raw.attested_at || null,
@@ -171,6 +200,12 @@ export async function createTimeEntry(payload: CreatePayload) {
     deviation_description: payload.deviation_description || null,
     deviation_status: payload.deviation_status || null,
     travel_time_hours: payload.travel_time_hours ?? null,
+    save_travel_compensation: payload.save_travel_compensation ?? null,
+    overtime_weekday_hours: payload.overtime_weekday_hours ?? null,
+    overtime_weekend_hours: payload.overtime_weekend_hours ?? null,
+    save_comp_time: payload.save_comp_time ?? null,
+    comp_time_saved_hours: payload.comp_time_saved_hours ?? null,
+    comp_time_taken_hours: payload.comp_time_taken_hours ?? null,
   };
 
   const raw = await api.post<RawTimeEntry>("/time-entries", body);
@@ -199,6 +234,12 @@ export async function updateTimeEntry(id: string | number, payload: UpdatePayloa
     deviation_description: payload.deviation_description || null,
     deviation_status: payload.deviation_status || null,
     travel_time_hours: payload.travel_time_hours ?? null,
+    save_travel_compensation: payload.save_travel_compensation ?? null,
+    overtime_weekday_hours: payload.overtime_weekday_hours ?? null,
+    overtime_weekend_hours: payload.overtime_weekend_hours ?? null,
+    save_comp_time: payload.save_comp_time ?? null,
+    comp_time_saved_hours: payload.comp_time_saved_hours ?? null,
+    comp_time_taken_hours: payload.comp_time_taken_hours ?? null,
   };
 
   const raw = await api.put<RawTimeEntry>(`/time-entries/${id}`, body);

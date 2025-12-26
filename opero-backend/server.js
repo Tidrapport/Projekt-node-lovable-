@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
 const PDFDocument = require("pdfkit");
 const db = require("./database");
 
@@ -27,6 +28,12 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("Missing JWT_SECRET in .env");
+
+const KNOWLEDGE_DIR = path.join(__dirname, "tdok");
+const KNOWLEDGE_EXTS = new Set([".txt", ".md", ".markdown"]);
+const MAX_CHUNK_CHARS = 1200;
+const MAX_CONTEXT_CHUNKS = 4;
+let knowledgeCache = { signature: "", chunks: [] };
 
 function generateCompanyCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
@@ -81,7 +88,10 @@ function getScopedCompanyId(req) {
   if (!req.user) return null;
   const role = (req.user.role || "").toLowerCase();
   if (role === "super_admin") {
-    return req.query.company_id || req.user.company_id || null;
+    if (req.query.company_id) return req.query.company_id;
+    if (req.user.company_id) return req.user.company_id;
+    req.company_scope_all = true;
+    return null;
   }
   return req.user.company_id || null;
 }
@@ -93,6 +103,154 @@ function isAdminRole(req) {
 
 function getAuthUserId(req) {
   return req.user?.user_id ?? req.user?.id ?? null;
+}
+
+function postJson(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const options = {
+      method: "POST",
+      hostname: parsed.hostname,
+      path: `${parsed.pathname}${parsed.search}`,
+      headers: {
+        ...headers,
+        "Content-Length": Buffer.byteLength(body)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        resolve({ status: res.statusCode || 0, text: data });
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function requestOpenAi(payload, apiKey) {
+  const url = "https://api.openai.com/v1/chat/completions";
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+  const body = JSON.stringify(payload);
+
+  if (typeof fetch === "function") {
+    const response = await fetch(url, { method: "POST", headers, body });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data };
+  }
+
+  const fallback = await postJson(url, headers, body);
+  let data = {};
+  try {
+    data = JSON.parse(fallback.text || "{}");
+  } catch {
+    data = {};
+  }
+  return { ok: fallback.status >= 200 && fallback.status < 300, status: fallback.status, data };
+}
+
+function chunkText(text) {
+  const blocks = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const chunks = [];
+  let buffer = "";
+  blocks.forEach((block) => {
+    if (!buffer) {
+      buffer = block;
+      return;
+    }
+    if (buffer.length + block.length + 2 <= MAX_CHUNK_CHARS) {
+      buffer = `${buffer}\n\n${block}`;
+      return;
+    }
+    chunks.push(buffer);
+    buffer = block;
+  });
+  if (buffer) chunks.push(buffer);
+  return chunks;
+}
+
+function loadKnowledgeChunks() {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(KNOWLEDGE_DIR, { withFileTypes: true });
+  } catch (err) {
+    return { chunks: [], sources: [] };
+  }
+
+  const files = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => KNOWLEDGE_EXTS.has(path.extname(name).toLowerCase()));
+
+  const signatureParts = [];
+  files.forEach((name) => {
+    try {
+      const fullPath = path.join(KNOWLEDGE_DIR, name);
+      const stat = fs.statSync(fullPath);
+      signatureParts.push(`${name}:${stat.mtimeMs}:${stat.size}`);
+    } catch {
+      signatureParts.push(`${name}:missing`);
+    }
+  });
+  const signature = signatureParts.join("|");
+  if (signature && knowledgeCache.signature === signature && knowledgeCache.chunks.length) {
+    return { chunks: knowledgeCache.chunks, sources: files };
+  }
+
+  const chunks = [];
+  files.forEach((name) => {
+    const fullPath = path.join(KNOWLEDGE_DIR, name);
+    try {
+      const content = fs.readFileSync(fullPath, "utf8");
+      const parts = chunkText(content);
+      parts.forEach((part) => {
+        chunks.push({
+          source: name,
+          text: part,
+          searchText: part.toLowerCase()
+        });
+      });
+    } catch (err) {
+      console.warn(`Kunde inte läsa kunskapsfil ${name}:`, err);
+    }
+  });
+
+  knowledgeCache = { signature, chunks };
+  return { chunks, sources: files };
+}
+
+function selectRelevantChunks(query, chunks) {
+  const terms = String(query || "")
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu) || [];
+  const uniqueTerms = Array.from(new Set(terms)).filter((term) => term.length > 2);
+
+  const scored = chunks
+    .map((chunk) => {
+      let score = 0;
+      uniqueTerms.forEach((term) => {
+        if (chunk.searchText.includes(term)) score += 1;
+      });
+      return { chunk, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, MAX_CONTEXT_CHUNKS).map((item) => item.chunk);
 }
 
 const DEFAULT_SHIFT_CONFIGS = [
@@ -466,23 +624,29 @@ app.delete("/customers/:id", requireAuth, requireAdmin, (req, res) => {
 // GET /projects
 app.get("/projects", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const customerId = req.query.customer_id;
+  const where = [];
+  const params = [];
 
-  const sql = customerId
-    ? `SELECT p.*, c.name AS customer_name
-       FROM projects p
-       LEFT JOIN customers c ON c.id = p.customer_id
-       WHERE p.company_id = ? AND p.customer_id = ?
-       ORDER BY p.name`
-    : `SELECT p.*, c.name AS customer_name
-       FROM projects p
-       LEFT JOIN customers c ON c.id = p.customer_id
-       WHERE p.company_id = ?
-       ORDER BY p.name`;
+  if (!allowAll) {
+    where.push("p.company_id = ?");
+    params.push(companyId);
+  }
+  if (customerId) {
+    where.push("p.customer_id = ?");
+    params.push(customerId);
+  }
 
-  const params = customerId ? [companyId, customerId] : [companyId];
+  const sql = `
+    SELECT p.*, c.name AS customer_name
+    FROM projects p
+    LEFT JOIN customers c ON c.id = p.customer_id
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY p.name
+  `;
 
   db.all(sql, params, (err, rows) => {
     if (err) {
@@ -605,14 +769,17 @@ app.delete("/projects/:id", requireAuth, requireAdmin, (req, res) => {
 // GET /subprojects (optional ?project_id=)
 app.get("/subprojects", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const projectId = req.query.project_id;
 
   if (projectId) {
     db.all(
-      "SELECT * FROM subprojects WHERE company_id = ? AND project_id = ? ORDER BY name",
-      [companyId, projectId],
+      allowAll
+        ? "SELECT * FROM subprojects WHERE project_id = ? ORDER BY name"
+        : "SELECT * FROM subprojects WHERE company_id = ? AND project_id = ? ORDER BY name",
+      allowAll ? [projectId] : [companyId, projectId],
       (err, rows) => {
         if (err) {
           console.error("DB-fel vid GET /subprojects (by project):", err);
@@ -623,8 +790,8 @@ app.get("/subprojects", requireAuth, (req, res) => {
     );
   } else {
     db.all(
-      "SELECT * FROM subprojects WHERE company_id = ? ORDER BY name",
-      [companyId],
+      allowAll ? "SELECT * FROM subprojects ORDER BY name" : "SELECT * FROM subprojects WHERE company_id = ? ORDER BY name",
+      allowAll ? [] : [companyId],
       (err, rows) => {
         if (err) {
           console.error("DB-fel vid GET /subprojects:", err);
@@ -869,6 +1036,42 @@ app.post("/superadmin/impersonate", requireAuth, requireSuperAdmin, (req, res) =
   }
 });
 
+// Superadmin AI helper for troubleshooting error codes
+app.post("/superadmin/ai", requireAuth, requireSuperAdmin, async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "OPENAI_API_KEY missing" });
+
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const incoming = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  const cleaned = incoming
+    .filter((msg) => msg && typeof msg.content === "string")
+    .map((msg) => ({
+      role: msg.role === "assistant" || msg.role === "system" ? msg.role : "user",
+      content: String(msg.content).slice(0, 4000)
+    }))
+    .slice(-12);
+
+  const messages = [
+    {
+      role: "system",
+      content:
+        "Du är en kortfattad svensk felsökningsassistent för Super Admin. Hjälp till att tolka felkoder/loggar och ge tydliga steg: orsak, var det sker (frontend/backend), och vad man ska kontrollera eller ändra."
+    },
+    ...cleaned
+  ];
+
+  try {
+    const result = await requestOpenAi({ model, messages, temperature: 0.2 }, apiKey);
+    if (!result.ok) return res.status(502).json({ error: result.data?.error?.message || "OpenAI error" });
+    const data = result.data || {};
+    const reply = data?.choices?.[0]?.message?.content || "";
+    res.json({ reply });
+  } catch (err) {
+    console.error("AI request failed:", err);
+    res.status(500).json({ error: "AI request failed" });
+  }
+});
+
 app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, res) => {
   // Return a normal token for the super_admin (without impersonated)
   const token = jwt.sign(
@@ -885,10 +1088,11 @@ app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, r
 // Hämta användare (admin) – scoped per company via getScopedCompanyId
 app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  db.all(
-    `SELECT
+  const sql = `
+    SELECT
       id,
       email,
       role,
@@ -905,17 +1109,17 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
       tax_table,
       created_at
      FROM users
-     WHERE company_id = ?
-     ORDER BY id DESC`,
-    [companyId],
-    (err, rows) => {
-      if (err) {
-        console.error("DB-fel vid GET /admin/users:", err);
-        return res.status(500).json({ error: "DB error" });
-      }
-      res.json(rows || []);
+     ${allowAll ? "" : "WHERE company_id = ?"}
+     ORDER BY id DESC`;
+  const params = allowAll ? [] : [companyId];
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /admin/users:", err);
+      return res.status(500).json({ error: "DB error" });
     }
-  );
+    res.json(rows || []);
+  });
 });
 
 // Skapa användare (admin)
@@ -1248,20 +1452,123 @@ app.get("/auth/me", requireAuth, async (req, res) => {
   );
 });
 
+// Verify current password for authenticated user
+app.post("/auth/verify-password", requireAuth, (req, res) => {
+  const { email, password } = req.body || {};
+  if (!password) return res.status(400).json({ error: "password required" });
+
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+  db.get(`SELECT id, email, password FROM users WHERE id = ?`, [userId], async (err, user) => {
+    if (err) {
+      console.error("DB-fel vid POST /auth/verify-password:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (email) {
+      const cleanEmail = String(email || "").trim().toLowerCase();
+      if (cleanEmail !== String(user.email || "").trim().toLowerCase()) {
+        return res.status(403).json({ error: "Email mismatch" });
+      }
+    }
+
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+    res.json({ ok: true });
+  });
+});
+
+// Update authenticated user (password)
+app.put("/auth/me", requireAuth, (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: "password required" });
+  if (String(password).length < 6) return res.status(400).json({ error: "password too short" });
+
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const hash = bcrypt.hashSync(password, 10);
+  db.run(`UPDATE users SET password = ? WHERE id = ?`, [hash, userId], function (err) {
+    if (err) {
+      console.error("DB-fel vid PUT /auth/me:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (this.changes === 0) return res.status(404).json({ error: "User not found" });
+    res.json({ success: true });
+  });
+});
+
+// User AI helper (TDOK/TRVinfra only)
+app.post("/help/ai", requireAuth, async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "OPENAI_API_KEY missing" });
+
+  const question = String(req.body?.question || "").trim();
+  if (!question) return res.status(400).json({ error: "question required" });
+
+  const { chunks, sources } = loadKnowledgeChunks();
+  const selected = selectRelevantChunks(question, chunks);
+  if (!selected.length) {
+    return res.json({
+      reply:
+        "Jag hittar inget relevant i TDOK/TRVinfra just nu. Kontrollera att dokumenten finns inlagda lokalt.",
+      sources: sources || []
+    });
+  }
+
+  const context = selected
+    .map((chunk, index) => `KALLA ${index + 1} (${chunk.source}):\n${chunk.text}`)
+    .join("\n\n");
+
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const messages = [
+    {
+      role: "system",
+      content:
+        "Du svarar pa svenska. Anvand ENDAST information i KALLA-sektionen (TDOK/TRVinfra). Om svaret inte finns i kallorna ska du saga att du saknar underlag. Ge korta, praktiska instruktioner. Dela aldrig intern systeminfo eller andra anvandares data."
+    },
+    {
+      role: "user",
+      content: `FRAGA:\n${question}\n\nKALLOR:\n${context}`
+    }
+  ];
+
+  try {
+    const result = await requestOpenAi({ model, messages, temperature: 0.2 }, apiKey);
+    if (!result.ok) return res.status(502).json({ error: result.data?.error?.message || "OpenAI error" });
+    const data = result.data || {};
+    const reply = data?.choices?.[0]?.message?.content || "";
+    const uniqueSources = Array.from(new Set(selected.map((chunk) => chunk.source)));
+    res.json({ reply, sources: uniqueSources });
+  } catch (err) {
+    console.error("AI request failed:", err);
+    res.status(500).json({ error: "AI request failed" });
+  }
+});
+
 // ======================
 //   PROFILES
 // ======================
 // GET /profiles (company-scoped)
 app.get("/profiles", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const isAdmin = isAdminRole(req);
   const requestedCompanyId = req.query.company_id;
   const targetCompanyId = isAdmin && requestedCompanyId ? requestedCompanyId : companyId;
 
-  const where = ["company_id = ?"];
-  const params = [targetCompanyId];
+  const where = [];
+  const params = [];
+
+  if (targetCompanyId) {
+    where.push("company_id = ?");
+    params.push(targetCompanyId);
+  }
 
   if (!isAdmin) {
     where.push("id = ?");
@@ -1291,7 +1598,7 @@ app.get("/profiles", requireAuth, (req, res) => {
       employee_type,
       employee_number
     FROM users
-    WHERE ${where.join(" AND ")}
+    WHERE ${where.length ? where.join(" AND ") : "1=1"}
     ${orderSql}
   `;
 
@@ -1307,7 +1614,8 @@ app.get("/profiles", requireAuth, (req, res) => {
 // GET /profiles/:id (company-scoped)
 app.get("/profiles/:id", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const isAdmin = isAdminRole(req);
   const id = req.params.id;
@@ -1316,8 +1624,8 @@ app.get("/profiles/:id", requireAuth, (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  db.get(
-    `SELECT
+  const sql = `
+    SELECT
       id,
       email,
       role,
@@ -1332,17 +1640,18 @@ app.get("/profiles/:id", requireAuth, (req, res) => {
       employee_type,
       employee_number
      FROM users
-     WHERE id = ? AND company_id = ?`,
-    [id, companyId],
-    (err, row) => {
-      if (err) {
-        console.error("DB-fel vid GET /profiles/:id:", err);
-        return res.status(500).json({ error: "DB error" });
-      }
-      if (!row) return res.status(404).json({ error: "Not found" });
-      res.json(row);
+     WHERE id = ?${allowAll ? "" : " AND company_id = ?"}
+  `;
+  const params = allowAll ? [id] : [id, companyId];
+
+  db.get(sql, params, (err, row) => {
+    if (err) {
+      console.error("DB-fel vid GET /profiles/:id:", err);
+      return res.status(500).json({ error: "DB error" });
     }
-  );
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  });
 });
 
 // ======================
@@ -1351,7 +1660,12 @@ app.get("/profiles/:id", requireAuth, (req, res) => {
 // GET /admin/ob-settings (read for all authenticated users)
 app.get("/admin/ob-settings", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  if (allowAll) {
+    return res.json(DEFAULT_SHIFT_CONFIGS);
+  }
 
   ensureShiftConfigs(companyId, (seedErr) => {
     if (seedErr) {
@@ -1425,7 +1739,12 @@ app.patch("/admin/ob-settings/:id", requireAuth, requireAdmin, (req, res) => {
 // GET /admin/compensation-settings (restid)
 app.get("/admin/compensation-settings", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  if (allowAll) {
+    return res.json({ travel_rate: DEFAULT_TRAVEL_RATE });
+  }
 
   ensureCompensationSettings(companyId, (seedErr) => {
     if (seedErr) {
@@ -1677,19 +1996,21 @@ app.post("/plans", requireAuth, (req, res) => {
 // Hämta alla yrkesroller – används av både admin & tidrapport (företagsscope)
 app.get("/job-roles", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  db.all(
-    `SELECT id, name FROM job_roles WHERE company_id = ? ORDER BY name`,
-    [companyId],
-    (err, rows) => {
-      if (err) {
-        console.error("DB-fel vid GET /job-roles:", err);
-        return res.status(500).json({ error: "Kunde inte hämta yrkesroller." });
-      }
-      res.json(rows || []);
+  const sql = allowAll
+    ? `SELECT id, name FROM job_roles ORDER BY name`
+    : `SELECT id, name FROM job_roles WHERE company_id = ? ORDER BY name`;
+  const params = allowAll ? [] : [companyId];
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /job-roles:", err);
+      return res.status(500).json({ error: "Kunde inte hämta yrkesroller." });
     }
-  );
+    res.json(rows || []);
+  });
 });
 
 // Skapa ny yrkesroll (admin)
@@ -1754,19 +2075,21 @@ app.delete("/job-roles/:id", requireAuth, requireAdmin, (req, res) => {
 // Hämta alla materialtyper – används i material_types.html + tidrapporter (företagsscope)
 app.get("/material-types", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  db.all(
-    `SELECT id, name, unit FROM material_types WHERE company_id = ? ORDER BY name`,
-    [companyId],
-    (err, rows) => {
-      if (err) {
-        console.error("DB-fel vid GET /material-types:", err);
-        return res.status(500).json({ error: "Kunde inte hämta materialtyper." });
-      }
-      res.json(rows || []);
+  const sql = allowAll
+    ? `SELECT id, name, unit FROM material_types ORDER BY name`
+    : `SELECT id, name, unit FROM material_types WHERE company_id = ? ORDER BY name`;
+  const params = allowAll ? [] : [companyId];
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /material-types:", err);
+      return res.status(500).json({ error: "Kunde inte hämta materialtyper." });
     }
-  );
+    res.json(rows || []);
+  });
 });
 
 // Skapa ny materialtyp (admin)
@@ -1860,7 +2183,8 @@ app.get("/debug-users", (req, res) => {
 // Alias: TIME ENTRIES (tenant-scoped, with filters)
 app.get("/time-entries", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const {
     from,
@@ -1876,9 +2200,13 @@ app.get("/time-entries", requireAuth, (req, res) => {
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
   const effectiveUserId = isAdmin ? user_id : req.user.user_id;
 
-  const where = ["u.company_id = ?"];
-  const params = [companyId];
+  const where = [];
+  const params = [];
 
+  if (!allowAll) {
+    where.push("u.company_id = ?");
+    params.push(companyId);
+  }
   if (from) { where.push("date(tr.datum) >= date(?)"); params.push(from); }
   if (to) { where.push("date(tr.datum) <= date(?)"); params.push(to); }
 
@@ -1907,7 +2235,7 @@ app.get("/time-entries", requireAuth, (req, res) => {
       c.name AS customer_name
     FROM time_reports tr
     ${join}
-    WHERE ${where.join(" AND ")}
+    WHERE ${where.length ? where.join(" AND ") : "1=1"}
     ORDER BY date(tr.datum) DESC, tr.id DESC
     ${limitNum ? `LIMIT ${limitNum}` : ""}
   `;
@@ -1941,10 +2269,52 @@ app.get("/time-entries", requireAuth, (req, res) => {
   });
 });
 
+// GET /comp-time-balance (sum of saved - taken comp time hours)
+app.get("/comp-time-balance", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const isAdmin = isAdminRole(req);
+  const targetUserId = isAdmin && req.query.user_id ? req.query.user_id : getAuthUserId(req);
+
+  if (!targetUserId) return res.status(400).json({ error: "user_id required" });
+
+  const sql = `
+    SELECT
+      SUM(
+        CASE
+          WHEN COALESCE(tr.comp_time_saved_hours, 0) > 0 THEN COALESCE(tr.comp_time_saved_hours, 0)
+          WHEN tr.save_comp_time = 1 THEN COALESCE(tr.overtime_weekday_hours, 0) + COALESCE(tr.overtime_weekend_hours, 0)
+          ELSE 0
+        END
+      ) AS saved_hours,
+      SUM(COALESCE(tr.comp_time_taken_hours, 0)) AS taken_hours
+    FROM time_reports tr
+    JOIN users u ON u.id = tr.user_id
+    WHERE u.company_id = ? AND tr.user_id = ?
+  `;
+
+  db.get(sql, [companyId, targetUserId], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid GET /comp-time-balance:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    const saved = Number(row?.saved_hours || 0);
+    const taken = Number(row?.taken_hours || 0);
+    res.json({
+      saved_hours: saved,
+      taken_hours: taken,
+      balance_hours: saved - taken
+    });
+  });
+});
+
 // POST /time-entries (create time report)
 app.post("/time-entries", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
   const userId = isAdmin && req.body.user_id ? req.body.user_id : req.user.user_id;
@@ -1966,11 +2336,22 @@ app.post("/time-entries", requireAuth, (req, res) => {
     deviation_description = null,
     deviation_status = null,
     travel_time_hours = 0,
+    save_travel_compensation = 0,
+    overtime_weekday_hours = 0,
+    overtime_weekend_hours = 0,
+    save_comp_time = 0,
+    comp_time_saved_hours = 0,
+    comp_time_taken_hours = 0,
     km,
     km_compensation
   } = req.body || {};
 
   if (!date) return res.status(400).json({ error: "date required" });
+
+  const saveTravelFlag = save_travel_compensation === true || save_travel_compensation === 1 || save_travel_compensation === "1";
+  const compTimeSavedValue = Number(comp_time_saved_hours) || 0;
+  const saveCompTimeFlag =
+    save_comp_time === true || save_comp_time === 1 || save_comp_time === "1" || compTimeSavedValue > 0;
 
   const calcHours = () => {
     if (!start_time || !end_time) return null;
@@ -2000,7 +2381,9 @@ app.post("/time-entries", requireAuth, (req, res) => {
       return res.status(500).json({ error: "DB error" });
     }
     if (!uRow) return res.status(400).json({ error: "Invalid user_id" });
-    if (String(uRow.company_id) !== String(companyId)) {
+    const effectiveCompanyId = allowAll ? uRow.company_id : companyId;
+    if (!effectiveCompanyId) return res.status(400).json({ error: "Company not found" });
+    if (String(uRow.company_id) !== String(effectiveCompanyId)) {
       return res.status(403).json({ error: "User not in company" });
     }
 
@@ -2011,8 +2394,8 @@ app.post("/time-entries", requireAuth, (req, res) => {
     function performInsert() {
       db.run(
         `INSERT INTO time_reports (
-          user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, deviation_title, deviation_description, deviation_status, restid, status, traktamente_type, traktamente_amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          user_id, user_name, datum, starttid, sluttid, timmar, project_id, subproject_id, job_role_id, comment, deviation_title, deviation_description, deviation_status, restid, save_travel_compensation, overtime_weekday_hours, overtime_weekend_hours, save_comp_time, comp_time_saved_hours, comp_time_taken_hours, status, traktamente_type, traktamente_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           userId,
           null,
@@ -2028,6 +2411,12 @@ app.post("/time-entries", requireAuth, (req, res) => {
           deviation_description || null,
           deviation_status || null,
           Number(travel_time_hours) || 0,
+          saveTravelFlag ? 1 : 0,
+          Number(overtime_weekday_hours) || 0,
+          Number(overtime_weekend_hours) || 0,
+          saveCompTimeFlag ? 1 : 0,
+          compTimeSavedValue,
+          Number(comp_time_taken_hours) || 0,
           status || "draft",
           allowance_type || null,
           allowance_amount || null
@@ -2053,7 +2442,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
 
       db.get(
         `SELECT id FROM job_roles WHERE id = ? AND company_id = ?`,
-        [job_role_id, companyId],
+        [job_role_id, effectiveCompanyId],
         (jrErr, jrRow) => {
           if (jrErr) {
             console.error("DB-fel vid SELECT job_role för time entry:", jrErr);
@@ -2066,7 +2455,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
     }
 
     if (checkProject) {
-      db.get(checkProject, [project_id, companyId], (pErr, pRow) => {
+      db.get(checkProject, [project_id, effectiveCompanyId], (pErr, pRow) => {
         if (pErr) {
           console.error("DB-fel vid SELECT project for time entry:", pErr);
           return res.status(500).json({ error: "DB error" });
@@ -2074,7 +2463,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
         if (!pRow) return res.status(400).json({ error: "Invalid project_id" });
 
         if (checkSubproject) {
-          db.get(checkSubproject, [subproject_id, companyId], (sErr, sRow) => {
+          db.get(checkSubproject, [subproject_id, effectiveCompanyId], (sErr, sRow) => {
             if (sErr) {
               console.error("DB-fel vid SELECT subproject for time entry:", sErr);
               return res.status(500).json({ error: "DB error" });
@@ -2089,7 +2478,7 @@ app.post("/time-entries", requireAuth, (req, res) => {
         }
       });
     } else if (checkSubproject) {
-      db.get(checkSubproject, [subproject_id, companyId], (sErr, sRow) => {
+      db.get(checkSubproject, [subproject_id, effectiveCompanyId], (sErr, sRow) => {
         if (sErr) {
           console.error("DB-fel vid SELECT subproject for time entry (no project):", sErr);
           return res.status(500).json({ error: "DB error" });
@@ -2106,7 +2495,8 @@ app.post("/time-entries", requireAuth, (req, res) => {
 // PUT /time-entries/:id (update time report)
 app.put("/time-entries/:id", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const id = req.params.id;
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
@@ -2125,7 +2515,8 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         console.error("DB-fel vid SELECT user for time_report:", uErr);
         return res.status(500).json({ error: "DB error" });
       }
-      if (!uRow || String(uRow.company_id) !== String(companyId)) {
+      const effectiveCompanyId = allowAll ? uRow?.company_id : companyId;
+      if (!uRow || !effectiveCompanyId || String(uRow.company_id) !== String(effectiveCompanyId)) {
         return res.status(403).json({ error: "Forbidden" });
       }
 
@@ -2145,7 +2536,13 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         status,
         allowance_type,
         allowance_amount,
-        travel_time_hours
+        travel_time_hours,
+        save_travel_compensation,
+        overtime_weekday_hours,
+        overtime_weekend_hours,
+        save_comp_time,
+        comp_time_saved_hours,
+        comp_time_taken_hours
       } = req.body || {};
 
       // If hours missing but start/end provided, calculate hours
@@ -2165,6 +2562,25 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
       }
       normalizedHours = normalizedHours != null ? Number(normalizedHours) : null;
 
+      const saveTravelValue =
+        save_travel_compensation === undefined
+          ? null
+          : save_travel_compensation === true || save_travel_compensation === 1 || save_travel_compensation === "1"
+          ? 1
+          : 0;
+      const compTimeSavedValue =
+        comp_time_saved_hours === undefined ? null : Number(comp_time_saved_hours) || 0;
+      const saveCompTimeValue =
+        comp_time_saved_hours !== undefined
+          ? compTimeSavedValue > 0
+            ? 1
+            : 0
+          : save_comp_time === undefined
+          ? null
+          : save_comp_time === true || save_comp_time === 1 || save_comp_time === "1"
+          ? 1
+          : 0;
+
       function performUpdate() {
         db.run(
         `UPDATE time_reports SET
@@ -2180,6 +2596,12 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
           deviation_description = COALESCE(?, deviation_description),
           deviation_status = COALESCE(?, deviation_status),
           restid = COALESCE(?, restid),
+          save_travel_compensation = COALESCE(?, save_travel_compensation),
+          overtime_weekday_hours = COALESCE(?, overtime_weekday_hours),
+          overtime_weekend_hours = COALESCE(?, overtime_weekend_hours),
+          save_comp_time = COALESCE(?, save_comp_time),
+          comp_time_saved_hours = COALESCE(?, comp_time_saved_hours),
+          comp_time_taken_hours = COALESCE(?, comp_time_taken_hours),
           status = COALESCE(?, status),
           traktamente_type = COALESCE(?, traktamente_type),
           traktamente_amount = COALESCE(?, traktamente_amount)
@@ -2197,6 +2619,12 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
           deviation_description ?? null,
           deviation_status ?? null,
           travel_time_hours ?? null,
+          saveTravelValue,
+          overtime_weekday_hours === undefined ? null : Number(overtime_weekday_hours) || 0,
+          overtime_weekend_hours === undefined ? null : Number(overtime_weekend_hours) || 0,
+          saveCompTimeValue,
+          compTimeSavedValue,
+          comp_time_taken_hours === undefined ? null : Number(comp_time_taken_hours) || 0,
           status ?? null,
           allowance_type ?? null,
           allowance_amount ?? null,
@@ -2222,7 +2650,7 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
       if (job_role_id != null) {
         db.get(
           `SELECT id FROM job_roles WHERE id = ? AND company_id = ?`,
-          [job_role_id, companyId],
+          [job_role_id, effectiveCompanyId],
           (jrErr, jrRow) => {
             if (jrErr) {
               console.error("DB-fel vid SELECT job_role för update:", jrErr);
@@ -2242,7 +2670,8 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
 // DELETE /time-entries/:id
 app.delete("/time-entries/:id", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const id = req.params.id;
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
@@ -2259,7 +2688,8 @@ app.delete("/time-entries/:id", requireAuth, (req, res) => {
         console.error("DB-fel vid SELECT user for time_report DELETE:", uErr);
         return res.status(500).json({ error: "DB error" });
       }
-      if (!uRow || String(uRow.company_id) !== String(companyId)) {
+      const effectiveCompanyId = allowAll ? uRow?.company_id : companyId;
+      if (!uRow || !effectiveCompanyId || String(uRow.company_id) !== String(effectiveCompanyId)) {
         return res.status(403).json({ error: "Forbidden" });
       }
 
@@ -2815,14 +3245,19 @@ app.post("/time-entries/:id/attest", requireAuth, requireAdmin, (req, res) => {
 // GET /deviation-reports
 app.get("/deviation-reports", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
-  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
   const { user_id, include_images } = req.query || {};
   const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
   const effectiveUserId = isAdmin ? user_id : req.user.user_id;
 
-  const where = ["dr.company_id = ?"];
-  const params = [companyId];
+  const where = [];
+  const params = [];
+  if (!allowAll) {
+    where.push("dr.company_id = ?");
+    params.push(companyId);
+  }
   if (effectiveUserId) {
     where.push("dr.user_id = ?");
     params.push(effectiveUserId);
@@ -2841,7 +3276,7 @@ app.get("/deviation-reports", requireAuth, (req, res) => {
     JOIN users u ON u.id = dr.user_id
     JOIN time_reports tr ON tr.id = dr.time_entry_id
     LEFT JOIN projects p ON p.id = tr.project_id
-    WHERE ${where.join(" AND ")}
+    WHERE ${where.length ? where.join(" AND ") : "1=1"}
     ORDER BY datetime(dr.created_at) DESC, dr.id DESC
   `;
 
