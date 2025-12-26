@@ -115,7 +115,12 @@ const Billing = () => {
         user_id: e.user_id != null ? String(e.user_id) : "",
         project:
           e.project_name || e.customer_name
-            ? { id: String(e.project_id || ""), name: e.project_name || "", customer_id: e.customer_id, customer_name: e.customer_name }
+            ? {
+                id: String(e.project_id || ""),
+                name: e.project_name || "",
+                customer_id: e.customer_id != null ? String(e.customer_id) : null,
+                customer_name: e.customer_name
+              }
             : e.project,
         subproject: e.subproject_name ? { id: String(e.subproject_id || ""), name: e.subproject_name, project_id: e.project_id } : e.subproject,
         profiles: e.user_full_name ? { id: String(e.user_id || ""), full_name: e.user_full_name } : e.profiles,
@@ -134,7 +139,7 @@ const Billing = () => {
 
   const filteredSubprojects = useMemo(() => {
     if (projectId === "all") return subprojects;
-    return subprojects.filter((s) => s.project_id === projectId);
+    return subprojects.filter((s) => String(s.project_id) === projectId);
   }, [projectId, subprojects]);
 
   const filteredEntries = useMemo(() => {
@@ -143,17 +148,13 @@ const Billing = () => {
         const proj = entry.project;
         const matchesCustomer =
           proj &&
-          (proj.customer_id === customerId ||
-            (proj.customer_name && proj.customer_name === customers.find((c) => c.id === customerId)?.name));
+          (String(proj.customer_id || "") === customerId ||
+            (proj.customer_name && proj.customer_name === customers.find((c) => String(c.id) === customerId)?.name));
         if (!matchesCustomer) return false;
       }
-      if (projectId !== "all" && entry.project_id !== projectId) return false;
-      if (subprojectId !== "all" && entry.subproject_id !== subprojectId) return false;
-      if (userId !== "all" && entry.user_id !== userId) return false;
-      if (attestStatus === "attested" && !entry.attested_by) return false;
-      if (attestStatus === "not_attested" && entry.attested_by) return false;
-      if (invoiceStatus === "invoiced" && !(entry as any).invoiced) return false;
-      if (invoiceStatus === "not_invoiced" && (entry as any).invoiced) return false;
+      if (projectId !== "all" && String(entry.project_id || "") !== projectId) return false;
+      if (subprojectId !== "all" && String(entry.subproject_id || "") !== subprojectId) return false;
+      if (userId !== "all" && String(entry.user_id || "") !== userId) return false;
       if (attestStatus === "attested" && !entry.attested_by) return false;
       if (attestStatus === "not_attested" && entry.attested_by) return false;
       if (invoiceStatus === "invoiced" && !(entry as any).invoiced) return false;
@@ -169,7 +170,7 @@ const Billing = () => {
 
       return true;
     });
-  }, [entries, customerId, projectId, subprojectId, userId, fromDate, toDate, customers]);
+  }, [entries, customerId, projectId, subprojectId, userId, fromDate, toDate, customers, attestStatus, invoiceStatus]);
 
   const totals = useMemo(() => {
     const hours = filteredEntries.reduce((sum, e) => sum + (e.total_hours || 0), 0);
@@ -182,7 +183,9 @@ const Billing = () => {
   const getSubprojectName = (entry: TimeEntry) => entry.subproject?.name || (entry as any).subproject_name || "–";
   const getCustomerName = (entry: TimeEntry) => {
     if (entry.project?.customer_name) return entry.project.customer_name;
-    const projCustomer = customers.find((c) => c.id === (entry.project?.customer_id || (entry as any).customer_id));
+    const projCustomer = customers.find(
+      (c) => String(c.id) === String(entry.project?.customer_id || (entry as any).customer_id || "")
+    );
     return projCustomer?.name || "–";
   };
   const getUserName = (entry: TimeEntry) => entry.profiles?.full_name || (entry as any).user_full_name || "–";
@@ -298,7 +301,7 @@ const Billing = () => {
               <SelectContent>
                 <SelectItem value="all">Alla kunder</SelectItem>
                 {customers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
+                  <SelectItem key={c.id} value={String(c.id)}>
                     {c.name}
                   </SelectItem>
                 ))}
@@ -315,7 +318,7 @@ const Billing = () => {
               <SelectContent>
                 <SelectItem value="all">Alla projekt</SelectItem>
                 {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
+                  <SelectItem key={p.id} value={String(p.id)}>
                     {p.name}
                   </SelectItem>
                 ))}
@@ -332,7 +335,7 @@ const Billing = () => {
               <SelectContent>
                 <SelectItem value="all">Alla underprojekt</SelectItem>
                 {filteredSubprojects.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
+                  <SelectItem key={s.id} value={String(s.id)}>
                     {s.name}
                   </SelectItem>
                 ))}
@@ -349,7 +352,7 @@ const Billing = () => {
               <SelectContent>
                 <SelectItem value="all">Alla användare</SelectItem>
                 {users.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
+                  <SelectItem key={u.id} value={String(u.id)}>
                     {u.full_name || "Användare"}
                   </SelectItem>
                 ))}

@@ -183,6 +183,7 @@ const SalaryOverview = () => {
         overtimeWeekendHours: 0,
         overtimeWeekendCompensation: 0,
         compTimeSavedHours: 0,
+        compTimeTakenHours: 0,
         compTimeDeduction: 0,
         shiftBreakdown: {
           day: { hours: 0, compensation: 0 },
@@ -208,6 +209,7 @@ const SalaryOverview = () => {
     let compTimeSavedHours = 0;
     let compTimeSavedWeekday = 0;
     let compTimeSavedWeekend = 0;
+    let compTimeTakenHours = 0;
 
     const adjustedEntries = timeEntries.map((entry) => {
       const overtimeWeekday = Number(entry.overtime_weekday_hours || 0);
@@ -215,8 +217,10 @@ const SalaryOverview = () => {
       const totalOvertime = overtimeWeekday + overtimeWeekend;
       const savedHoursRaw = Number(entry.comp_time_saved_hours || 0);
       const savedHours = savedHoursRaw > 0 ? savedHoursRaw : entry.save_comp_time ? totalOvertime : 0;
+      const takenHours = Number(entry.comp_time_taken_hours || 0);
 
       compTimeSavedHours += savedHours;
+      compTimeTakenHours += takenHours;
 
       if (savedHours <= 0 || totalOvertime <= 0) return entry;
 
@@ -297,7 +301,8 @@ const SalaryOverview = () => {
       compTimeSavedWeekend * baseHourlyRate * ((shiftMultipliers.overtime_weekend || 1) - 1);
 
     const perDiemDays = Object.keys(perDiemByDate).length;
-    const totalHours = Object.values(shiftBreakdown).reduce((sum, s) => sum + s.hours, 0);
+    const totalHoursWorked = Object.values(shiftBreakdown).reduce((sum, s) => sum + s.hours, 0);
+    const totalHours = Math.max(0, totalHoursWorked - compTimeSavedHours);
     const grossSalary = monthlySalary > 0 ? monthlySalary : totalHours * hourlyWage;
     const obCompensation = Object.values(shiftBreakdown).reduce(
       (sum, s) => sum + s.compensation,
@@ -320,6 +325,7 @@ const SalaryOverview = () => {
       overtimeWeekendHours: obSummary.overtimeWeekend,
       overtimeWeekendCompensation,
       compTimeSavedHours,
+      compTimeTakenHours,
       compTimeDeduction,
       shiftBreakdown,
     };
@@ -327,6 +333,7 @@ const SalaryOverview = () => {
 
   const salaryData = calculateSalaryData();
   const compTimeBalanceHours = Number(compTimeBalance?.balance_hours || 0);
+  const compTimeSavedTotalHours = Number(compTimeBalance?.saved_hours || 0);
   const monthlySalary = Number(profile?.monthly_salary || 0);
   const hourlyWage = Number(profile?.hourly_wage || 0);
   const showMonthlySalary = monthlySalary > 0;
@@ -748,20 +755,25 @@ const SalaryOverview = () => {
           </CardContent>
         </Card>
 
-        <Card className={compTimeBalanceHours !== 0 ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/30" : ""}>
+        <Card className={compTimeSavedTotalHours !== 0 ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/30" : ""}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sparad komptid</CardTitle>
             <Clock className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
-              {compTimeBalanceHours.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h
+              {compTimeSavedTotalHours.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Saldo (sparat - uttag)
+              Totalt sparat (utan uttag)
             </p>
-            {salaryData.compTimeSavedHours > 0 && (
+            {salaryData.compTimeTakenHours > 0 && (
               <p className="text-xs text-muted-foreground mt-1">
+                Uttag denna period: {salaryData.compTimeTakenHours.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h
+              </p>
+            )}
+            {salaryData.compTimeSavedHours > 0 && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-300 mt-1">
                 Denna period: {salaryData.compTimeSavedHours.toFixed(1)} h
               </p>
             )}

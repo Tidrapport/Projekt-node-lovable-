@@ -18,6 +18,7 @@ type UserRow = {
   email: string;
   role: string;
   company_id: string | number | null;
+  is_active?: number | null;
   full_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
@@ -53,6 +54,7 @@ const AdminUsers = () => {
   const [resetUser, setResetUser] = useState<UserRow | null>(null);
   const [companyOptions, setCompanyOptions] = useState<{ id: string; name: string; code?: string | null }[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"active" | "inactive">("active");
 
   // New user form state
   const [newName, setNewName] = useState("");
@@ -88,6 +90,11 @@ const AdminUsers = () => {
     return companyId ? String(companyId) : "";
   }, [companyId, isSuperAdmin, selectedCompanyId]);
 
+  const isUserActive = (user: UserRow) => user.is_active === undefined || user.is_active === null || user.is_active === 1;
+
+  const activeUsers = useMemo(() => users.filter((user) => isUserActive(user)), [users]);
+  const inactiveUsers = useMemo(() => users.filter((user) => !isUserActive(user)), [users]);
+
   const fetchUsers = async () => {
     if (!targetCompanyId) {
       setUsers([]);
@@ -95,7 +102,7 @@ const AdminUsers = () => {
     }
     setLoading(true);
     try {
-      const data = await apiFetch<UserRow[]>(`/admin/users?company_id=${targetCompanyId}`);
+      const data = await apiFetch<UserRow[]>(`/admin/users?company_id=${targetCompanyId}&include_inactive=1`);
       setUsers(data || []);
     } catch (err: any) {
       toast.error(err.message || "Kunde inte hämta användare");
@@ -256,10 +263,20 @@ const AdminUsers = () => {
   const handleDelete = async (userId: string | number) => {
     try {
       await apiFetch(`/admin/users/${userId}`, { method: "DELETE" });
-      toast.success("Användare borttagen");
+      toast.success("Användare avaktiverad");
       fetchUsers();
     } catch (err: any) {
-      toast.error(err.message || "Kunde inte ta bort användare");
+      toast.error(err.message || "Kunde inte avaktivera användare");
+    }
+  };
+
+  const handleReactivate = async (userId: string | number) => {
+    try {
+      await apiFetch(`/admin/users/${userId}/reactivate`, { method: "POST" });
+      toast.success("Användare aktiverad");
+      fetchUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte aktivera användare");
     }
   };
 
@@ -415,6 +432,22 @@ const AdminUsers = () => {
       </div>
 
       <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant={activeTab === "active" ? "default" : "outline"}
+            onClick={() => setActiveTab("active")}
+          >
+            Aktiva ({activeUsers.length})
+          </Button>
+          <Button
+            size="sm"
+            variant={activeTab === "inactive" ? "default" : "outline"}
+            onClick={() => setActiveTab("inactive")}
+          >
+            Avaktiverade ({inactiveUsers.length})
+          </Button>
+        </div>
         {users.length === 0 ? (
           <Card className="shadow-card">
             <CardContent className="pt-6 text-center text-muted-foreground">
@@ -423,7 +456,16 @@ const AdminUsers = () => {
             </CardContent>
           </Card>
         ) : (
-          users.map((user) => {
+          ((activeTab === "active" ? activeUsers : inactiveUsers).length === 0 ? (
+            <Card className="shadow-card">
+              <CardContent className="pt-6 text-center text-muted-foreground">
+                <UsersIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>{activeTab === "active" ? "Inga aktiva användare." : "Inga avaktiverade användare."}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            (activeTab === "active" ? activeUsers : inactiveUsers).map((user) => {
+            const inactive = !isUserActive(user);
             const isAdmin = (user.role || "").toLowerCase() === "admin" || (user.role || "").toLowerCase() === "super_admin";
             return (
               <Card key={user.id} className="shadow-card">
@@ -435,10 +477,11 @@ const AdminUsers = () => {
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-lg">{user.full_name || user.email}</h3>
+                          <h3 className="font-semibold text-lg">{user.full_name || user.email || "Avaktiverad användare"}</h3>
                           <Badge variant={isAdmin ? "default" : "outline"}>{isAdmin ? "Admin" : "User"}</Badge>
                           {user.employee_type && <Badge variant="secondary">{user.employee_type}</Badge>}
                           {user.employee_number && <Badge variant="outline">#{user.employee_number}</Badge>}
+                          {inactive && <Badge variant="secondary">Avaktiverad</Badge>}
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {user.created_at ? `Registrerad ${format(new Date(user.created_at), "d MMMM yyyy", { locale: sv })}` : "Registrerad"}
@@ -473,16 +516,23 @@ const AdminUsers = () => {
                         <Key className="h-4 w-4 mr-1" />
                         Återställ lösenord
                       </Button>
-                      <Button variant="outline" size="sm" className="text-destructive" onClick={() => handleDelete(user.id)}>
-                        <Trash2 className="h-4 w-4 mr-1" />
-                        Ta bort
-                      </Button>
+                      {inactive ? (
+                        <Button variant="outline" size="sm" onClick={() => handleReactivate(user.id)}>
+                          Aktivera
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" className="text-destructive" onClick={() => handleDelete(user.id)}>
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Avaktivera
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
             );
-          })
+            })
+          ))
         )}
       </div>
 

@@ -3,11 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiFetch } from "@/api/client";
 import { getMe } from "@/api/auth";
 import { toast } from "sonner";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Shield, Building2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -55,6 +56,7 @@ const Auth = () => {
   // Login state
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [forgotDialogOpen, setForgotDialogOpen] = useState(false);
 
   // Load companies and saved company code on mount
   useEffect(() => {
@@ -190,12 +192,15 @@ const Auth = () => {
   // Show loading while checking for saved company code
   if (initialLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
         <div className="w-full max-w-md space-y-6">
-          <div className="text-center space-y-2">
-            <Building2 className="h-16 w-16 mx-auto text-primary" />
-            <h1 className="text-3xl font-bold font-heading">Tidrapporteringssystem</h1>
-            <p className="text-muted-foreground">Laddar...</p>
+          <div className="text-center space-y-2 text-slate-100">
+            <img
+              src="/opero-systems-logo.png"
+              alt="Opero Systems AB"
+              className="h-24 mx-auto object-contain"
+            />
+            <p className="text-slate-300">Laddar...</p>
           </div>
         </div>
       </div>
@@ -205,12 +210,15 @@ const Auth = () => {
   // Super admin login form
   if (isSuperAdminMode) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
         <div className="w-full max-w-md space-y-6">
-          <div className="text-center space-y-2">
-            <Shield className="h-16 w-16 mx-auto text-primary" />
-            <h1 className="text-3xl font-bold font-heading">Admin Inloggning</h1>
-            <p className="text-muted-foreground">Systemadministratör</p>
+          <div className="text-center space-y-2 text-slate-100">
+            <img
+              src="/opero-systems-logo.png"
+              alt="Opero Systems AB"
+              className="h-24 mx-auto object-contain"
+            />
+            <p className="text-slate-300">Systemadministratör</p>
           </div>
 
           <Card className="shadow-elevated border-primary/20">
@@ -272,22 +280,21 @@ const Auth = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
       <div className="w-full max-w-md space-y-6">
-        <div className="text-center space-y-2">
-          {verifiedCompany?.logo_url ? (
-            <img src={verifiedCompany.logo_url} alt={verifiedCompany.name} className="h-20 mx-auto object-contain" />
-          ) : (
-            <Building2 className="h-16 w-16 mx-auto text-primary" />
-          )}
-          <h1 className="text-3xl font-bold font-heading">💰💰 OPERO 💰💰</h1>
-          <p className="text-muted-foreground">Företags operativsystem</p>
-        </div>
 
         <Card className="shadow-elevated">
-          <CardHeader>
-            <CardTitle>Välkommen</CardTitle>
-            <CardDescription>
+          <CardHeader className="space-y-3">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <img
+                src="/opero-systems-logo.png"
+                alt="Opero Systems AB"
+                className="h-28 mx-auto object-contain rounded-md bg-slate-950 p-2"
+              />
+              <p className="text-sm text-muted-foreground">Företags operativsystem</p>
+            </div>
+            <CardTitle className="text-center">Välkommen</CardTitle>
+            <CardDescription className="text-center">
               {!verifiedCompany 
                 ? "Välj ditt företag för att fortsätta" 
                 : `Logga in till ${verifiedCompany.name}`
@@ -295,85 +302,101 @@ const Auth = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {!verifiedCompany ? (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="company-select">Välj företag</Label>
-                  <Select value={selectedCompanyCode} onValueChange={handleCompanySelect}>
-                    <SelectTrigger id="company-select" disabled={loading}>
-                      <SelectValue placeholder="Välj ditt företag" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60">
-                      {companies.map((company) => (
-                        <SelectItem key={getCompanyCode(company)} value={getCompanyCode(company)}>
-                          <span className="flex items-center gap-2">
-                            <span>{company.name}</span>
-                            <span className="text-muted-foreground font-mono text-xs">({company.abbreviation})</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Kontakta din administratör om ditt företag inte visas
-                  </p>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="company-select">Välj företag</Label>
+                <Select value={selectedCompanyCode} onValueChange={handleCompanySelect}>
+                  <SelectTrigger id="company-select" disabled={loading}>
+                    <SelectValue placeholder="Välj ditt företag" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {companies.map((company) => (
+                      <SelectItem key={getCompanyCode(company)} value={getCompanyCode(company)}>
+                        <span className="flex items-center gap-2">
+                          <span>{company.name}</span>
+                          <span className="text-muted-foreground font-mono text-xs">({company.abbreviation})</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Kontakta din administratör om ditt företag inte visas</span>
+                  {verifiedCompany && (
+                    <Button type="button" variant="ghost" size="sm" onClick={resetCompanyVerification}>
+                      Rensa val
+                    </Button>
+                  )}
                 </div>
               </div>
-            ) : (
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="bg-muted/50 p-3 rounded-lg flex justify-between items-center">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Inloggning till</p>
-                    <p className="font-medium">{verifiedCompany.name}</p>
-                  </div>
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={resetCompanyVerification}
+
+              {verifiedCompany && (
+                <div className="bg-muted/50 p-3 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Inloggning till</p>
+                  <p className="font-medium">{verifiedCompany.name}</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="email">E-post</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="din@epost.se"
+                  required
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="password">Lösenord</Label>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setForgotDialogOpen(true)}
                   >
-                    Byt företag
+                    Glömt lösenord?
                   </Button>
                 </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="email">E-post</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="din@epost.se"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <Label htmlFor="password">Lösenord</Label>
-                    <Link to="/forgot-password" className="text-xs text-primary hover:underline">
-                      Glömt lösenord?
-                    </Link>
-                  </div>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-                
-                <Button type="submit" className="w-full bg-gradient-primary" disabled={loading}>
-                  {loading ? "Loggar in..." : "Logga in"}
-                </Button>
-              </form>
-            )}
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  disabled={loading}
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full bg-gradient-primary"
+                disabled={loading || (companies.length > 0 && !verifiedCompany)}
+              >
+                {loading ? "Loggar in..." : "Logga in"}
+              </Button>
+            </form>
           </CardContent>
         </Card>
+
+        <Dialog open={forgotDialogOpen} onOpenChange={setForgotDialogOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Glömt lösenord</DialogTitle>
+              <DialogDescription>Kontakta din chef för att få ett nytt lösenord.</DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => setForgotDialogOpen(false)}>
+                Stäng
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
         
         {/* Hidden super admin access */}
         <div className="text-center">

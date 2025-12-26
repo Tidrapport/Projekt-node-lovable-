@@ -20,7 +20,8 @@ import {
   Contact,
   ChevronRight,
   FileText,
-  Wallet
+  Wallet,
+  ClipboardList
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -47,6 +48,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 const userItems = [
   { title: "Översikt", url: "/", icon: Home },
   { title: "Tidrapporter", url: "/time-reports", icon: Clock },
+  { title: "Arbetsordrar", url: "/work-orders", icon: ClipboardList },
   { title: "Svetsrapport", url: "/welding-report", icon: Briefcase },
   { title: "Planering", url: "/planning", icon: Calendar },
   { title: "Avvikelser", url: "/deviations", icon: AlertTriangle },
@@ -60,6 +62,7 @@ const userItems = [
 const adminMainItems = [
   { title: "Admin Panel", url: "/admin/dashboard", icon: Shield },
   { title: "Statistik", url: "/admin/statistics", icon: BarChart3 },
+  { title: "Arbetsorder", url: "/admin/work-orders", icon: ClipboardList },
   { title: "Attestering", url: "/admin/attestations", icon: CheckSquare },
   { title: "Fakturering", url: "/admin/billing", icon: FileText },
   { title: "Löner", url: "/admin/salaries", icon: Wallet },
@@ -77,6 +80,7 @@ const adminHubSubItems = [
   { title: "Yrkesroller", url: "/admin/job-roles", icon: Briefcase },
   { title: "Tillägg", url: "/admin/material-types", icon: Package },
   { title: "OB-inställningar", url: "/admin/ob-settings", icon: Percent },
+  { title: "Faktura-inställningar", url: "/admin/invoice-settings", icon: FileText },
 ];
 
 const superAdminItems = [

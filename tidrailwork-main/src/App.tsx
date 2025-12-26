@@ -12,6 +12,7 @@ import TimeReports from "./pages/TimeReports";
 import Planning from "./pages/Planning";
 import Deviations from "./pages/Deviations";
 import SalaryOverview from "./pages/SalaryOverview";
+import WorkOrders from "./pages/WorkOrders";
 import ChangePassword from "./pages/ChangePassword";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -26,7 +27,9 @@ import AdminPlanning from "./pages/admin/Planning";
 import AdminTimeAttestations from "./pages/admin/TimeAttestations";
 import AdminDeviations from "./pages/admin/Deviations";
 import AdminOBSettings from "./pages/admin/OBSettings";
+import AdminInvoiceSettings from "./pages/admin/InvoiceSettings";
 import AdminStatistics from "./pages/admin/Statistics";
+import AdminWorkOrders from "./pages/admin/WorkOrders";
 import AdminHub from "./pages/admin/AdminHub";
 import AdminCustomers from "./pages/admin/Customers";
 import AdminWeldingReports from "./pages/admin/WeldingReports";
@@ -82,6 +85,16 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <TimeReports />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/work-orders"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <WorkOrders />
                     </Layout>
                   </ProtectedRoute>
                 }
@@ -277,11 +290,31 @@ const App = () => (
                 }
               />
               <Route
+                path="/admin/invoice-settings"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminInvoiceSettings />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/admin/statistics"
                 element={
                   <ProtectedRoute>
                     <Layout>
                       <AdminStatistics />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/work-orders"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminWorkOrders />
                     </Layout>
                   </ProtectedRoute>
                 }
