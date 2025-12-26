@@ -25,6 +25,24 @@ app.use(express.static(__dirname));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // Serve uppladdade filer (bilder m.m.)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Servera byggd frontend (SPA) om den finns
+const FRONTEND_DIST = path.join(__dirname, "../tidrailwork-main/dist");
+const HAS_FRONTEND_DIST = fs.existsSync(FRONTEND_DIST);
+if (HAS_FRONTEND_DIST) {
+  app.use(express.static(FRONTEND_DIST));
+}
+// SPA fallback tidigt för refresh på klientroutes (även när API-route finns)
+if (HAS_FRONTEND_DIST) {
+  app.use((req, res, next) => {
+    if (req.method !== "GET") return next();
+    const accept = req.headers.accept || "";
+    const secFetchDest = req.headers["sec-fetch-dest"] || "";
+    if (!accept.includes("text/html") && secFetchDest !== "document") return next();
+    if (req.path.startsWith("/uploads")) return next();
+    if (path.extname(req.path)) return next();
+    return res.sendFile(path.join(FRONTEND_DIST, "index.html"));
+  });
+}
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("Missing JWT_SECRET in .env");
@@ -908,6 +926,629 @@ app.delete("/subprojects/:id", requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// ======================
+//   WORK ORDERS
+// ======================
+app.get("/work-orders", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  let targetCompanyId = companyId;
+  if (!targetCompanyId && allowAll && req.query.company_id) {
+    targetCompanyId = req.query.company_id;
+  }
+
+  const where = [];
+  const params = [];
+  if (targetCompanyId) {
+    where.push("wo.company_id = ?");
+    params.push(targetCompanyId);
+  }
+
+  const sql = `
+    SELECT
+      wo.*,
+      p.name AS project_name,
+      (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.started_by) AS started_by_name,
+      (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.closed_by) AS closed_by_name,
+      (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.attested_by) AS attested_by_name,
+      (SELECT COUNT(1) FROM work_order_comments c WHERE c.work_order_id = wo.id) AS comments_count,
+      GROUP_CONCAT(u.id) AS assignee_ids,
+      GROUP_CONCAT(u.first_name || ' ' || u.last_name) AS assignee_names,
+      GROUP_CONCAT(u.email) AS assignee_emails
+    FROM work_orders wo
+    LEFT JOIN projects p ON p.id = wo.project_id AND p.company_id = wo.company_id
+    LEFT JOIN work_order_assignees woa ON woa.work_order_id = wo.id
+    LEFT JOIN users u ON u.id = woa.user_id
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    GROUP BY wo.id
+    ORDER BY wo.created_at DESC
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /work-orders:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    const result = (rows || []).map((row) => {
+      const ids = row.assignee_ids ? String(row.assignee_ids).split(",") : [];
+      const names = row.assignee_names ? String(row.assignee_names).split(",") : [];
+      const emails = row.assignee_emails ? String(row.assignee_emails).split(",") : [];
+      const assignees = ids.map((id, index) => ({
+        id: Number(id),
+        full_name: names[index] || "",
+        email: emails[index] || "",
+      }));
+      return { ...row, assignees };
+    });
+    res.json(result);
+  });
+});
+
+// User view: assigned work orders
+app.get("/work-orders/assigned", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+  const sql = `
+    SELECT
+      wo.*,
+      p.name AS project_name,
+      (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.started_by) AS started_by_name,
+      (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.closed_by) AS closed_by_name,
+      (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.attested_by) AS attested_by_name,
+      (SELECT COUNT(1) FROM work_order_comments c WHERE c.work_order_id = wo.id) AS comments_count,
+      GROUP_CONCAT(u.id) AS assignee_ids,
+      GROUP_CONCAT(u.first_name || ' ' || u.last_name) AS assignee_names,
+      GROUP_CONCAT(u.email) AS assignee_emails
+    FROM work_orders wo
+    JOIN work_order_assignees woa ON woa.work_order_id = wo.id
+    LEFT JOIN projects p ON p.id = wo.project_id AND p.company_id = wo.company_id
+    LEFT JOIN work_order_assignees woa2 ON woa2.work_order_id = wo.id
+    LEFT JOIN users u ON u.id = woa2.user_id
+    WHERE wo.company_id = ? AND woa.user_id = ?
+    GROUP BY wo.id
+    ORDER BY wo.created_at DESC
+  `;
+
+  db.all(sql, [companyId, userId], (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /work-orders/assigned:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    const result = (rows || []).map((row) => {
+      const ids = row.assignee_ids ? String(row.assignee_ids).split(",") : [];
+      const names = row.assignee_names ? String(row.assignee_names).split(",") : [];
+      const emails = row.assignee_emails ? String(row.assignee_emails).split(",") : [];
+      const assignees = ids.map((id, index) => ({
+        id: Number(id),
+        full_name: names[index] || "",
+        email: emails[index] || "",
+      }));
+      return { ...row, assignees };
+    });
+    res.json(result);
+  });
+});
+
+app.post("/work-orders", requireAuth, requireAdmin, (req, res) => {
+  const scopedCompanyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  let companyId = scopedCompanyId;
+
+  if (!companyId && allowAll && req.body?.company_id) {
+    companyId = req.body.company_id;
+  }
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const {
+    title,
+    description = null,
+    instructions = null,
+    project_id = null,
+    priority = "medium",
+    deadline = null,
+    address = null,
+    contact_name = null,
+    contact_phone = null,
+    status = "not_started",
+    assignees = [],
+  } = req.body || {};
+
+  if (!title || !String(title).trim()) {
+    return res.status(400).json({ error: "title required" });
+  }
+
+  const cleanPriority = ["low", "medium", "high"].includes(String(priority).toLowerCase())
+    ? String(priority).toLowerCase()
+    : "medium";
+  const cleanStatus = ["not_started", "in_progress", "paused", "closed", "attested", "active"].includes(
+    String(status).toLowerCase()
+  )
+    ? String(status).toLowerCase() === "active"
+      ? "not_started"
+      : String(status).toLowerCase()
+    : "not_started";
+
+  const parsedAssignees = Array.isArray(assignees)
+    ? assignees.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+    : [];
+  const uniqueAssignees = Array.from(new Set(parsedAssignees));
+
+  const orderYear = (() => {
+    if (deadline) {
+      const parsed = new Date(deadline);
+      if (!Number.isNaN(parsed.getTime())) return parsed.getFullYear();
+    }
+    return new Date().getFullYear();
+  })();
+
+  const continueInsert = () => {
+    db.get(
+      `SELECT MAX(order_number) AS max_number FROM work_orders WHERE company_id = ? AND order_year = ?`,
+      [companyId, orderYear],
+      (err, row) => {
+        if (err) {
+          console.error("DB-fel vid SELECT work order number:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        const nextNumber = Number(row?.max_number || 0) + 1;
+
+        db.run(
+          `INSERT INTO work_orders (
+            company_id, order_number, order_year, title, description, instructions, project_id, priority, deadline,
+            address, contact_name, contact_phone, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            companyId,
+            nextNumber,
+            orderYear,
+            String(title).trim(),
+            description ? String(description).trim() : null,
+            instructions ? String(instructions).trim() : null,
+            project_id || null,
+            cleanPriority,
+            deadline || null,
+            address ? String(address).trim() : null,
+            contact_name ? String(contact_name).trim() : null,
+            contact_phone ? String(contact_phone).trim() : null,
+            cleanStatus,
+          ],
+          function (iErr) {
+            if (iErr) {
+              console.error("DB-fel vid INSERT work_order:", iErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            const workOrderId = this.lastID;
+
+            const insertAssignees = () => {
+              if (!uniqueAssignees.length) return finish(workOrderId, []);
+
+              const values = uniqueAssignees.map((userId) => [workOrderId, userId]);
+              const placeholders = values.map(() => "(?, ?)").join(", ");
+              const flatValues = values.flat();
+
+              db.run(
+                `INSERT INTO work_order_assignees (work_order_id, user_id) VALUES ${placeholders}`,
+                flatValues,
+                (aErr) => {
+                  if (aErr) {
+                    console.error("DB-fel vid INSERT work_order_assignees:", aErr);
+                    return res.status(500).json({ error: "DB error" });
+                  }
+                  finish(workOrderId, uniqueAssignees);
+                }
+              );
+            };
+
+            const finish = (id, assigneeIds) => {
+              db.get(
+                `SELECT wo.*, p.name AS project_name
+                 FROM work_orders wo
+                 LEFT JOIN projects p ON p.id = wo.project_id AND p.company_id = wo.company_id
+                 WHERE wo.id = ?`,
+                [id],
+                (gErr, row) => {
+                  if (gErr || !row) {
+                    if (gErr) console.error("DB-fel vid SELECT work_order:", gErr);
+                    return res.status(500).json({ error: "DB error" });
+                  }
+                  if (!assigneeIds.length) return res.json({ ...row, assignees: [] });
+                  const placeholders = assigneeIds.map(() => "?").join(", ");
+                  db.all(
+                    `SELECT id, (first_name || ' ' || last_name) AS full_name, email FROM users WHERE id IN (${placeholders})`,
+                    assigneeIds,
+                    (uErr, uRows) => {
+                      if (uErr) {
+                        console.error("DB-fel vid SELECT assignees:", uErr);
+                        return res.status(500).json({ error: "DB error" });
+                      }
+                      res.json({ ...row, assignees: uRows || [] });
+                    }
+                  );
+                }
+              );
+            };
+
+            insertAssignees();
+          }
+        );
+      }
+    );
+  };
+
+  const validateAssignees = () => {
+    if (!uniqueAssignees.length) return continueInsert();
+    const placeholders = uniqueAssignees.map(() => "?").join(", ");
+    db.all(
+      `SELECT id FROM users WHERE id IN (${placeholders}) AND company_id = ?`,
+      [...uniqueAssignees, companyId],
+      (uErr, rows) => {
+        if (uErr) {
+          console.error("DB-fel vid SELECT assignees validation:", uErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if ((rows || []).length !== uniqueAssignees.length) {
+          return res.status(400).json({ error: "Invalid assignees" });
+        }
+        continueInsert();
+      }
+    );
+  };
+
+  if (project_id) {
+    db.get(
+      `SELECT id FROM projects WHERE id = ? AND company_id = ?`,
+      [project_id, companyId],
+      (pErr, pRow) => {
+        if (pErr) {
+          console.error("DB-fel vid SELECT project for work_order:", pErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if (!pRow) return res.status(400).json({ error: "Invalid project_id" });
+        validateAssignees();
+      }
+    );
+  } else {
+    validateAssignees();
+  }
+});
+
+// Start work order (assigned user)
+app.post("/work-orders/:id/start", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+
+  db.get(
+    `SELECT wo.id, wo.company_id, wo.status FROM work_orders wo WHERE wo.id = ? AND wo.company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid SELECT work_order start:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Not found" });
+
+      db.get(
+        `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+        [id, userId],
+        (aErr, aRow) => {
+          if (aErr) {
+            console.error("DB-fel vid SELECT work_order_assignees start:", aErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          if (!aRow) return res.status(403).json({ error: "Forbidden" });
+
+          db.run(
+            `UPDATE work_orders
+             SET status = 'in_progress',
+                 started_at = COALESCE(started_at, datetime('now')),
+                 started_by = COALESCE(started_by, ?),
+                 updated_at = datetime('now')
+             WHERE id = ?`,
+            [userId, id],
+            function (uErr) {
+              if (uErr) {
+                console.error("DB-fel vid UPDATE work_order start:", uErr);
+                return res.status(500).json({ error: "DB error" });
+              }
+              res.json({ success: true });
+            }
+          );
+        }
+      );
+    }
+  );
+});
+
+// Pause work order (assigned user)
+app.post("/work-orders/:id/pause", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order pause:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row || String(row.company_id) !== String(companyId)) return res.status(404).json({ error: "Not found" });
+
+    db.get(
+      `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+      [id, userId],
+      (aErr, aRow) => {
+        if (aErr) {
+          console.error("DB-fel vid SELECT work_order_assignees pause:", aErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if (!aRow) return res.status(403).json({ error: "Forbidden" });
+
+        db.run(
+          `UPDATE work_orders
+           SET status = 'paused',
+               updated_at = datetime('now')
+           WHERE id = ?`,
+          [id],
+          function (uErr) {
+            if (uErr) {
+              console.error("DB-fel vid UPDATE work_order pause:", uErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.json({ success: true });
+          }
+        );
+      }
+    );
+  });
+});
+
+// Save report text (assigned user)
+app.post("/work-orders/:id/report", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+  const reportText = String(req.body?.report_text || "").trim();
+  if (!reportText) return res.status(400).json({ error: "report_text required" });
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order report:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row || String(row.company_id) !== String(companyId)) return res.status(404).json({ error: "Not found" });
+
+    db.get(
+      `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+      [id, userId],
+      (aErr, aRow) => {
+        if (aErr) {
+          console.error("DB-fel vid SELECT work_order_assignees report:", aErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if (!aRow) return res.status(403).json({ error: "Forbidden" });
+
+        db.run(
+          `UPDATE work_orders
+           SET report_text = ?,
+               report_updated_at = datetime('now'),
+               report_updated_by = ?,
+               updated_at = datetime('now')
+           WHERE id = ?`,
+          [reportText, userId, id],
+          function (uErr) {
+            if (uErr) {
+              console.error("DB-fel vid UPDATE work_order report:", uErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.json({ success: true });
+          }
+        );
+      }
+    );
+  });
+});
+
+// Close work order (assigned user)
+app.post("/work-orders/:id/close", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+  const reportText = String(req.body?.report_text || "").trim();
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order close:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row || String(row.company_id) !== String(companyId)) return res.status(404).json({ error: "Not found" });
+
+    db.get(
+      `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+      [id, userId],
+      (aErr, aRow) => {
+        if (aErr) {
+          console.error("DB-fel vid SELECT work_order_assignees close:", aErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if (!aRow) return res.status(403).json({ error: "Forbidden" });
+
+        db.run(
+          `UPDATE work_orders
+           SET status = 'closed',
+               report_text = COALESCE(?, report_text),
+               report_updated_at = datetime('now'),
+               report_updated_by = ?,
+               closed_at = datetime('now'),
+               closed_by = ?,
+               updated_at = datetime('now')
+           WHERE id = ?`,
+          [reportText || null, userId, userId, id],
+          function (uErr) {
+            if (uErr) {
+              console.error("DB-fel vid UPDATE work_order close:", uErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.json({ success: true });
+          }
+        );
+      }
+    );
+  });
+});
+
+// Attest work order (admin)
+app.post("/work-orders/:id/attest", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  const id = req.params.id;
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order attest:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row || String(row.company_id) !== String(companyId)) return res.status(404).json({ error: "Not found" });
+
+    db.run(
+      `UPDATE work_orders
+       SET status = 'attested',
+           attested_at = datetime('now'),
+           attested_by = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`,
+      [userId, id],
+      function (uErr) {
+        if (uErr) {
+          console.error("DB-fel vid UPDATE work_order attest:", uErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json({ success: true });
+      }
+    );
+  });
+});
+
+// Comments
+app.get("/work-orders/:id/comments", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order comments:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!allowAll && String(row.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+
+    const isAdminUser = isAdminRole(req);
+    if (!isAdminUser) {
+      db.get(
+        `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+        [id, userId],
+        (aErr, aRow) => {
+          if (aErr) {
+            console.error("DB-fel vid SELECT work_order_assignees comments:", aErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          if (!aRow) return res.status(403).json({ error: "Forbidden" });
+          fetchComments();
+        }
+      );
+    } else {
+      fetchComments();
+    }
+
+    function fetchComments() {
+      db.all(
+        `SELECT c.id, c.comment, c.created_at, u.id AS user_id, (u.first_name || ' ' || u.last_name) AS full_name, u.email
+         FROM work_order_comments c
+         LEFT JOIN users u ON u.id = c.user_id
+         WHERE c.work_order_id = ?
+         ORDER BY c.created_at DESC`,
+        [id],
+        (cErr, rows) => {
+          if (cErr) {
+            console.error("DB-fel vid SELECT work_order_comments:", cErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          res.json(rows || []);
+        }
+      );
+    }
+  });
+});
+
+app.post("/work-orders/:id/comments", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+  const comment = String(req.body?.comment || "").trim();
+  if (!comment) return res.status(400).json({ error: "comment required" });
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order comment:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!allowAll && String(row.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+
+    const isAdminUser = isAdminRole(req);
+    if (!isAdminUser) {
+      db.get(
+        `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+        [id, userId],
+        (aErr, aRow) => {
+          if (aErr) {
+            console.error("DB-fel vid SELECT work_order_assignees comment:", aErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          if (!aRow) return res.status(403).json({ error: "Forbidden" });
+          insertComment();
+        }
+      );
+    } else {
+      insertComment();
+    }
+
+    function insertComment() {
+      db.run(
+        `INSERT INTO work_order_comments (work_order_id, user_id, comment) VALUES (?, ?, ?)`,
+        [id, userId, comment],
+        function (iErr) {
+          if (iErr) {
+            console.error("DB-fel vid INSERT work_order_comments:", iErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          res.json({ success: true });
+        }
+      );
+    }
+  });
+});
+
 // Login med email + lösenord + company_id (valfritt)
 app.post("/login", (req, res) => {
   const { email, password, company_id } = req.body;
@@ -916,7 +1557,7 @@ app.post("/login", (req, res) => {
     return res.status(400).json({ error: "E‑post och lösenord krävs." });
   }
 
-  let sql = `SELECT * FROM users WHERE email = ?`;
+  let sql = `SELECT * FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)`;
   const params = [email];
 
   if (company_id) {
@@ -967,7 +1608,7 @@ app.post("/auth/login", (req, res) => {
   const { email, password, company_id } = req.body || {};
 
   db.get(
-    `SELECT id, email, password AS password_hash, role, company_id, (first_name || ' ' || last_name) AS full_name FROM users WHERE email = ?`,
+    `SELECT id, email, password AS password_hash, role, company_id, (first_name || ' ' || last_name) AS full_name FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)`,
     [email],
     async (err, user) => {
       if (err || !user) return res.status(401).json({ error: "Invalid credentials" });
@@ -1090,13 +1731,17 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
   const companyId = getScopedCompanyId(req);
   const allowAll = req.company_scope_all === true;
   if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+  const includeInactive = ["1", "true", "yes"].includes(String(req.query.include_inactive || "").toLowerCase());
 
+  const baseWhere = allowAll ? "1=1" : "company_id = ?";
+  const activeWhere = includeInactive ? "" : " AND (is_active IS NULL OR is_active = 1)";
   const sql = `
     SELECT
       id,
       email,
       role,
       company_id,
+      is_active,
       (first_name || ' ' || last_name) as full_name,
       first_name,
       last_name,
@@ -1105,11 +1750,11 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
       monthly_salary,
       emergency_contact,
       employee_type,
-      employee_number,
-      tax_table,
-      created_at
+     employee_number,
+     tax_table,
+     created_at
      FROM users
-     ${allowAll ? "" : "WHERE company_id = ?"}
+     WHERE ${baseWhere}${activeWhere}
      ORDER BY id DESC`;
   const params = allowAll ? [] : [companyId];
 
@@ -1332,11 +1977,13 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     }
 
     db.run(
-      `DELETE FROM users WHERE id = ?`,
+      `UPDATE users
+       SET is_active = 0
+       WHERE id = ?`,
       [id],
       function (err) {
         if (err) {
-          console.error("DB-fel vid DELETE /admin/users/:id:", err);
+          console.error("DB-fel vid SOFT DELETE /admin/users/:id:", err);
           return res.status(500).json({ error: "Kunde inte ta bort användare." });
         }
 
@@ -1347,6 +1994,36 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
         res.json({ success: true });
       }
     );
+  });
+});
+
+// Återaktivera användare (admin)
+app.post("/admin/users/:id/reactivate", requireAuth, requireAdmin, (req, res) => {
+  const { id } = req.params;
+
+  db.get(`SELECT company_id FROM users WHERE id = ?`, [id], (gErr, row) => {
+    if (gErr) {
+      console.error("DB-fel vid SELECT users for REACTIVATE:", gErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row) return res.status(404).json({ error: "Användaren hittades inte." });
+
+    const actorRole = (req.user.role || "").toLowerCase();
+    const scopedCompany = getScopedCompanyId(req);
+    if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    db.run(`UPDATE users SET is_active = 1 WHERE id = ?`, [id], function (err) {
+      if (err) {
+        console.error("DB-fel vid REACTIVATE /admin/users/:id:", err);
+        return res.status(500).json({ error: "Kunde inte aktivera användare." });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: "Användaren hittades inte." });
+      }
+      res.json({ success: true });
+    });
   });
 });
 
@@ -1401,7 +2078,7 @@ app.get("/contacts", requireAuth, (req, res) => {
       tax_table,
       created_at
      FROM users
-     WHERE company_id = ?
+     WHERE company_id = ? AND (is_active IS NULL OR is_active = 1)
      ORDER BY first_name, last_name`,
     [companyId],
     (err, rows) => {
@@ -2536,6 +3213,9 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         status,
         allowance_type,
         allowance_amount,
+        deviation_title,
+        deviation_description,
+        deviation_status,
         travel_time_hours,
         save_travel_compensation,
         overtime_weekday_hours,
@@ -3864,11 +4544,6 @@ app.delete("/welding_reports/:id", requireAuth, (req, res) => {
   });
 });
 
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Opero backend kör på http://localhost:${PORT}`);
-});
-
 // DELETE a material row for a time-entry (owner or admin)
 app.delete("/time-entries/:id/materials/:materialRowId", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
@@ -3909,4 +4584,9 @@ app.delete("/time-entries/:id/materials/:materialRowId", requireAuth, (req, res)
       );
     });
   });
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+  console.log(`Opero backend kör på http://localhost:${PORT}`);
 });

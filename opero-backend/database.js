@@ -122,6 +122,13 @@ db.serialize(() => {
         else console.log('Kolumnen "tax_table" har lagts till i users.');
       });
     }
+    const hasIsActive = columns.some((col) => col.name === "is_active");
+    if (!hasIsActive) {
+      db.run(`ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till is_active:", alterErr);
+        else console.log('Kolumnen "is_active" har lagts till i users.');
+      });
+    }
   });
 
   // --- Job roles (Yrkesroller) per företag ---
@@ -368,6 +375,131 @@ db.serialize(() => {
       FOREIGN KEY (material_type_id) REFERENCES material_types(id)
     );
   `);
+
+  // --- Work orders ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS work_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      order_number INTEGER NOT NULL,
+      order_year INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      instructions TEXT,
+      project_id INTEGER,
+      priority TEXT DEFAULT 'medium',
+      deadline TEXT,
+      address TEXT,
+      contact_name TEXT,
+      contact_phone TEXT,
+      status TEXT DEFAULT 'active',
+      report_text TEXT,
+      report_updated_at TEXT,
+      report_updated_by INTEGER,
+      started_at TEXT,
+      started_by INTEGER,
+      closed_at TEXT,
+      closed_by INTEGER,
+      attested_at TEXT,
+      attested_by INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      UNIQUE (company_id, order_year, order_number)
+    );
+  `);
+
+  db.all(`PRAGMA table_info(work_orders);`, (err, cols) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för work_orders:", err);
+      return;
+    }
+    const hasReportText = cols.some((c) => c.name === "report_text");
+    const hasReportUpdatedAt = cols.some((c) => c.name === "report_updated_at");
+    const hasReportUpdatedBy = cols.some((c) => c.name === "report_updated_by");
+    const hasStartedAt = cols.some((c) => c.name === "started_at");
+    const hasStartedBy = cols.some((c) => c.name === "started_by");
+    const hasClosedAt = cols.some((c) => c.name === "closed_at");
+    const hasClosedBy = cols.some((c) => c.name === "closed_by");
+    const hasAttestedAt = cols.some((c) => c.name === "attested_at");
+    const hasAttestedBy = cols.some((c) => c.name === "attested_by");
+
+    if (!hasReportText) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN report_text TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till report_text:", e);
+      });
+    }
+    if (!hasReportUpdatedAt) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN report_updated_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till report_updated_at:", e);
+      });
+    }
+    if (!hasReportUpdatedBy) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN report_updated_by INTEGER;`, (e) => {
+        if (e) console.error("Kunde inte lägga till report_updated_by:", e);
+      });
+    }
+    if (!hasStartedAt) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN started_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till started_at:", e);
+      });
+    }
+    if (!hasStartedBy) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN started_by INTEGER;`, (e) => {
+        if (e) console.error("Kunde inte lägga till started_by:", e);
+      });
+    }
+    if (!hasClosedAt) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN closed_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till closed_at:", e);
+      });
+    }
+    if (!hasClosedBy) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN closed_by INTEGER;`, (e) => {
+        if (e) console.error("Kunde inte lägga till closed_by:", e);
+      });
+    }
+    if (!hasAttestedAt) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN attested_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till attested_at:", e);
+      });
+    }
+    if (!hasAttestedBy) {
+      db.run(`ALTER TABLE work_orders ADD COLUMN attested_by INTEGER;`, (e) => {
+        if (e) console.error("Kunde inte lägga till attested_by:", e);
+      });
+    }
+  });
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS work_order_assignees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_order_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      UNIQUE (work_order_id, user_id)
+    );
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS work_order_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_order_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      comment TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_work_orders_company_id ON work_orders(company_id);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_work_orders_year ON work_orders(order_year);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_work_order_assignees_work_order_id ON work_order_assignees(work_order_id);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_work_order_comments_work_order_id ON work_order_comments(work_order_id);`);
 
   // --- Deviation reports (linked to tidrapporter) ---
   db.run(`
