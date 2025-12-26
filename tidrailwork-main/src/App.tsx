@@ -16,6 +16,7 @@ import ChangePassword from "./pages/ChangePassword";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Contacts from "./pages/Contacts";
+import TdokAi from "./pages/TdokAi";
 import AdminProjects from "./pages/admin/Projects";
 import AdminUsers from "./pages/admin/Users";
 import AdminJobRoles from "./pages/admin/JobRoles";
@@ -131,6 +132,16 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <Contacts />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/tdok-ai"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <TdokAi />
                     </Layout>
                   </ProtectedRoute>
                 }

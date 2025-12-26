@@ -52,6 +52,7 @@ const userItems = [
   { title: "Avvikelser", url: "/deviations", icon: AlertTriangle },
   { title: "Lönöversikt", url: "/salary-overview", icon: DollarSign },
   { title: "Kontakter", url: "/contacts", icon: Contact },
+  { title: "TDOK AI", url: "/tdok-ai", icon: FileText },
   { title: "Byt lösenord", url: "/change-password", icon: Key },
 ];
 
