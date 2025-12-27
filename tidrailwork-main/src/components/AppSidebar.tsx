@@ -42,6 +42,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { UserImpersonationSelector } from "./UserImpersonationSelector";
+import { SuperAdminCompanySwitcher } from "./SuperAdminCompanySwitcher";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const userItems = [
@@ -190,6 +191,10 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+        )}
+
+        {!isCollapsed && isSuperAdmin && (
+          <SuperAdminCompanySwitcher />
         )}
 
         {!isCollapsed && isAdmin && (

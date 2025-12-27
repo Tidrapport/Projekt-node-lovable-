@@ -17,6 +17,7 @@ export type MeResponse = {
   user: AuthUser;
   role: AuthUser["role"];
   company_id: number;
+  home_company_id?: number;
   is_admin: boolean;
   is_super_admin: boolean;
   impersonated: boolean;

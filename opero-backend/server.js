@@ -47,6 +47,21 @@ if (HAS_FRONTEND_DIST) {
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("Missing JWT_SECRET in .env");
 
+const SUPERADMIN_COMPANY_NAMES = [
+  process.env.SUPERADMIN_COMPANY_NAME || "Opero Systems AB",
+  process.env.SUPERADMIN_COMPANY_ALT_NAME || "Opero-System AB",
+].filter((name, index, arr) => name && arr.indexOf(name) === index);
+
+function resolveSuperAdminCompanyId(callback) {
+  if (!SUPERADMIN_COMPANY_NAMES.length) return callback(null, null);
+  const where = SUPERADMIN_COMPANY_NAMES.map(() => "LOWER(name) = LOWER(?)").join(" OR ");
+  const sql = `SELECT id, name FROM companies WHERE ${where} ORDER BY id LIMIT 1`;
+  db.get(sql, SUPERADMIN_COMPANY_NAMES, (err, row) => {
+    if (err) return callback(err);
+    callback(null, row ? row.id : null);
+  });
+}
+
 const KNOWLEDGE_DIR = path.join(__dirname, "tdok");
 const KNOWLEDGE_EXTS = new Set([".txt", ".md", ".markdown"]);
 const MAX_CHUNK_CHARS = 1200;
@@ -1998,26 +2013,42 @@ app.post("/auth/login", (req, res) => {
       const ok = await bcrypt.compare(password, user.password_hash);
       if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
-      if (company_id && String(company_id) !== String(user.company_id) && (user.role || "") !== "super_admin") {
+      const role = (user.role || "").toLowerCase();
+      const isSuperAdmin = role === "super_admin";
+      if (company_id && String(company_id) !== String(user.company_id) && !isSuperAdmin) {
         return res.status(403).json({ error: "Wrong company" });
       }
 
-      const token = jwt.sign(
-        { user_id: user.id, role: user.role, company_id: user.company_id },
-        JWT_SECRET,
-        { expiresIn: "12h" }
-      );
+      const finalizeLogin = (companyId) => {
+        const token = jwt.sign(
+          { user_id: user.id, role: user.role, company_id: companyId },
+          JWT_SECRET,
+          { expiresIn: "12h" }
+        );
 
-      res.json({
-        access_token: token,
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          company_id: user.company_id,
-          full_name: user.full_name
-        }
-      });
+        res.json({
+          access_token: token,
+          user: {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            company_id: companyId,
+            full_name: user.full_name
+          }
+        });
+      };
+
+      if (isSuperAdmin) {
+        resolveSuperAdminCompanyId((companyErr, homeCompanyId) => {
+          if (companyErr) {
+            console.error("DB-fel vid resolveSuperAdminCompanyId:", companyErr);
+          }
+          finalizeLogin(homeCompanyId || user.company_id);
+        });
+        return;
+      }
+
+      finalizeLogin(user.company_id);
     }
   );
 });
@@ -2096,13 +2127,35 @@ app.post("/superadmin/ai", requireAuth, requireSuperAdmin, async (req, res) => {
 });
 
 app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, res) => {
-  // Return a normal token for the super_admin (without impersonated)
-  const token = jwt.sign(
-    { user_id: req.user.user_id, role: "super_admin", company_id: req.user.company_id, impersonated: false },
-    JWT_SECRET,
-    { expiresIn: "12h" }
-  );
-  return res.json({ access_token: token });
+  const superAdminId = req.user.user_id || req.user.id;
+  if (!superAdminId) return res.status(401).json({ error: "Unauthorized" });
+
+  resolveSuperAdminCompanyId((companyErr, homeCompanyId) => {
+    if (companyErr) {
+      console.error("DB-fel vid resolveSuperAdminCompanyId:", companyErr);
+    }
+    if (homeCompanyId) {
+      const token = jwt.sign(
+        { user_id: superAdminId, role: "super_admin", company_id: homeCompanyId, impersonated: false },
+        JWT_SECRET,
+        { expiresIn: "12h" }
+      );
+      return res.json({ access_token: token });
+    }
+
+    db.get("SELECT company_id FROM users WHERE id = ?", [superAdminId], (err, row) => {
+      if (err || !row) {
+        console.error("DB-fel vid POST /superadmin/stop-impersonate:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      const token = jwt.sign(
+        { user_id: superAdminId, role: "super_admin", company_id: row.company_id, impersonated: false },
+        JWT_SECRET,
+        { expiresIn: "12h" }
+      );
+      return res.json({ access_token: token });
+    });
+  });
 });
 
 // ======================
@@ -2499,14 +2552,38 @@ app.get("/auth/me", requireAuth, async (req, res) => {
     (err, user) => {
       if (err || !user) return res.status(404).json({ error: "User not found" });
 
-      res.json({
-        user,
-        role: user.role,
-        company_id: user.company_id,
-        is_admin: (user.role || "").toLowerCase() === "admin" || (user.role || "").toLowerCase() === "super_admin",
-        is_super_admin: (user.role || "").toLowerCase() === "super_admin",
-        impersonated: !!req.user.impersonated
-      });
+      const isImpersonated = !!req.user.impersonated;
+      const role = (user.role || "").toLowerCase();
+      const isSuperAdmin = role === "super_admin";
+      const tokenCompanyId = req.user.company_id || user.company_id;
+
+      const respond = (homeCompanyId) => {
+        const effectiveCompanyId = isSuperAdmin
+          ? (isImpersonated ? tokenCompanyId : homeCompanyId)
+          : user.company_id;
+
+        res.json({
+          user,
+          role: user.role,
+          company_id: effectiveCompanyId,
+          home_company_id: homeCompanyId,
+          is_admin: role === "admin" || role === "super_admin",
+          is_super_admin: isSuperAdmin,
+          impersonated: isImpersonated
+        });
+      };
+
+      if (isSuperAdmin) {
+        resolveSuperAdminCompanyId((companyErr, homeCompanyId) => {
+          if (companyErr) {
+            console.error("DB-fel vid resolveSuperAdminCompanyId:", companyErr);
+          }
+          respond(homeCompanyId || user.company_id);
+        });
+        return;
+      }
+
+      respond(user.company_id);
     }
   );
 });

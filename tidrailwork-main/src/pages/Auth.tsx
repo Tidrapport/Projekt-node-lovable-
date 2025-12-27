@@ -99,7 +99,7 @@ const Auth = () => {
   // Redirect if already logged in
   useEffect(() => {
     if (user) {
-      navigate("/");
+      navigate(user.role === "super_admin" ? "/superadmin" : "/");
     }
   }, [user, navigate]);
 
@@ -159,9 +159,9 @@ const Auth = () => {
 
       // Use Auth context to login (stores token)
       await login(email.trim(), password, companyId);
-
+      const me = await getMe();
       toast.success("Inloggad!");
-      navigate("/");
+      navigate(me?.user?.role === "super_admin" ? "/superadmin" : "/");
     } catch (error: any) {
       console.error("Login error:", error);
       if (error.message === "Invalid login credentials") {
