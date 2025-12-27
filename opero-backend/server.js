@@ -2163,8 +2163,10 @@ app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, r
 // ======================
 // Hämta användare (admin) – scoped per company via getScopedCompanyId
 app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
-  const companyId = getScopedCompanyId(req);
-  const allowAll = req.company_scope_all === true;
+  const actorRole = (req.user.role || "").toLowerCase();
+  const wantsAll = actorRole === "super_admin" && ["1", "true", "yes", "all"].includes(String(req.query.all || req.query.company_id || "").toLowerCase());
+  const companyId = wantsAll ? null : getScopedCompanyId(req);
+  const allowAll = wantsAll || req.company_scope_all === true;
   if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
   const includeInactive = ["1", "true", "yes"].includes(String(req.query.include_inactive || "").toLowerCase());
 

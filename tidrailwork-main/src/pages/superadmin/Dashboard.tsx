@@ -29,6 +29,13 @@ type AdminUser = {
   is_active?: number | null;
 };
 
+type BillingUser = {
+  id: string | number;
+  company_id: string | number | null;
+  role?: string | null;
+  created_at?: string | null;
+};
+
 const SuperAdminDashboard = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +60,8 @@ const SuperAdminDashboard = () => {
   const [passwordDialogTitle, setPasswordDialogTitle] = useState("");
   const [passwordDialogDescription, setPasswordDialogDescription] = useState("");
   const [passwordDialogValue, setPasswordDialogValue] = useState("");
+
+  const [billingUsers, setBillingUsers] = useState<BillingUser[]>([]);
 
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -79,17 +88,16 @@ const SuperAdminDashboard = () => {
 
   const fetchCompanies = async () => {
     try {
-      const companiesData = await apiFetch(`/companies`);
-      const withCounts = await Promise.all(
-        (companiesData || []).map(async (company: any) => {
-          try {
-            const users = await apiFetch(`/admin/users?company_id=${company.id}`);
-            return { ...company, user_count: (users || []).length };
-          } catch {
-            return { ...company, user_count: 0 };
-          }
-        })
-      );
+      const [companiesData, usersData] = await Promise.all([
+        apiFetch<Company[]>(`/companies`),
+        apiFetch<BillingUser[]>(`/admin/users?include_inactive=1&all=1`),
+      ]);
+      const users = usersData || [];
+      setBillingUsers(users);
+      const withCounts = (companiesData || []).map((company) => ({
+        ...company,
+        user_count: users.filter((u) => String(u.company_id) === String(company.id)).length,
+      }));
       setCompanies(withCounts);
     } catch (error) {
       console.error("Error fetching companies:", error);
@@ -231,6 +239,92 @@ const SuperAdminDashboard = () => {
     toast.success("Företagskod kopierad");
   };
 
+  const parseSqlDate = (value?: string | null) => {
+    if (!value) return null;
+    const normalized = value.includes("T") ? value : value.replace(" ", "T");
+    const date = new Date(normalized);
+    if (Number.isNaN(date.valueOf())) return null;
+    return date;
+  };
+
+  const monthLabel = new Date().toLocaleDateString("sv-SE", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const billingSummary = (() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const summaryMap = new Map<
+      string,
+      {
+        company_id: string;
+        company_name: string;
+        total: number;
+        fullPrice: number;
+        discounted: number;
+        roles: { admin: number; user: number; other: number };
+      }
+    >();
+
+    companies.forEach((company) => {
+      summaryMap.set(String(company.id), {
+        company_id: String(company.id),
+        company_name: company.name,
+        total: 0,
+        fullPrice: 0,
+        discounted: 0,
+        roles: { admin: 0, user: 0, other: 0 },
+      });
+    });
+
+    billingUsers.forEach((user) => {
+      if (!user.company_id) return;
+      const role = String(user.role || "user").toLowerCase();
+      if (role === "super_admin") return;
+      const createdAt = parseSqlDate(user.created_at);
+      if (!createdAt) return;
+      if (createdAt.getFullYear() !== currentYear || createdAt.getMonth() !== currentMonth) return;
+
+      const key = String(user.company_id);
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          company_id: key,
+          company_name: `Bolag ${key}`,
+          total: 0,
+          fullPrice: 0,
+          discounted: 0,
+          roles: { admin: 0, user: 0, other: 0 },
+        });
+      }
+      const entry = summaryMap.get(key)!;
+      entry.total += 1;
+      if (role === "admin") {
+        entry.fullPrice += 1;
+      } else if (createdAt.getDate() > 15) {
+        entry.discounted += 1;
+      } else {
+        entry.fullPrice += 1;
+      }
+      if (role === "admin") entry.roles.admin += 1;
+      else if (role === "user") entry.roles.user += 1;
+      else entry.roles.other += 1;
+    });
+
+    return Array.from(summaryMap.values()).sort((a, b) => a.company_name.localeCompare(b.company_name, "sv-SE"));
+  })();
+
+  const formatBillable = (value: number) => {
+    if (Number.isNaN(value)) return "0";
+    return value % 1 === 0 ? String(Math.trunc(value)) : value.toFixed(1);
+  };
+
+  const totalNewUsers = billingSummary.reduce((sum, item) => sum + item.total, 0);
+  const totalFullPrice = billingSummary.reduce((sum, item) => sum + item.fullPrice, 0);
+  const totalDiscounted = billingSummary.reduce((sum, item) => sum + item.discounted, 0);
+  const totalBillable = billingSummary.reduce((sum, item) => sum + item.fullPrice + item.discounted * 0.5, 0);
+
   const sendAi = async () => {
     const content = aiInput.trim();
     if (!content || aiLoading) return;
@@ -289,37 +383,67 @@ const SuperAdminDashboard = () => {
               </Button>
             </DialogTrigger>
             <DialogContent className="bg-slate-950 text-slate-100 border-slate-800">
-              <DialogHeader>
-                <DialogTitle>Skapa nytt företag + admin</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
+            <DialogHeader>
+              <DialogTitle className="text-blue-200">Skapa nytt företag + admin</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-blue-200">Företagsnamn</Label>
+                <Input
+                  value={newCompanyName}
+                  onChange={(e) => setNewCompanyName(e.target.value)}
+                  placeholder="Företag AB"
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Faktura-email</Label>
+                <Input
+                  type="email"
+                  value={newCompanyBillingEmail}
+                  onChange={(e) => setNewCompanyBillingEmail(e.target.value)}
+                  placeholder="faktura@foretag.se"
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>Företagsnamn</Label>
-                  <Input value={newCompanyName} onChange={(e) => setNewCompanyName(e.target.value)} placeholder="Företag AB" />
+                  <Label className="text-blue-200">Admin förnamn</Label>
+                  <Input
+                    value={adminFirstName}
+                    onChange={(e) => setAdminFirstName(e.target.value)}
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
                 </div>
                 <div className="space-y-2">
-                  <Label>Faktura-email</Label>
-                  <Input type="email" value={newCompanyBillingEmail} onChange={(e) => setNewCompanyBillingEmail(e.target.value)} placeholder="faktura@foretag.se" />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>Admin förnamn</Label>
-                    <Input value={adminFirstName} onChange={(e) => setAdminFirstName(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Admin efternamn</Label>
-                    <Input value={adminLastName} onChange={(e) => setAdminLastName(e.target.value)} />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Admin e-post</Label>
-                  <Input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Admin lösenord</Label>
-                  <Input type="text" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Starkt lösenord" />
+                  <Label className="text-blue-200">Admin efternamn</Label>
+                  <Input
+                    value={adminLastName}
+                    onChange={(e) => setAdminLastName(e.target.value)}
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Admin e-post</Label>
+                <Input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Admin lösenord</Label>
+                <Input
+                  type="text"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="Starkt lösenord"
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+            </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setShowNewCompanyDialog(false)}>
                   Avbryt
@@ -332,7 +456,7 @@ const SuperAdminDashboard = () => {
           </Dialog>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100 shadow-[0_20px_60px_-40px_rgba(14,165,233,0.6)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-slate-400">Totalt antal företag</CardTitle>
@@ -384,6 +508,80 @@ const SuperAdminDashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100">
+          <CardHeader>
+            <CardTitle>Fakturering – {monthLabel}</CardTitle>
+            <CardDescription className="text-slate-400">
+              Fakturering sker sista dagen i månaden. Nya användare efter den 15:e faktureras med 50% rabatt.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-xs uppercase text-slate-400">Nya användare</p>
+                <p className="text-2xl font-semibold">{totalNewUsers}</p>
+                <p className="text-xs text-slate-500">Denna månad</p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-xs uppercase text-slate-400">Fullpris</p>
+                <p className="text-2xl font-semibold">{totalFullPrice}</p>
+                <p className="text-xs text-slate-500">Skapade t.o.m 15:e</p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-xs uppercase text-slate-400">50% rabatt</p>
+                <p className="text-2xl font-semibold">{totalDiscounted}</p>
+                <p className="text-xs text-slate-500">Skapade efter 15:e</p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-xs uppercase text-slate-400">Faktureras</p>
+                <p className="text-2xl font-semibold">{formatBillable(totalBillable)}</p>
+                <p className="text-xs text-slate-500">Användare (vägt)</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <Table className="text-slate-200">
+                <TableHeader>
+                  <TableRow className="border-slate-800">
+                    <TableHead className="text-slate-400">Företag</TableHead>
+                    <TableHead className="text-slate-400">Nya användare</TableHead>
+                    <TableHead className="text-slate-400">Användartyper</TableHead>
+                    <TableHead className="text-slate-400">Fullpris</TableHead>
+                    <TableHead className="text-slate-400">50% rabatt</TableHead>
+                    <TableHead className="text-slate-400">Faktura denna månad</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {billingSummary.map((item) => {
+                    const billable = item.fullPrice + item.discounted * 0.5;
+                    const roleSummary = [
+                      item.roles.admin ? `Admin ${item.roles.admin}` : null,
+                      item.roles.user ? `Användare ${item.roles.user}` : null,
+                      item.roles.other ? `Övriga ${item.roles.other}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" • ");
+                    return (
+                      <TableRow key={item.company_id} className="border-slate-800">
+                        <TableCell className="font-medium">{item.company_name}</TableCell>
+                        <TableCell>{item.total}</TableCell>
+                        <TableCell className="text-sm text-slate-400">{roleSummary || "—"}</TableCell>
+                        <TableCell>{item.fullPrice}</TableCell>
+                        <TableCell>{item.discounted}</TableCell>
+                        <TableCell className="text-sm">
+                          {item.total === 0
+                            ? "Ingen faktura denna månad"
+                            : `Denna månad får ${item.company_name} faktura för ${formatBillable(billable)} användare`}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100">
           <CardHeader>
@@ -439,28 +637,38 @@ const SuperAdminDashboard = () => {
       <Dialog open={!!editingCompany} onOpenChange={(open) => !open && setEditingCompany(null)}>
         <DialogContent className="bg-slate-950 text-slate-100 border-slate-800">
           <DialogHeader>
-            <DialogTitle>Redigera företag</DialogTitle>
+            <DialogTitle className="text-blue-200">Redigera företag</DialogTitle>
           </DialogHeader>
           {editingCompany && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Företagsnamn</Label>
-                <Input value={editingCompany.name} onChange={(e) => setEditingCompany({ ...editingCompany, name: e.target.value })} />
+                <Label className="text-blue-200">Företagsnamn</Label>
+                <Input
+                  value={editingCompany.name}
+                  onChange={(e) => setEditingCompany({ ...editingCompany, name: e.target.value })}
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Faktura-email</Label>
+                <Label className="text-blue-200">Faktura-email</Label>
                 <Input
                   value={editingCompany.billing_email || ""}
                   onChange={(e) => setEditingCompany({ ...editingCompany, billing_email: e.target.value })}
                   placeholder="faktura@foretag.se"
+                  className="text-slate-900 placeholder:text-slate-400"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Företagskod</Label>
-                <Input value={editingCompany.code || ""} onChange={(e) => setEditingCompany({ ...editingCompany, code: e.target.value })} placeholder="t.ex. ABC123" />
+                <Label className="text-blue-200">Företagskod</Label>
+                <Input
+                  value={editingCompany.code || ""}
+                  onChange={(e) => setEditingCompany({ ...editingCompany, code: e.target.value })}
+                  placeholder="t.ex. ABC123"
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Företagsadmin</Label>
+                <Label className="text-blue-200">Företagsadmin</Label>
                 {loadingAdmins ? (
                   <p className="text-sm text-slate-400">Laddar admin-användare...</p>
                 ) : adminUsers.length === 0 ? (
@@ -483,17 +691,19 @@ const SuperAdminDashboard = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>Admin namn</Label>
+                  <Label className="text-blue-200">Admin namn</Label>
                   <Input
                     value={adminUsers.find((u) => String(u.id) === String(selectedAdminId))?.full_name || ""}
                     readOnly
+                    className="text-slate-900 placeholder:text-slate-400"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Admin e-post</Label>
+                  <Label className="text-blue-200">Admin e-post</Label>
                   <Input
                     value={adminUsers.find((u) => String(u.id) === String(selectedAdminId))?.email || ""}
                     readOnly
+                    className="text-slate-900 placeholder:text-slate-400"
                   />
                 </div>
               </div>
@@ -520,11 +730,11 @@ const SuperAdminDashboard = () => {
       </Dialog>
 
       <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
-        <DialogContent className="sm:max-w-md bg-slate-950 text-slate-100 border-slate-800">
+        <DialogContent className="sm:max-w-md bg-slate-950 text-blue-200 border-slate-800">
           <DialogHeader>
-            <DialogTitle>Återställ lösenord</DialogTitle>
+            <DialogTitle className="text-blue-200">Återställ lösenord</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-blue-300/70">
             Generera ett nytt lösenord för{" "}
             {adminUsers.find((u) => String(u.id) === String(selectedAdminId))?.full_name ||
               adminUsers.find((u) => String(u.id) === String(selectedAdminId))?.email}
@@ -546,13 +756,13 @@ const SuperAdminDashboard = () => {
           if (open) setPasswordDialogOpen(true);
         }}
       >
-        <DialogContent className="sm:max-w-md [&>button]:hidden bg-slate-950 text-slate-100 border-slate-800">
+        <DialogContent className="sm:max-w-md [&>button]:hidden bg-slate-950 text-blue-200 border-slate-800">
           <DialogHeader>
-            <DialogTitle>{passwordDialogTitle}</DialogTitle>
-            <DialogDescription>{passwordDialogDescription}</DialogDescription>
+            <DialogTitle className="text-blue-200">{passwordDialogTitle}</DialogTitle>
+            <DialogDescription className="text-blue-300/70">{passwordDialogDescription}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="generated-password">Genererat lösenord</Label>
+            <Label htmlFor="generated-password" className="text-blue-200">Genererat lösenord</Label>
             <Input id="generated-password" value={passwordDialogValue} readOnly className="font-mono" />
           </div>
           <DialogFooter>
