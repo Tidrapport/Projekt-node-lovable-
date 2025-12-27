@@ -17,7 +17,7 @@ app.use(cors({
   origin: process.env.FRONTEND_ORIGIN || true,
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // ✅ servera alla .html, .js, .css osv från samma mapp som server.js
@@ -377,7 +377,7 @@ app.get("/login.html", (req, res) => {
 // Offentligt endpoint för att lista företag vid inloggning
 app.get("/public/companies", (req, res) => {
   db.all(
-    "SELECT id, name, code, code AS company_code FROM companies ORDER BY name",
+    "SELECT id, name, code, code AS company_code, logo_url FROM companies ORDER BY name",
     [],
     (err, rows) => {
       if (err) {
@@ -395,7 +395,7 @@ app.get("/companies", requireAuth, (req, res) => {
   if (role === "super_admin") {
     db.all(
       `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
-              bankgiro, bic_number, iban_number, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
+              bankgiro, bic_number, iban_number, logo_url, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
               invoice_late_interest, created_at
        FROM companies ORDER BY name`,
       [],
@@ -410,7 +410,7 @@ app.get("/companies", requireAuth, (req, res) => {
   } else {
     db.all(
       `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
-              bankgiro, bic_number, iban_number, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
+              bankgiro, bic_number, iban_number, logo_url, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
               invoice_late_interest, created_at
        FROM companies WHERE id = ?`,
       [req.user.company_id],
@@ -489,6 +489,7 @@ app.put("/companies/:id", requireAuth, (req, res) => {
     bankgiro,
     bic_number,
     iban_number,
+    logo_url,
     org_number,
     vat_number,
     f_skatt,
@@ -560,6 +561,10 @@ app.put("/companies/:id", requireAuth, (req, res) => {
     fields.push("iban_number = ?");
     params.push(iban_number ? String(iban_number).trim() : null);
   }
+  if (logo_url !== undefined) {
+    fields.push("logo_url = ?");
+    params.push(logo_url ? String(logo_url).trim() : null);
+  }
   if (org_number !== undefined) {
     fields.push("org_number = ?");
     params.push(org_number ? String(org_number).trim() : null);
@@ -620,6 +625,53 @@ app.delete("/companies/:id", requireAuth, requireSuperAdmin, (req, res) => {
   });
 });
 
+// POST /companies/:id/logo (upload company logo, base64)
+app.post("/companies/:id/logo", requireAuth, requireAdmin, (req, res) => {
+  const { id } = req.params;
+  const scopedCompanyId = getScopedCompanyId(req);
+  const role = (req.user?.role || "").toLowerCase();
+  const isSuper = role === "super_admin";
+  if (!isSuper && String(scopedCompanyId || "") !== String(id)) {
+    return res.status(403).json({ error: "Admin kan bara uppdatera sitt eget företag" });
+  }
+
+  const { filename, content_base64 } = req.body || {};
+  if (!filename || !content_base64) {
+    return res.status(400).json({ error: "filename och content_base64 krävs" });
+  }
+
+  const uploadsDir = path.join(__dirname, "uploads", "company-logos");
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (e) {
+    console.error("Kunde inte skapa upload-mapp:", e);
+  }
+
+  const safeName = `${id}-${Date.now()}-${String(filename).replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
+  const filePath = path.join(uploadsDir, safeName);
+
+  try {
+    const data = content_base64.split(",").pop();
+    fs.writeFileSync(filePath, data, { encoding: "base64" });
+  } catch (e) {
+    console.error("Kunde inte skriva logga:", e);
+    return res.status(500).json({ error: "Kunde inte spara logga" });
+  }
+
+  const storagePath = `/uploads/company-logos/${safeName}`;
+  db.run(
+    `UPDATE companies SET logo_url = ? WHERE id = ?`,
+    [storagePath, id],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid UPDATE company logo:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.json({ logo_url: storagePath });
+    }
+  );
+});
+
 // ======================
 // CUSTOMERS (tenant-scoped)
 // ======================
@@ -646,13 +698,66 @@ app.post("/customers", requireAuth, requireAdmin, (req, res) => {
   const companyId = getScopedCompanyId(req);
   if (!companyId) return res.status(400).json({ error: "Company not found" });
 
-  const { name, orgnr, contact_name, contact_email, contact_phone, notes } = req.body || {};
+  const {
+    name,
+    customer_number,
+    customer_type,
+    orgnr,
+    vat_number,
+    invoice_address1,
+    invoice_address2,
+    postal_code,
+    city,
+    country,
+    contact_name,
+    contact_email,
+    contact_phone,
+    phone_secondary,
+    their_reference,
+    notes
+  } = req.body || {};
   if (!name) return res.status(400).json({ error: "name required" });
 
   db.run(
-    `INSERT INTO customers (company_id, name, orgnr, contact_name, contact_email, contact_phone, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [companyId, name, orgnr || null, contact_name || null, contact_email || null, contact_phone || null, notes || null],
+    `INSERT INTO customers (
+      company_id,
+      customer_number,
+      customer_type,
+      name,
+      orgnr,
+      vat_number,
+      invoice_address1,
+      invoice_address2,
+      postal_code,
+      city,
+      country,
+      contact_name,
+      contact_email,
+      contact_phone,
+      phone_secondary,
+      their_reference,
+      notes
+    )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      companyId,
+      customer_number || null,
+      customer_type || null,
+      name,
+      orgnr || null,
+      vat_number || null,
+      invoice_address1 || null,
+      invoice_address2 || null,
+      postal_code || null,
+      city || null,
+      country || null,
+      contact_name || null,
+      contact_email || null,
+      contact_phone || null,
+      phone_secondary || null,
+      their_reference || null,
+      notes || null
+    ],
     function (err) {
       if (err) {
         console.error("DB-fel vid POST /customers:", err);
@@ -675,7 +780,24 @@ app.put("/customers/:id", requireAuth, requireAdmin, (req, res) => {
   if (!companyId) return res.status(400).json({ error: "Company not found" });
 
   const id = req.params.id;
-  const { name, orgnr, contact_name, contact_email, contact_phone, notes } = req.body || {};
+  const {
+    name,
+    customer_number,
+    customer_type,
+    orgnr,
+    vat_number,
+    invoice_address1,
+    invoice_address2,
+    postal_code,
+    city,
+    country,
+    contact_name,
+    contact_email,
+    contact_phone,
+    phone_secondary,
+    their_reference,
+    notes
+  } = req.body || {};
 
   db.get("SELECT id FROM customers WHERE id = ? AND company_id = ?", [id, companyId], (err, exists) => {
     if (err) {
@@ -687,13 +809,42 @@ app.put("/customers/:id", requireAuth, requireAdmin, (req, res) => {
     db.run(
       `UPDATE customers
        SET name = COALESCE(?, name),
+           customer_number = COALESCE(?, customer_number),
+           customer_type = COALESCE(?, customer_type),
            orgnr = COALESCE(?, orgnr),
+           vat_number = COALESCE(?, vat_number),
+           invoice_address1 = COALESCE(?, invoice_address1),
+           invoice_address2 = COALESCE(?, invoice_address2),
+           postal_code = COALESCE(?, postal_code),
+           city = COALESCE(?, city),
+           country = COALESCE(?, country),
            contact_name = COALESCE(?, contact_name),
            contact_email = COALESCE(?, contact_email),
            contact_phone = COALESCE(?, contact_phone),
+           phone_secondary = COALESCE(?, phone_secondary),
+           their_reference = COALESCE(?, their_reference),
            notes = COALESCE(?, notes)
        WHERE id = ? AND company_id = ?`,
-      [name ?? null, orgnr ?? null, contact_name ?? null, contact_email ?? null, contact_phone ?? null, notes ?? null, id, companyId],
+      [
+        name ?? null,
+        customer_number ?? null,
+        customer_type ?? null,
+        orgnr ?? null,
+        vat_number ?? null,
+        invoice_address1 ?? null,
+        invoice_address2 ?? null,
+        postal_code ?? null,
+        city ?? null,
+        country ?? null,
+        contact_name ?? null,
+        contact_email ?? null,
+        contact_phone ?? null,
+        phone_secondary ?? null,
+        their_reference ?? null,
+        notes ?? null,
+        id,
+        companyId
+      ],
       function (e2) {
         if (e2) {
           console.error("DB-fel vid UPDATE customer:", e2);

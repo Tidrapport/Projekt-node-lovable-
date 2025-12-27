@@ -19,6 +19,19 @@ import { calculateOBDistribution } from "@/lib/obDistribution";
 interface Customer {
   id: string;
   name: string;
+  customer_number?: string | null;
+  customer_type?: string | null;
+  orgnr?: string | null;
+  vat_number?: string | null;
+  invoice_address1?: string | null;
+  invoice_address2?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  country?: string | null;
+  contact_phone?: string | null;
+  phone_secondary?: string | null;
+  contact_email?: string | null;
+  their_reference?: string | null;
 }
 
 interface Project {
@@ -54,6 +67,20 @@ interface TimeEntry {
   profiles: { full_name: string };
 }
 
+const toDigits = (value: string) => value.replace(/\D/g, "");
+
+const formatVatNumber = (value: string) => {
+  const digits = toDigits(value || "");
+  if (!digits) return "";
+  let base = digits;
+  if (digits.length >= 12 && digits.endsWith("01")) {
+    base = digits.slice(0, -2);
+  } else if (digits.length > 10) {
+    base = digits.slice(0, 10);
+  }
+  return `SE${base}01`;
+};
+
 const AdminCustomers = () => {
   const { companyId } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -69,7 +96,22 @@ const AdminCustomers = () => {
   // Customer dialog state
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
-  const [customerName, setCustomerName] = useState("");
+  const [customerForm, setCustomerForm] = useState({
+    name: "",
+    customer_number: "",
+    customer_type: "company",
+    orgnr: "",
+    vat_number: "",
+    invoice_address1: "",
+    invoice_address2: "",
+    postal_code: "",
+    city: "",
+    country: "",
+    contact_phone: "",
+    phone_secondary: "",
+    contact_email: "",
+    their_reference: "",
+  });
 
   // Filtered data
   const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
@@ -154,10 +196,40 @@ const AdminCustomers = () => {
   const openCustomerDialog = (customer?: Customer) => {
     if (customer) {
       setEditingCustomerId(customer.id);
-      setCustomerName(customer.name);
+      setCustomerForm({
+        name: customer.name || "",
+        customer_number: customer.customer_number || "",
+        customer_type: customer.customer_type || "company",
+        orgnr: customer.orgnr || "",
+        vat_number: formatVatNumber(customer.vat_number || customer.orgnr || ""),
+        invoice_address1: customer.invoice_address1 || "",
+        invoice_address2: customer.invoice_address2 || "",
+        postal_code: customer.postal_code || "",
+        city: customer.city || "",
+        country: customer.country || "",
+        contact_phone: customer.contact_phone || "",
+        phone_secondary: customer.phone_secondary || "",
+        contact_email: customer.contact_email || "",
+        their_reference: customer.their_reference || "",
+      });
     } else {
       setEditingCustomerId(null);
-      setCustomerName("");
+      setCustomerForm({
+        name: "",
+        customer_number: "",
+        customer_type: "company",
+        orgnr: "",
+        vat_number: "",
+        invoice_address1: "",
+        invoice_address2: "",
+        postal_code: "",
+        city: "",
+        country: "",
+        contact_phone: "",
+        phone_secondary: "",
+        contact_email: "",
+        their_reference: "",
+      });
     }
     setShowCustomerDialog(true);
   };
@@ -167,16 +239,55 @@ const AdminCustomers = () => {
     setLoading(true);
 
     try {
+      const name = customerForm.name.trim();
+      const customerNumber = customerForm.customer_number.trim();
+      if (!name || !customerNumber) {
+        toast.error("Kundnamn och kundnummer krävs.");
+        setLoading(false);
+        return;
+      }
+      const payload = {
+        name,
+        customer_number: customerNumber,
+        customer_type: customerForm.customer_type || "company",
+        orgnr: customerForm.orgnr.trim() || null,
+        vat_number: formatVatNumber(customerForm.vat_number || customerForm.orgnr) || null,
+        invoice_address1: customerForm.invoice_address1.trim() || null,
+        invoice_address2: customerForm.invoice_address2.trim() || null,
+        postal_code: customerForm.postal_code.trim() || null,
+        city: customerForm.city.trim() || null,
+        country: customerForm.country.trim() || null,
+        contact_phone: customerForm.contact_phone.trim() || null,
+        phone_secondary: customerForm.phone_secondary.trim() || null,
+        contact_email: customerForm.contact_email.trim() || null,
+        their_reference: customerForm.their_reference.trim() || null,
+        company_id: companyId,
+      };
       if (editingCustomerId) {
-        await apiFetch(`/customers/${editingCustomerId}`, { method: "PUT", json: { name: customerName.trim() } });
+        await apiFetch(`/customers/${editingCustomerId}`, { method: "PUT", json: payload });
         toast.success("Kund uppdaterad!");
       } else {
-        await apiFetch(`/customers`, { method: "POST", json: { name: customerName.trim(), company_id: companyId } });
+        await apiFetch(`/customers`, { method: "POST", json: payload });
         toast.success("Kund skapad!");
       }
 
       setShowCustomerDialog(false);
-      setCustomerName("");
+      setCustomerForm({
+        name: "",
+        customer_number: "",
+        customer_type: "company",
+        orgnr: "",
+        vat_number: "",
+        invoice_address1: "",
+        invoice_address2: "",
+        postal_code: "",
+        city: "",
+        country: "",
+        contact_phone: "",
+        phone_secondary: "",
+        contact_email: "",
+        their_reference: "",
+      });
       setEditingCustomerId(null);
       fetchData();
     } catch (error: any) {
@@ -482,15 +593,139 @@ const AdminCustomers = () => {
             <DialogTitle>{editingCustomerId ? "Redigera kund" : "Ny kund"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCustomerSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="customerName">Kundnamn *</Label>
-              <Input
-                id="customerName"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="T.ex. Trafikverket"
-                required
-              />
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Kundnummer *</Label>
+                <Input
+                  value={customerForm.customer_number}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, customer_number: e.target.value }))}
+                  placeholder="20331"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Kundtyp</Label>
+                <Select
+                  value={customerForm.customer_type}
+                  onValueChange={(value) => setCustomerForm((prev) => ({ ...prev, customer_type: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Välj typ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="company">Företag</SelectItem>
+                    <SelectItem value="private">Privat</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Kundnamn *</Label>
+                <Input
+                  value={customerForm.name}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="T.ex. Trafikverket"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Org-/Personnummer</Label>
+                <Input
+                  value={customerForm.orgnr}
+                  onChange={(e) => {
+                    const orgNumber = e.target.value;
+                    const autoVat = formatVatNumber(orgNumber);
+                    setCustomerForm((prev) => ({
+                      ...prev,
+                      orgnr: orgNumber,
+                      vat_number: autoVat,
+                    }));
+                  }}
+                  placeholder="556000-0000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>VAT-nummer</Label>
+                <Input
+                  value={customerForm.vat_number}
+                  onChange={(e) => {
+                    const formatted = formatVatNumber(e.target.value);
+                    setCustomerForm((prev) => ({ ...prev, vat_number: formatted }));
+                  }}
+                  placeholder="SE556000000001"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Fakturaadress</Label>
+                <Input
+                  value={customerForm.invoice_address1}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, invoice_address1: e.target.value }))}
+                  placeholder="Gatuadress"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Fakturaadress 2</Label>
+                <Input
+                  value={customerForm.invoice_address2}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, invoice_address2: e.target.value }))}
+                  placeholder="C/O, våning, etc."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Postnr</Label>
+                <Input
+                  value={customerForm.postal_code}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, postal_code: e.target.value }))}
+                  placeholder="123 45"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Ort</Label>
+                <Input
+                  value={customerForm.city}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, city: e.target.value }))}
+                  placeholder="Stad"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Land</Label>
+                <Input
+                  value={customerForm.country}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, country: e.target.value }))}
+                  placeholder="Sverige"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Telefon</Label>
+                <Input
+                  value={customerForm.contact_phone}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, contact_phone: e.target.value }))}
+                  placeholder="070..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Telefon 2</Label>
+                <Input
+                  value={customerForm.phone_secondary}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, phone_secondary: e.target.value }))}
+                  placeholder="08..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>E-post</Label>
+                <Input
+                  value={customerForm.contact_email}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, contact_email: e.target.value }))}
+                  placeholder="kund@foretag.se"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Er referens</Label>
+                <Input
+                  value={customerForm.their_reference}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, their_reference: e.target.value }))}
+                  placeholder="Kontaktperson"
+                />
+              </div>
             </div>
             <Button type="submit" disabled={loading} className="w-full">
               {editingCustomerId ? "Uppdatera" : "Skapa"}

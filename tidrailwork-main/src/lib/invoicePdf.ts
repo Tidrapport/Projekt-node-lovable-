@@ -26,6 +26,7 @@ type CompanyFooter = {
   bankgiro?: string | null;
   bic_number?: string | null;
   iban_number?: string | null;
+  logo_url?: string | null;
   org_number?: string | null;
   vat_number?: string | null;
   f_skatt?: boolean | number | null;
@@ -112,6 +113,7 @@ const COORDS = {
   },
   iban_line: { x: 344.0, y: 131.1, w: 130 },
   bic_line: { x: 479.4, y: 131.1, w: 110 },
+  logo: { x: 55.3, y: 702.8, w: 155.0, h: 93.0 },
   footer: {
     address_x: 55.3,
     address_y: [94.9, 82.2, 69.6, 57.0],
@@ -177,6 +179,35 @@ export async function generateInvoicePdf(
     const safe = text || "";
     clearTextArea(x, y, width, opts.size ?? 9);
     drawText(safe, x, y, opts);
+  };
+
+  const drawLogo = async (url: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      let image;
+      try {
+        image = await pdfDoc.embedPng(bytes);
+      } catch {
+        image = await pdfDoc.embedJpg(bytes);
+      }
+      const { width, height } = image.scale(1);
+      const scale = Math.min(COORDS.logo.w / width, COORDS.logo.h / height);
+      const drawWidth = width * scale;
+      const drawHeight = height * scale;
+      const drawX = COORDS.logo.x + (COORDS.logo.w - drawWidth) / 2;
+      const drawY = COORDS.logo.y + (COORDS.logo.h - drawHeight) / 2;
+      clearArea(COORDS.logo.x, COORDS.logo.y, COORDS.logo.w, COORDS.logo.h);
+      page.drawImage(image, {
+        x: drawX,
+        y: drawY,
+        width: drawWidth,
+        height: drawHeight,
+      });
+    } catch {
+      // Ignore logo errors to avoid breaking invoice generation.
+    }
   };
 
   const addressLines = (meta.customer_address_lines || []).slice(0, 4);
@@ -254,9 +285,12 @@ export async function generateInvoicePdf(
   for (let i = 0; i < rowCount; i += 1) {
     const line = lines[i];
     const y = start_y - i * row_h;
+    const quantityValue = Number(line.quantity || 0);
+    const quantityText =
+      quantityValue === 0 ? "" : formatNumber(Math.abs(quantityValue));
     drawText(line.item_no, cols.item_no.x, y);
     drawText(line.description, cols.description.x, y);
-    drawText(formatNumber(line.quantity), cols.quantity.x, y);
+    drawText(quantityText, cols.quantity.x, y);
     drawText(line.unit, cols.unit.x, y);
     drawText(formatNumber(line.unit_price), cols.unit_price.x, y);
     drawText(formatNumber(line.total), cols.total.x, y);
@@ -276,6 +310,10 @@ export async function generateInvoicePdf(
   const bicValue = companyFooter?.bic_number ? `BIC ${companyFooter.bic_number}` : "";
   drawValue(ibanValue, COORDS.iban_line.x, COORDS.iban_line.y, COORDS.iban_line.w);
   drawValue(bicValue, COORDS.bic_line.x, COORDS.bic_line.y, COORDS.bic_line.w);
+
+  if (companyFooter?.logo_url) {
+    await drawLogo(companyFooter.logo_url);
+  }
 
   if (companyFooter) {
     const addressFooterLines: string[] = [];

@@ -24,6 +24,7 @@ db.serialize(() => {
       bankgiro TEXT,
       bic_number TEXT,
       iban_number TEXT,
+      logo_url TEXT,
       org_number TEXT,
       vat_number TEXT,
       f_skatt INTEGER DEFAULT 0,
@@ -99,6 +100,12 @@ db.serialize(() => {
     if (!hasIbanNumber) {
       db.run(`ALTER TABLE companies ADD COLUMN iban_number TEXT;`, (alterErr) => {
         if (alterErr) console.error("Kunde inte lägga till iban_number:", alterErr);
+      });
+    }
+    const hasLogoUrl = columns.some((col) => col.name === "logo_url");
+    if (!hasLogoUrl) {
+      db.run(`ALTER TABLE companies ADD COLUMN logo_url TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till logo_url:", alterErr);
       });
     }
     const hasOrgNumber = columns.some((col) => col.name === "org_number");
@@ -973,15 +980,92 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_id INTEGER NOT NULL,
+      customer_number TEXT,
+      customer_type TEXT,
       name TEXT NOT NULL,
       orgnr TEXT,
+      vat_number TEXT,
+      invoice_address1 TEXT,
+      invoice_address2 TEXT,
+      postal_code TEXT,
+      city TEXT,
+      country TEXT,
       contact_name TEXT,
       contact_email TEXT,
       contact_phone TEXT,
+      phone_secondary TEXT,
+      their_reference TEXT,
       notes TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  db.all(`PRAGMA table_info(customers);`, (err, cols) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för customers:", err);
+      return;
+    }
+    const hasCustomerNumber = cols.some((c) => c.name === "customer_number");
+    if (!hasCustomerNumber) {
+      db.run(`ALTER TABLE customers ADD COLUMN customer_number TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till customer_number:", e);
+      });
+    }
+    const hasCustomerType = cols.some((c) => c.name === "customer_type");
+    if (!hasCustomerType) {
+      db.run(`ALTER TABLE customers ADD COLUMN customer_type TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till customer_type:", e);
+      });
+    }
+    const hasVatNumber = cols.some((c) => c.name === "vat_number");
+    if (!hasVatNumber) {
+      db.run(`ALTER TABLE customers ADD COLUMN vat_number TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till vat_number:", e);
+      });
+    }
+    const hasInvoiceAddress1 = cols.some((c) => c.name === "invoice_address1");
+    if (!hasInvoiceAddress1) {
+      db.run(`ALTER TABLE customers ADD COLUMN invoice_address1 TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till invoice_address1:", e);
+      });
+    }
+    const hasInvoiceAddress2 = cols.some((c) => c.name === "invoice_address2");
+    if (!hasInvoiceAddress2) {
+      db.run(`ALTER TABLE customers ADD COLUMN invoice_address2 TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till invoice_address2:", e);
+      });
+    }
+    const hasPostalCode = cols.some((c) => c.name === "postal_code");
+    if (!hasPostalCode) {
+      db.run(`ALTER TABLE customers ADD COLUMN postal_code TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till postal_code:", e);
+      });
+    }
+    const hasCity = cols.some((c) => c.name === "city");
+    if (!hasCity) {
+      db.run(`ALTER TABLE customers ADD COLUMN city TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till city:", e);
+      });
+    }
+    const hasCountry = cols.some((c) => c.name === "country");
+    if (!hasCountry) {
+      db.run(`ALTER TABLE customers ADD COLUMN country TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till country:", e);
+      });
+    }
+    const hasPhoneSecondary = cols.some((c) => c.name === "phone_secondary");
+    if (!hasPhoneSecondary) {
+      db.run(`ALTER TABLE customers ADD COLUMN phone_secondary TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till phone_secondary:", e);
+      });
+    }
+    const hasTheirReference = cols.some((c) => c.name === "their_reference");
+    if (!hasTheirReference) {
+      db.run(`ALTER TABLE customers ADD COLUMN their_reference TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till their_reference:", e);
+      });
+    }
+  });
 
   // --- Shift type configs (OB/övertid) ---
   db.run(`

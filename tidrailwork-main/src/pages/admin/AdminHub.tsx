@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ interface CompanyInfo {
   id: string;
   name: string;
   code?: string | null;
+  logo_url?: string | null;
   created_at?: string | null;
   user_count: number;
 }
@@ -55,6 +56,9 @@ const AdminHub = () => {
   const { companyId } = useAuth();
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
   const [companyName, setCompanyName] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingName, setSavingName] = useState(false);
@@ -100,10 +104,12 @@ const AdminHub = () => {
         id: String(selected.id),
         name: selected.name,
         code: selected.code || selected.company_code || null,
+        logo_url: selected.logo_url || null,
         created_at: selected.created_at || null,
         user_count: (users || []).length,
       });
       setCompanyName(selected.name || "");
+      setLogoUrl(selected.logo_url || "");
       if (!preserveInvoiceForm) {
         setInvoiceForm({
           billing_email: selected.billing_email || "",
@@ -112,12 +118,12 @@ const AdminHub = () => {
           postal_code: selected.postal_code || "",
           city: selected.city || "",
           country: selected.country || "",
-        phone: selected.phone || "",
-        bankgiro: selected.bankgiro || "",
-        bic_number: selected.bic_number || "",
-        iban_number: selected.iban_number || "",
-        org_number: selected.org_number || "",
-        vat_number: formatVatNumber(selected.vat_number || ""),
+          phone: selected.phone || "",
+          bankgiro: selected.bankgiro || "",
+          bic_number: selected.bic_number || "",
+          iban_number: selected.iban_number || "",
+          org_number: selected.org_number || "",
+          vat_number: formatVatNumber(selected.vat_number || ""),
           f_skatt:
             selected.f_skatt === true ||
             selected.f_skatt === 1 ||
@@ -153,19 +159,19 @@ const AdminHub = () => {
       await apiFetch(`/companies/${companyInfo.id}`, {
         method: "PUT",
         json: {
-        billing_email: invoiceForm.billing_email || null,
-        address_line1: invoiceForm.address_line1 || null,
-        address_line2: invoiceForm.address_line2 || null,
-        postal_code: invoiceForm.postal_code || null,
-        city: invoiceForm.city || null,
-        country: invoiceForm.country || null,
+          billing_email: invoiceForm.billing_email || null,
+          address_line1: invoiceForm.address_line1 || null,
+          address_line2: invoiceForm.address_line2 || null,
+          postal_code: invoiceForm.postal_code || null,
+          city: invoiceForm.city || null,
+          country: invoiceForm.country || null,
           phone: invoiceForm.phone || null,
           bankgiro: invoiceForm.bankgiro || null,
           bic_number: invoiceForm.bic_number || null,
           iban_number: invoiceForm.iban_number || null,
           org_number: invoiceForm.org_number || null,
-        vat_number: formatVatNumber(invoiceForm.vat_number || "") || null,
-        f_skatt: invoiceForm.f_skatt ? 1 : 0,
+          vat_number: formatVatNumber(invoiceForm.vat_number || "") || null,
+          f_skatt: invoiceForm.f_skatt ? 1 : 0,
           invoice_payment_terms: invoiceForm.invoice_payment_terms || null,
           invoice_our_reference: invoiceForm.invoice_our_reference || null,
           invoice_late_interest: invoiceForm.invoice_late_interest || null,
@@ -200,6 +206,42 @@ const AdminHub = () => {
       toast.error("Kunde inte uppdatera företagsnamn");
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const uploadLogo = async (file: File) => {
+    if (!companyInfo) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Välj en bildfil.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Bilden är för stor (max 2 MB).");
+      return;
+    }
+    setLogoUploading(true);
+    try {
+      const content_base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Kunde inte läsa filen"));
+        reader.readAsDataURL(file);
+      });
+      const response = await apiFetch<{ logo_url: string }>(`/companies/${companyInfo.id}/logo`, {
+        method: "POST",
+        json: {
+          filename: file.name,
+          content_base64,
+        },
+      });
+      setLogoUrl(response.logo_url);
+      toast.success("Logga uppdaterad.");
+      fetchCompanyInfo(true);
+    } catch (error) {
+      console.error("Kunde inte ladda upp logga:", error);
+      toast.error("Kunde inte ladda upp logga");
+    } finally {
+      setLogoUploading(false);
     }
   };
 
@@ -279,6 +321,47 @@ const AdminHub = () => {
             <Button onClick={saveCompanyName} disabled={savingName}>
               Spara företagsnamn
             </Button>
+          </div>
+
+          <div className="border-t pt-6">
+            <h3 className="font-semibold mb-2">Företagslogga</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Loggan används på fakturan och i administrativa vyer.
+            </p>
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-20 w-36 rounded-md border bg-white p-2 flex items-center justify-center">
+                  <img
+                    src={logoUrl || "/railwork-logo.jpg"}
+                    alt="Företagslogga"
+                    className="max-h-full max-w-full object-contain"
+                  />
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  PNG eller JPG, max 2 MB.
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  ref={logoInputRef}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadLogo(file);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  disabled={logoUploading}
+                  onClick={() => logoInputRef.current?.click()}
+                >
+                  {logoUploading ? "Laddar..." : "Byt logga"}
+                </Button>
+              </div>
+            </div>
           </div>
 
           <div className="border-t pt-6">

@@ -61,10 +61,20 @@ interface TimeEntry {
 interface Customer {
   id: string;
   name: string;
+  customer_number?: string | null;
+  customer_type?: string | null;
   orgnr?: string | null;
+  vat_number?: string | null;
+  invoice_address1?: string | null;
+  invoice_address2?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  country?: string | null;
   contact_name?: string | null;
   contact_email?: string | null;
   contact_phone?: string | null;
+  phone_secondary?: string | null;
+  their_reference?: string | null;
   notes?: string | null;
 }
 
@@ -100,6 +110,7 @@ type CompanyInfo = {
   bankgiro?: string | null;
   bic_number?: string | null;
   iban_number?: string | null;
+  logo_url?: string | null;
   org_number?: string | null;
   vat_number?: string | null;
   f_skatt?: number | null;
@@ -577,17 +588,11 @@ const Billing = () => {
 
       const customerLines: string[] = [];
       if (targetCustomer?.name) customerLines.push(targetCustomer.name);
-      if (targetCustomer?.notes) {
-        const notesLines = targetCustomer.notes
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean);
-        customerLines.push(...notesLines);
-      }
-      if (targetCustomer?.contact_name) customerLines.push(targetCustomer.contact_name);
-      if (targetCustomer?.contact_email) customerLines.push(targetCustomer.contact_email);
-      if (targetCustomer?.contact_phone) customerLines.push(targetCustomer.contact_phone);
-      if (targetCustomer?.orgnr) customerLines.push(`Org.nr ${targetCustomer.orgnr}`);
+      if (targetCustomer?.invoice_address1) customerLines.push(targetCustomer.invoice_address1);
+      if (targetCustomer?.invoice_address2) customerLines.push(targetCustomer.invoice_address2);
+      const postalCity = [targetCustomer?.postal_code, targetCustomer?.city].filter(Boolean).join(" ");
+      if (postalCity) customerLines.push(postalCity);
+      if (targetCustomer?.country) customerLines.push(targetCustomer.country);
 
       const companies = await apiFetch<CompanyInfo[]>(`/companies`);
       const company = companyId
@@ -607,13 +612,13 @@ const Billing = () => {
         invoice_date: format(invoiceDate, "yyyy-MM-dd"),
         invoice_number: invoiceNumber,
         ocr,
-        customer_number: targetCustomer?.id ? String(targetCustomer.id) : "",
+        customer_number: targetCustomer?.customer_number || (targetCustomer?.id ? String(targetCustomer.id) : ""),
         our_reference: company?.invoice_our_reference || user?.full_name || user?.email || "",
-        their_reference: targetCustomer?.contact_name || "",
+        their_reference: targetCustomer?.their_reference || targetCustomer?.contact_name || "",
         order_number: selectedProject?.code || selectedProject?.name || "",
         payment_terms: paymentTerms,
         due_date: format(dueDate, "yyyy-MM-dd"),
-        vat_number: targetCustomer?.orgnr || "",
+        vat_number: targetCustomer?.vat_number || targetCustomer?.orgnr || "",
         late_interest: company?.invoice_late_interest || "8%",
         customer_address_lines: customerLines,
       };
@@ -631,6 +636,7 @@ const Billing = () => {
             bankgiro: company.bankgiro,
             bic_number: company.bic_number,
             iban_number: company.iban_number,
+            logo_url: company.logo_url,
             org_number: company.org_number,
             vat_number: company.vat_number,
             f_skatt: company.f_skatt,
