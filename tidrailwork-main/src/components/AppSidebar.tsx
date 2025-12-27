@@ -7,7 +7,6 @@ import {
   Briefcase,
   Package,
   LogOut,
-  Shield,
   CheckSquare,
   AlertCircle,
   Percent,
@@ -60,7 +59,6 @@ const userItems = [
 
 // Main admin items (not under AdminHub)
 const adminMainItems = [
-  { title: "Admin Panel", url: "/admin/dashboard", icon: Shield },
   { title: "Statistik", url: "/admin/statistics", icon: BarChart3 },
   { title: "Arbetsorder", url: "/admin/work-orders", icon: ClipboardList },
   { title: "Attestering", url: "/admin/attestations", icon: CheckSquare },
@@ -152,7 +150,7 @@ export function AppSidebar() {
                         <SidebarMenuSubItem>
                           <SidebarMenuSubButton asChild isActive={isActive("/admin/hub")}>
                             <NavLink to="/admin/hub">
-                              <span>Översikt</span>
+                              <span>Mitt Företag</span>
                             </NavLink>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>

@@ -22,7 +22,6 @@ import AdminProjects from "./pages/admin/Projects";
 import AdminUsers from "./pages/admin/Users";
 import AdminJobRoles from "./pages/admin/JobRoles";
 import AdminMaterialTypes from "./pages/admin/MaterialTypes";
-import AdminDashboard from "./pages/admin/Dashboard";
 import AdminPlanning from "./pages/admin/Planning";
 import AdminTimeAttestations from "./pages/admin/TimeAttestations";
 import AdminDeviations from "./pages/admin/Deviations";
@@ -226,16 +225,6 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <AdminMaterialTypes />
-                    </Layout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin/dashboard"
-                element={
-                  <ProtectedRoute>
-                    <Layout>
-                      <AdminDashboard />
                     </Layout>
                   </ProtectedRoute>
                 }
