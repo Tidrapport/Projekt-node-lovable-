@@ -1,2 +1,5 @@
 node_modules/
 opero.db
+.env
+.env.*
+!.env.example
