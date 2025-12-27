@@ -1,0 +1,767 @@
+import { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { apiFetch } from "@/api/client";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { toast } from "sonner";
+import { Download } from "lucide-react";
+
+type JobRoleRate = {
+  id: string;
+  name: string;
+  day_rate: string;
+  evening_rate: string;
+  night_rate: string;
+  weekend_rate: string;
+  overtime_weekday_rate: string;
+  overtime_weekend_rate: string;
+  per_diem_rate: string;
+  travel_time_rate: string;
+};
+
+type MaterialRate = {
+  id: string;
+  name: string;
+  price: string;
+  unit: string;
+};
+
+type Project = {
+  id: string;
+  name: string;
+};
+
+type PriceListSettings = {
+  show_day: boolean;
+  show_evening: boolean;
+  show_night: boolean;
+  show_weekend: boolean;
+  show_overtime_weekday: boolean;
+  show_overtime_weekend: boolean;
+  day_start: string;
+  day_end: string;
+  evening_start: string;
+  evening_end: string;
+  night_start: string;
+  night_end: string;
+  weekend_start: string;
+  weekend_end: string;
+};
+
+const UNIT_OPTIONS = [
+  { value: "styck", label: "Styck" },
+  { value: "mil", label: "Mil" },
+  { value: "antal", label: "Antal" },
+  { value: "liter", label: "Liter" },
+  { value: "skift", label: "Skift" },
+];
+
+const toRateString = (value?: number | null) => {
+  if (value === null || value === undefined) return "";
+  return String(value);
+};
+
+const normalizeUnit = (value: string | null | undefined) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (UNIT_OPTIONS.some((opt) => opt.value === normalized)) return normalized;
+  return "styck";
+};
+
+const DEFAULT_SETTINGS: PriceListSettings = {
+  show_day: true,
+  show_evening: true,
+  show_night: true,
+  show_weekend: true,
+  show_overtime_weekday: true,
+  show_overtime_weekend: true,
+  day_start: "06:00",
+  day_end: "18:00",
+  evening_start: "18:00",
+  evening_end: "21:00",
+  night_start: "21:00",
+  night_end: "06:00",
+  weekend_start: "18:00",
+  weekend_end: "06:00",
+};
+
+const normalizeSettings = (value: any): PriceListSettings => ({
+  show_day: Boolean(value?.show_day ?? DEFAULT_SETTINGS.show_day),
+  show_evening: Boolean(value?.show_evening ?? DEFAULT_SETTINGS.show_evening),
+  show_night: Boolean(value?.show_night ?? DEFAULT_SETTINGS.show_night),
+  show_weekend: Boolean(value?.show_weekend ?? DEFAULT_SETTINGS.show_weekend),
+  show_overtime_weekday: Boolean(value?.show_overtime_weekday ?? DEFAULT_SETTINGS.show_overtime_weekday),
+  show_overtime_weekend: Boolean(value?.show_overtime_weekend ?? DEFAULT_SETTINGS.show_overtime_weekend),
+  day_start: value?.day_start || DEFAULT_SETTINGS.day_start,
+  day_end: value?.day_end || DEFAULT_SETTINGS.day_end,
+  evening_start: value?.evening_start || DEFAULT_SETTINGS.evening_start,
+  evening_end: value?.evening_end || DEFAULT_SETTINGS.evening_end,
+  night_start: value?.night_start || DEFAULT_SETTINGS.night_start,
+  night_end: value?.night_end || DEFAULT_SETTINGS.night_end,
+  weekend_start: value?.weekend_start || DEFAULT_SETTINGS.weekend_start,
+  weekend_end: value?.weekend_end || DEFAULT_SETTINGS.weekend_end,
+});
+
+const formatRate = (value: string) => {
+  if (!value) return "-";
+  const num = Number(value);
+  if (Number.isNaN(num)) return value;
+  return num.toFixed(2);
+};
+
+const PriceList = () => {
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(String(currentYear));
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("standard");
+  const [jobRoles, setJobRoles] = useState<JobRoleRate[]>([]);
+  const [materials, setMaterials] = useState<MaterialRate[]>([]);
+  const [settings, setSettings] = useState<PriceListSettings>(DEFAULT_SETTINGS);
+  const [settingsSource, setSettingsSource] = useState<string>("default");
+
+  const yearOptions = useMemo(() => {
+    return Array.from({ length: 5 }, (_, idx) => String(currentYear - 2 + idx));
+  }, [currentYear]);
+
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) || null,
+    [projects, selectedProjectId]
+  );
+
+  const loadPriceList = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ year });
+      if (selectedProjectId !== "standard") {
+        params.set("project_id", selectedProjectId);
+      }
+      const data = await apiFetch<any>(`/price-list?${params.toString()}`);
+      const jobRolesData = (data?.job_roles || []).map((role: any) => ({
+        id: String(role.id),
+        name: role.name || "-",
+        day_rate: toRateString(role.day_rate),
+        evening_rate: toRateString(role.evening_rate),
+        night_rate: toRateString(role.night_rate),
+        weekend_rate: toRateString(role.weekend_rate),
+        overtime_weekday_rate: toRateString(role.overtime_weekday_rate),
+        overtime_weekend_rate: toRateString(role.overtime_weekend_rate),
+        per_diem_rate: toRateString(role.per_diem_rate),
+        travel_time_rate: toRateString(role.travel_time_rate),
+      }));
+
+      const materialData = (data?.material_types || []).map((item: any) => ({
+        id: String(item.id),
+        name: item.name || "-",
+        price: toRateString(item.price),
+        unit: normalizeUnit(item.unit),
+      }));
+
+      setJobRoles(jobRolesData);
+      setMaterials(materialData);
+      setSettings(normalizeSettings(data?.settings));
+      setSettingsSource(String(data?.settings_source || "default"));
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte hämta prislista");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const data = await apiFetch<Project[]>("/projects?active=true");
+      setProjects((data || []).map((p) => ({ id: String(p.id), name: p.name })));
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte hämta projekt");
+    }
+  };
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
+
+  useEffect(() => {
+    loadPriceList();
+  }, [year, selectedProjectId]);
+
+  const updateJobRoleRate = (id: string, field: keyof JobRoleRate, value: string) => {
+    setJobRoles((prev) =>
+      prev.map((role) => (role.id === id ? { ...role, [field]: value } : role))
+    );
+  };
+
+  const updateMaterial = (id: string, field: keyof MaterialRate, value: string) => {
+    setMaterials((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const updateSettings = (field: keyof PriceListSettings, value: string | boolean) => {
+    setSettings((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const params = new URLSearchParams({ year });
+      if (selectedProjectId !== "standard") {
+        params.set("project_id", selectedProjectId);
+      }
+      await apiFetch(`/price-list?${params.toString()}`, {
+        method: "PUT",
+        json: {
+          year: Number(year),
+          job_roles: jobRoles.map((role) => ({
+            id: role.id,
+            day_rate: role.day_rate,
+            evening_rate: role.evening_rate,
+            night_rate: role.night_rate,
+            weekend_rate: role.weekend_rate,
+            overtime_weekday_rate: role.overtime_weekday_rate,
+            overtime_weekend_rate: role.overtime_weekend_rate,
+            per_diem_rate: role.per_diem_rate,
+            travel_time_rate: role.travel_time_rate,
+          })),
+          material_types: materials.map((item) => ({
+            id: item.id,
+            price: item.price,
+            unit: item.unit,
+          })),
+          settings: {
+            show_day: settings.show_day,
+            show_evening: settings.show_evening,
+            show_night: settings.show_night,
+            show_weekend: settings.show_weekend,
+            show_overtime_weekday: settings.show_overtime_weekday,
+            show_overtime_weekend: settings.show_overtime_weekend,
+            day_start: settings.day_start,
+            day_end: settings.day_end,
+            evening_start: settings.evening_start,
+            evening_end: settings.evening_end,
+            night_start: settings.night_start,
+            night_end: settings.night_end,
+            weekend_start: settings.weekend_start,
+            weekend_end: settings.weekend_end,
+          },
+        },
+      });
+      toast.success("Prislista sparad");
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte spara prislista");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const exportToPDF = async () => {
+    if (jobRoles.length === 0 && materials.length === 0) {
+      toast.error("Inga rader att exportera");
+      return;
+    }
+
+    try {
+      const doc = new jsPDF();
+      const title =
+        selectedProjectId === "standard"
+          ? "Prislista - Standard"
+          : `Prislista - ${selectedProject?.name || "Projekt"}`;
+
+      doc.setFontSize(20);
+      doc.text(title, 14, 18);
+      doc.setFontSize(11);
+      doc.text(`År: ${year}`, 14, 26);
+      doc.text(`Exportdatum: ${new Date().toLocaleDateString("sv-SE")}`, 14, 33);
+
+      let yPos = 42;
+
+      if (jobRoles.length > 0) {
+        doc.setFontSize(14);
+        doc.text("Yrkesroller", 14, yPos);
+        yPos += 4;
+
+        autoTable(doc, {
+          startY: yPos,
+          head: [[
+            "Yrkesroll",
+            "Dag",
+            "Kväll",
+            "Natt",
+            "Helg",
+            "ÖT vardag",
+            "ÖT helg",
+            "Traktamente",
+            "Restid",
+          ]],
+          body: jobRoles.map((role) => [
+            role.name,
+            formatRate(role.day_rate),
+            formatRate(role.evening_rate),
+            formatRate(role.night_rate),
+            formatRate(role.weekend_rate),
+            formatRate(role.overtime_weekday_rate),
+            formatRate(role.overtime_weekend_rate),
+            formatRate(role.per_diem_rate),
+            formatRate(role.travel_time_rate),
+          ]),
+          styles: { fontSize: 8, cellPadding: 2, valign: "middle" },
+          headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+          margin: { left: 14, right: 14 },
+        });
+
+        yPos = (doc as any).lastAutoTable?.finalY + 10;
+      }
+
+      if (materials.length > 0) {
+        doc.setFontSize(14);
+        doc.text("Tillägg", 14, yPos);
+        yPos += 4;
+
+        autoTable(doc, {
+          startY: yPos,
+          head: [["Tillägg", "Pris", "Enhet"]],
+          body: materials.map((item) => [
+            item.name,
+            formatRate(item.price),
+            item.unit || "-",
+          ]),
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+          margin: { left: 14, right: 14 },
+          columnStyles: {
+            0: { cellWidth: 90 },
+            1: { cellWidth: 30, halign: "right" },
+            2: { cellWidth: 30 },
+          },
+        });
+      }
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.text(
+          `Sida ${i} av ${pageCount}`,
+          doc.internal.pageSize.getWidth() / 2,
+          doc.internal.pageSize.getHeight() - 8,
+          { align: "center" }
+        );
+      }
+
+      const baseName = selectedProject?.name || "Standard";
+      const safeName = baseName.replace(/[^a-zA-Z0-9_-]+/g, "_");
+      doc.save(`prislista_${safeName}_${year}.pdf`);
+    } catch (error) {
+      console.error("PDF error:", error);
+      toast.error("Kunde inte skapa PDF");
+    }
+  };
+
+  const clearExternalPriceList = async () => {
+    if (selectedProjectId === "standard") return;
+    try {
+      await apiFetch(`/price-list?year=${year}&project_id=${selectedProjectId}`, {
+        method: "DELETE",
+      });
+      toast.success("Extern prislista rensad");
+      loadPriceList();
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte rensa prislista");
+    }
+  };
+
+  return (
+    <div className="space-y-6 p-4 md:p-6 lg:p-8">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Prislista</h1>
+        <p className="text-muted-foreground">
+          Skapa och hantera prislistor för fakturering.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+          {selectedProjectId === "standard"
+              ? "Standardprislista"
+              : `Extern prislista – ${selectedProject?.name || "Projekt"}`}
+          </CardTitle>
+          <CardDescription>
+            Prislista som gäller för valt år. Extern prislista kan anges per projekt.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-4 md:flex-row">
+              <div className="space-y-2">
+                <Label>År</Label>
+                <Select value={year} onValueChange={setYear}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Välj år" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        {opt}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Projekt (extern prislista)</Label>
+                <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+                  <SelectTrigger className="w-64">
+                    <SelectValue placeholder="Standardprislista" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standardprislista</SelectItem>
+                    {projects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedProjectId !== "standard" && (
+                  <p className="text-xs text-muted-foreground">
+                    Tomma fält använder standardprislistan vid fakturering.
+                  </p>
+                )}
+                {settingsSource === "standard" && selectedProjectId !== "standard" && (
+                  <p className="text-xs text-muted-foreground">
+                    Visar standardinställningar. Spara för att skapa projektets egna inställningar.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={loadPriceList} disabled={loading}>
+                Uppdatera
+              </Button>
+              <Button variant="outline" onClick={exportToPDF} disabled={loading}>
+                <Download className="h-4 w-4 mr-2" />
+                Ladda ner PDF
+              </Button>
+              {selectedProjectId !== "standard" && (
+                <Button variant="outline" onClick={clearExternalPriceList} disabled={loading}>
+                  Rensa extern prislista
+                </Button>
+              )}
+              <Button onClick={handleSave} disabled={saving || loading}>
+                {saving ? "Sparar..." : "Spara prislista"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Kundunderlag – visning</CardTitle>
+          <CardDescription>Välj vilka tidskategorier som ska visas i kundunderlaget.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.show_day}
+                onCheckedChange={(value) => updateSettings("show_day", value === true)}
+              />
+              Visa dag
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.show_evening}
+                onCheckedChange={(value) => updateSettings("show_evening", value === true)}
+              />
+              Visa kväll
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.show_night}
+                onCheckedChange={(value) => updateSettings("show_night", value === true)}
+              />
+              Visa natt
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.show_weekend}
+                onCheckedChange={(value) => updateSettings("show_weekend", value === true)}
+              />
+              Visa helg
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.show_overtime_weekday}
+                onCheckedChange={(value) => updateSettings("show_overtime_weekday", value === true)}
+              />
+              Visa övertid vardag
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.show_overtime_weekend}
+                onCheckedChange={(value) => updateSettings("show_overtime_weekend", value === true)}
+              />
+              Visa övertid helg
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground mt-4">
+            Tidsintervallen styr hur timmar delas upp i kundunderlaget.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Kundunderlag – tidsintervall</CardTitle>
+          <CardDescription>Ställ in tider för dag, kväll, natt och helg.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Dag (start)</Label>
+              <Input
+                type="time"
+                value={settings.day_start}
+                onChange={(e) => updateSettings("day_start", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Dag (slut)</Label>
+              <Input
+                type="time"
+                value={settings.day_end}
+                onChange={(e) => updateSettings("day_end", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Kväll (start)</Label>
+              <Input
+                type="time"
+                value={settings.evening_start}
+                onChange={(e) => updateSettings("evening_start", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Kväll (slut)</Label>
+              <Input
+                type="time"
+                value={settings.evening_end}
+                onChange={(e) => updateSettings("evening_end", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Natt (start)</Label>
+              <Input
+                type="time"
+                value={settings.night_start}
+                onChange={(e) => updateSettings("night_start", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Natt (slut)</Label>
+              <Input
+                type="time"
+                value={settings.night_end}
+                onChange={(e) => updateSettings("night_end", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Helg (start)</Label>
+              <Input
+                type="time"
+                value={settings.weekend_start}
+                onChange={(e) => updateSettings("weekend_start", e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Helg (slut)</Label>
+              <Input
+                type="time"
+                value={settings.weekend_end}
+                onChange={(e) => updateSettings("weekend_end", e.target.value)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Yrkesroller</CardTitle>
+          <CardDescription>Arvode och OB-priser per yrkesroll.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {jobRoles.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Inga yrkesroller att visa.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Yrkesroll</TableHead>
+                    <TableHead>Dag</TableHead>
+                    <TableHead>Kväll</TableHead>
+                    <TableHead>Natt</TableHead>
+                    <TableHead>Helg</TableHead>
+                    <TableHead>ÖT vardag</TableHead>
+                    <TableHead>ÖT helg</TableHead>
+                    <TableHead>Traktamente</TableHead>
+                    <TableHead>Restid</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {jobRoles.map((role) => (
+                    <TableRow key={role.id}>
+                      <TableCell className="font-medium">{role.name}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.day_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "day_rate", e.target.value)}
+                          className="w-24"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.evening_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "evening_rate", e.target.value)}
+                          className="w-24"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.night_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "night_rate", e.target.value)}
+                          className="w-24"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.weekend_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "weekend_rate", e.target.value)}
+                          className="w-24"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.overtime_weekday_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "overtime_weekday_rate", e.target.value)}
+                          className="w-28"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.overtime_weekend_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "overtime_weekend_rate", e.target.value)}
+                          className="w-28"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.per_diem_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "per_diem_rate", e.target.value)}
+                          className="w-28"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={role.travel_time_rate}
+                          onChange={(e) => updateJobRoleRate(role.id, "travel_time_rate", e.target.value)}
+                          className="w-24"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Tillägg</CardTitle>
+          <CardDescription>Fast pris per tillägg med vald enhet.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {materials.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Inga tillägg att visa.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tillägg</TableHead>
+                    <TableHead>Pris</TableHead>
+                    <TableHead>Enhet</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {materials.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">{item.name}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={item.price}
+                          onChange={(e) => updateMaterial(item.id, "price", e.target.value)}
+                          className="w-28"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={item.unit}
+                          onValueChange={(value) => updateMaterial(item.id, "unit", value)}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue placeholder="Välj enhet" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UNIT_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default PriceList;

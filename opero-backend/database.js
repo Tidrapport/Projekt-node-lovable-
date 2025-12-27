@@ -15,6 +15,21 @@ db.serialize(() => {
       name TEXT NOT NULL,
       code TEXT UNIQUE,
       billing_email TEXT,
+      address_line1 TEXT,
+      address_line2 TEXT,
+      postal_code TEXT,
+      city TEXT,
+      country TEXT,
+      phone TEXT,
+      bankgiro TEXT,
+      bic_number TEXT,
+      iban_number TEXT,
+      org_number TEXT,
+      vat_number TEXT,
+      f_skatt INTEGER DEFAULT 0,
+      invoice_payment_terms TEXT,
+      invoice_our_reference TEXT,
+      invoice_late_interest TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -30,6 +45,96 @@ db.serialize(() => {
       db.run(`ALTER TABLE companies ADD COLUMN billing_email TEXT;`, (alterErr) => {
         if (alterErr) console.error("Kunde inte lägga till billing_email:", alterErr);
         else console.log('Kolumnen "billing_email" har lagts till i companies.');
+      });
+    }
+    const hasAddressLine1 = columns.some((col) => col.name === "address_line1");
+    if (!hasAddressLine1) {
+      db.run(`ALTER TABLE companies ADD COLUMN address_line1 TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till address_line1:", alterErr);
+      });
+    }
+    const hasAddressLine2 = columns.some((col) => col.name === "address_line2");
+    if (!hasAddressLine2) {
+      db.run(`ALTER TABLE companies ADD COLUMN address_line2 TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till address_line2:", alterErr);
+      });
+    }
+    const hasPostalCode = columns.some((col) => col.name === "postal_code");
+    if (!hasPostalCode) {
+      db.run(`ALTER TABLE companies ADD COLUMN postal_code TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till postal_code:", alterErr);
+      });
+    }
+    const hasCity = columns.some((col) => col.name === "city");
+    if (!hasCity) {
+      db.run(`ALTER TABLE companies ADD COLUMN city TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till city:", alterErr);
+      });
+    }
+    const hasCountry = columns.some((col) => col.name === "country");
+    if (!hasCountry) {
+      db.run(`ALTER TABLE companies ADD COLUMN country TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till country:", alterErr);
+      });
+    }
+    const hasPhone = columns.some((col) => col.name === "phone");
+    if (!hasPhone) {
+      db.run(`ALTER TABLE companies ADD COLUMN phone TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till phone:", alterErr);
+      });
+    }
+    const hasBankgiro = columns.some((col) => col.name === "bankgiro");
+    if (!hasBankgiro) {
+      db.run(`ALTER TABLE companies ADD COLUMN bankgiro TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till bankgiro:", alterErr);
+      });
+    }
+    const hasBicNumber = columns.some((col) => col.name === "bic_number");
+    if (!hasBicNumber) {
+      db.run(`ALTER TABLE companies ADD COLUMN bic_number TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till bic_number:", alterErr);
+      });
+    }
+    const hasIbanNumber = columns.some((col) => col.name === "iban_number");
+    if (!hasIbanNumber) {
+      db.run(`ALTER TABLE companies ADD COLUMN iban_number TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till iban_number:", alterErr);
+      });
+    }
+    const hasOrgNumber = columns.some((col) => col.name === "org_number");
+    if (!hasOrgNumber) {
+      db.run(`ALTER TABLE companies ADD COLUMN org_number TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till org_number:", alterErr);
+      });
+    }
+    const hasVatNumber = columns.some((col) => col.name === "vat_number");
+    if (!hasVatNumber) {
+      db.run(`ALTER TABLE companies ADD COLUMN vat_number TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till vat_number:", alterErr);
+      });
+    }
+    const hasFSkatt = columns.some((col) => col.name === "f_skatt");
+    if (!hasFSkatt) {
+      db.run(`ALTER TABLE companies ADD COLUMN f_skatt INTEGER DEFAULT 0;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till f_skatt:", alterErr);
+      });
+    }
+    const hasInvoiceTerms = columns.some((col) => col.name === "invoice_payment_terms");
+    if (!hasInvoiceTerms) {
+      db.run(`ALTER TABLE companies ADD COLUMN invoice_payment_terms TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till invoice_payment_terms:", alterErr);
+      });
+    }
+    const hasInvoiceReference = columns.some((col) => col.name === "invoice_our_reference");
+    if (!hasInvoiceReference) {
+      db.run(`ALTER TABLE companies ADD COLUMN invoice_our_reference TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till invoice_our_reference:", alterErr);
+      });
+    }
+    const hasInvoiceLateInterest = columns.some((col) => col.name === "invoice_late_interest");
+    if (!hasInvoiceLateInterest) {
+      db.run(`ALTER TABLE companies ADD COLUMN invoice_late_interest TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till invoice_late_interest:", alterErr);
       });
     }
     const hasCreatedAt = columns.some((col) => col.name === "created_at");
@@ -247,6 +352,149 @@ db.serialize(() => {
 
     db.run(`CREATE INDEX IF NOT EXISTS idx_material_types_company_id ON material_types(company_id);`);
   });
+
+  // --- Price lists (Prislistor) per år ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS job_role_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      job_role_id INTEGER NOT NULL,
+      base_rate REAL,
+      day_rate REAL,
+      evening_rate REAL,
+      night_rate REAL,
+      weekend_rate REAL,
+      overtime_weekday_rate REAL,
+      overtime_weekend_rate REAL,
+      per_diem_rate REAL,
+      travel_time_rate REAL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (job_role_id) REFERENCES job_roles(id),
+      UNIQUE (company_id, year, job_role_id)
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_job_role_rates_company_year ON job_role_rates(company_id, year);`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS material_type_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      material_type_id INTEGER NOT NULL,
+      price REAL,
+      unit TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (material_type_id) REFERENCES material_types(id),
+      UNIQUE (company_id, year, material_type_id)
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_material_type_rates_company_year ON material_type_rates(company_id, year);`);
+
+  // --- Project-specific price lists (external) ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS price_list_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      show_day INTEGER DEFAULT 1,
+      show_evening INTEGER DEFAULT 1,
+      show_night INTEGER DEFAULT 1,
+      show_weekend INTEGER DEFAULT 1,
+      show_overtime_weekday INTEGER DEFAULT 1,
+      show_overtime_weekend INTEGER DEFAULT 1,
+      day_start TEXT,
+      day_end TEXT,
+      evening_start TEXT,
+      evening_end TEXT,
+      night_start TEXT,
+      night_end TEXT,
+      weekend_start TEXT,
+      weekend_end TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      UNIQUE (company_id, year)
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_list_settings_company_year ON price_list_settings(company_id, year);`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS project_price_list_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      project_id INTEGER NOT NULL,
+      show_day INTEGER DEFAULT 1,
+      show_evening INTEGER DEFAULT 1,
+      show_night INTEGER DEFAULT 1,
+      show_weekend INTEGER DEFAULT 1,
+      show_overtime_weekday INTEGER DEFAULT 1,
+      show_overtime_weekend INTEGER DEFAULT 1,
+      day_start TEXT,
+      day_end TEXT,
+      evening_start TEXT,
+      evening_end TEXT,
+      night_start TEXT,
+      night_end TEXT,
+      weekend_start TEXT,
+      weekend_end TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      UNIQUE (company_id, year, project_id)
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_project_price_list_settings_company_year ON project_price_list_settings(company_id, year);`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS project_job_role_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      project_id INTEGER NOT NULL,
+      job_role_id INTEGER NOT NULL,
+      day_rate REAL,
+      evening_rate REAL,
+      night_rate REAL,
+      weekend_rate REAL,
+      overtime_weekday_rate REAL,
+      overtime_weekend_rate REAL,
+      per_diem_rate REAL,
+      travel_time_rate REAL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (job_role_id) REFERENCES job_roles(id),
+      UNIQUE (company_id, year, project_id, job_role_id)
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_project_job_role_rates_company_year ON project_job_role_rates(company_id, year);`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS project_material_type_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      project_id INTEGER NOT NULL,
+      material_type_id INTEGER NOT NULL,
+      price REAL,
+      unit TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (material_type_id) REFERENCES material_types(id),
+      UNIQUE (company_id, year, project_id, material_type_id)
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_project_material_type_rates_company_year ON project_material_type_rates(company_id, year);`);
 
   // Standard‑företag (id = 1)
   db.run(

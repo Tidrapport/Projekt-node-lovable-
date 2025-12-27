@@ -81,6 +81,7 @@ const adminHubSubItems = [
   { title: "Tillägg", url: "/admin/material-types", icon: Package },
   { title: "OB-inställningar", url: "/admin/ob-settings", icon: Percent },
   { title: "Faktura-inställningar", url: "/admin/invoice-settings", icon: FileText },
+  { title: "Prislista", url: "/admin/price-list", icon: FileText },
 ];
 
 const superAdminItems = [

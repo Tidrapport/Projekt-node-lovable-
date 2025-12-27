@@ -687,11 +687,14 @@ export default function AdminSalaries() {
   const selectedHours = selectedSummaries.reduce((sum, s) => sum + s.workHours, 0);
   const selectedEntries = selectedSummaries.reduce((sum, s) => sum + s.entries.length, 0);
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">
+    return (
+      <div className="container mx-auto flex items-center justify-center min-h-[400px] p-6">
         <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>;
+      </div>
+    );
   }
-  return <div className="space-y-6">
+  return (
+    <div className="container mx-auto space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-bold"> Löner – Fortnox Export</h1>
         <p className="text-muted-foreground"> Skapa och exportera löneunderlag för import till Fortnox Lön</p>
@@ -1134,5 +1137,6 @@ export default function AdminSalaries() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>;
+    </div>
+  );
 }

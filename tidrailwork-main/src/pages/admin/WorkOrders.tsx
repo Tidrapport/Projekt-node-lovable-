@@ -20,10 +20,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { apiFetch } from "@/api/client";
+import { apiFetch, getToken } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { ChevronDown, Filter, Plus, Search } from "lucide-react";
+import { ChevronDown, Download, Filter, Plus, Search } from "lucide-react";
 
 type WorkOrderAssignee = {
   id: number;
@@ -84,6 +84,7 @@ const WorkOrders = () => {
   const [saving, setSaving] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
   const [attesting, setAttesting] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const normalizeStatus = (status?: string | null) => {
     const value = String(status || "not_started").toLowerCase();
@@ -171,6 +172,34 @@ const WorkOrders = () => {
       toast.error(error.message || "Kunde inte attestera");
     } finally {
       setAttesting(false);
+    }
+  };
+
+  const handleDownloadPdf = async (order: WorkOrder) => {
+    if (!order || downloadingId) return;
+    setDownloadingId(order.id);
+    try {
+      const token = getToken();
+      const base = import.meta.env.VITE_API_BASE_URL?.trim() || "";
+      const query = isSuperAdmin && companyId ? `?company_id=${companyId}` : "";
+      const url = base ? `${base}/work-orders/${order.id}/pdf${query}` : `/work-orders/${order.id}/pdf${query}`;
+      const res = await fetch(url, {
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Kunde inte hämta arbetsorder");
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const orderCode = `${order.order_year}-${String(order.order_number).padStart(4, "0")}`;
+      a.href = downloadUrl;
+      a.download = `arbetsorder_${orderCode}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte ladda ner arbetsorder");
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -617,6 +646,16 @@ const WorkOrders = () => {
             <DialogClose asChild>
               <Button variant="outline">Stäng</Button>
             </DialogClose>
+            {selectedOrder && (
+              <Button
+                variant="outline"
+                onClick={() => handleDownloadPdf(selectedOrder)}
+                disabled={downloadingId === selectedOrder.id}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {downloadingId === selectedOrder.id ? "Laddar..." : "Ladda ner PDF"}
+              </Button>
+            )}
             {selectedOrder && String(selectedOrder.status || "").toLowerCase() === "closed" && (
               <Button onClick={() => handleAttest(selectedOrder)} disabled={attesting}>
                 {attesting ? "Attesterar..." : "Attestera"}

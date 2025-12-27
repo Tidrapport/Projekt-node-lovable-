@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +83,18 @@ const InvoiceSettings = () => {
           <div className="flex justify-end">
             <Button onClick={handleSave}>Spara</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Prislista</CardTitle>
+          <CardDescription>Skapa och hantera prislistor för fakturering.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex justify-end">
+          <Button asChild variant="outline">
+            <Link to="/admin/price-list">Gå till prislista</Link>
+          </Button>
         </CardContent>
       </Card>
     </div>

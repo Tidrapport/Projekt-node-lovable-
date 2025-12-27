@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { format } from "date-fns";
+import { addDays, format } from "date-fns";
 import { sv } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -33,12 +33,22 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
+import { calculateOBDistribution } from "@/lib/obDistribution";
+import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 
 interface TimeEntry {
   id: string;
   date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  break_minutes?: number | null;
   total_hours: number;
   travel_time_hours?: number | null;
+  overtime_weekday_hours?: number | null;
+  overtime_weekend_hours?: number | null;
+  per_diem_type?: string | null;
+  job_role_id?: string | null;
+  materials?: { material_type_id: string | number; quantity: number }[];
   attested_by: string | null;
   project_id: string | null;
   subproject_id: string | null;
@@ -51,11 +61,17 @@ interface TimeEntry {
 interface Customer {
   id: string;
   name: string;
+  orgnr?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  notes?: string | null;
 }
 
 interface Project {
   id: string;
   name: string;
+  code?: string | null;
   customer_id?: string | null;
   customer_name?: string | null;
 }
@@ -71,13 +87,73 @@ interface UserProfile {
   full_name: string | null;
 }
 
+type CompanyInfo = {
+  id: string;
+  name: string;
+  billing_email?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  bankgiro?: string | null;
+  bic_number?: string | null;
+  iban_number?: string | null;
+  org_number?: string | null;
+  vat_number?: string | null;
+  f_skatt?: number | null;
+  invoice_payment_terms?: string | null;
+  invoice_our_reference?: string | null;
+  invoice_late_interest?: string | null;
+};
+
+type PriceListJobRole = {
+  id: string;
+  name: string;
+  day_rate: number | null;
+  evening_rate: number | null;
+  night_rate: number | null;
+  weekend_rate: number | null;
+  overtime_weekday_rate: number | null;
+  overtime_weekend_rate: number | null;
+  per_diem_rate: number | null;
+  travel_time_rate: number | null;
+};
+
+type PriceListMaterial = {
+  id: string;
+  name: string;
+  price: number | null;
+  unit: string;
+};
+
+type PriceListSettings = {
+  day_start?: string;
+  day_end?: string;
+  evening_start?: string;
+  evening_end?: string;
+  night_start?: string;
+  night_end?: string;
+  weekend_start?: string;
+  weekend_end?: string;
+};
+
+type PriceListResponse = {
+  year: number;
+  job_roles: PriceListJobRole[];
+  material_types: PriceListMaterial[];
+  settings?: PriceListSettings;
+};
+
 const Billing = () => {
-  const { user } = useAuth();
+  const { user, companyId } = useAuth();
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [subprojects, setSubprojects] = useState<Subproject[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [exportingInvoicePdf, setExportingInvoicePdf] = useState(false);
 
   const [customerId, setCustomerId] = useState<string>("all");
   const [projectId, setProjectId] = useState<string>("all");
@@ -106,8 +182,19 @@ const Billing = () => {
       const normalized = (entryData || []).map((e) => ({
         id: String(e.id),
         date: e.datum || e.date || "",
+        start_time: e.starttid && e.starttid !== "null" ? e.starttid : e.start_time || "",
+        end_time: e.sluttid && e.sluttid !== "null" ? e.sluttid : e.end_time || "",
+        break_minutes: e.break_minutes != null ? Number(e.break_minutes) : 0,
         total_hours: e.timmar != null ? Number(e.timmar) : Number(e.total_hours) || 0,
         travel_time_hours: e.restid != null ? Number(e.restid) : Number(e.travel_time_hours) || 0,
+        overtime_weekday_hours: e.overtime_weekday_hours ?? null,
+        overtime_weekend_hours: e.overtime_weekend_hours ?? null,
+        per_diem_type: e.per_diem_type || e.traktamente_type || null,
+        job_role_id: e.job_role_id != null ? String(e.job_role_id) : null,
+        materials: (e.materials || []).map((m: any) => ({
+          material_type_id: String(m.material_type_id),
+          quantity: Number(m.quantity) || 0,
+        })),
         attested_by: e.attested_by != null ? String(e.attested_by) : null,
         invoiced: e.invoiced ?? false,
         project_id: e.project_id != null ? String(e.project_id) : null,
@@ -195,6 +282,189 @@ const Billing = () => {
     return dateStr || "";
   };
 
+  const timeToHours = (value: string | undefined, fallback: number) => {
+    const match = String(value || "").match(/^([0-1]\d|2[0-3]):([0-5]\d)$/);
+    if (!match) return fallback;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    return hours + minutes / 60;
+  };
+
+  const hasProjectRates = (priceList: PriceListResponse) => {
+    const roleHasRate = priceList.job_roles.some((role) =>
+      [
+        role.day_rate,
+        role.evening_rate,
+        role.night_rate,
+        role.weekend_rate,
+        role.overtime_weekday_rate,
+        role.overtime_weekend_rate,
+        role.per_diem_rate,
+        role.travel_time_rate,
+      ].some((val) => val !== null && val !== undefined)
+    );
+    const materialHasRate = priceList.material_types.some((mat) => mat.price !== null && mat.price !== undefined);
+    return roleHasRate || materialHasRate;
+  };
+
+  const buildInvoiceLines = (
+    invoiceEntries: TimeEntry[],
+    priceList: PriceListResponse
+  ): { lines: InvoiceLine[]; totals: InvoiceTotals } => {
+    const jobRoleRates = new Map(priceList.job_roles.map((role) => [role.id, role]));
+    const materialRates = new Map(priceList.material_types.map((mat) => [mat.id, mat]));
+
+    const settings = priceList.settings || {};
+    const shiftWindows = {
+      day: { start: timeToHours(settings.day_start, 6), end: timeToHours(settings.day_end, 18) },
+      evening: { start: timeToHours(settings.evening_start, 18), end: timeToHours(settings.evening_end, 21) },
+      night: { start: timeToHours(settings.night_start, 21), end: timeToHours(settings.night_end, 6) },
+      weekend: { start: timeToHours(settings.weekend_start, 18), end: timeToHours(settings.weekend_end, 6) },
+    };
+
+    const lineMap = new Map<string, InvoiceLine>();
+    const orderedLines: InvoiceLine[] = [];
+
+    const addLine = (key: string, line: InvoiceLine) => {
+      if (!Number.isFinite(line.quantity) || line.quantity === 0) return;
+      const existing = lineMap.get(key);
+      if (existing) {
+        existing.quantity += line.quantity;
+        existing.total += line.total;
+        return;
+      }
+      lineMap.set(key, line);
+      orderedLines.push(line);
+    };
+
+    invoiceEntries.forEach((entry) => {
+      const role = entry.job_role_id ? jobRoleRates.get(entry.job_role_id) : null;
+      const roleName = role?.name || "Yrkesroll";
+      const totalHours = Number(entry.total_hours || 0);
+
+      let distribution = { day: totalHours, evening: 0, night: 0, weekend: 0 };
+      if (entry.date && entry.start_time && entry.end_time) {
+        distribution = calculateOBDistribution(
+          entry.date,
+          entry.start_time,
+          entry.end_time,
+          entry.break_minutes || 0,
+          shiftWindows
+        );
+      }
+
+      addLine(`${roleName}-day`, {
+        item_no: "",
+        description: `${roleName} Dag`,
+        quantity: distribution.day,
+        unit: "tim",
+        unit_price: Number(role?.day_rate ?? 0),
+        total: distribution.day * Number(role?.day_rate ?? 0),
+      });
+      addLine(`${roleName}-evening`, {
+        item_no: "",
+        description: `${roleName} Kväll`,
+        quantity: distribution.evening,
+        unit: "tim",
+        unit_price: Number(role?.evening_rate ?? 0),
+        total: distribution.evening * Number(role?.evening_rate ?? 0),
+      });
+      addLine(`${roleName}-night`, {
+        item_no: "",
+        description: `${roleName} Natt`,
+        quantity: distribution.night,
+        unit: "tim",
+        unit_price: Number(role?.night_rate ?? 0),
+        total: distribution.night * Number(role?.night_rate ?? 0),
+      });
+      addLine(`${roleName}-weekend`, {
+        item_no: "",
+        description: `${roleName} Helg`,
+        quantity: distribution.weekend,
+        unit: "tim",
+        unit_price: Number(role?.weekend_rate ?? 0),
+        total: distribution.weekend * Number(role?.weekend_rate ?? 0),
+      });
+
+      if (entry.overtime_weekday_hours) {
+        addLine(`${roleName}-overtime-weekday`, {
+          item_no: "",
+          description: `${roleName} Övertid vardag`,
+          quantity: Number(entry.overtime_weekday_hours || 0),
+          unit: "tim",
+          unit_price: Number(role?.overtime_weekday_rate ?? 0),
+          total: Number(entry.overtime_weekday_hours || 0) * Number(role?.overtime_weekday_rate ?? 0),
+        });
+      }
+
+      if (entry.overtime_weekend_hours) {
+        addLine(`${roleName}-overtime-weekend`, {
+          item_no: "",
+          description: `${roleName} Övertid helg`,
+          quantity: Number(entry.overtime_weekend_hours || 0),
+          unit: "tim",
+          unit_price: Number(role?.overtime_weekend_rate ?? 0),
+          total: Number(entry.overtime_weekend_hours || 0) * Number(role?.overtime_weekend_rate ?? 0),
+        });
+      }
+
+      if (entry.travel_time_hours) {
+        addLine(`${roleName}-travel`, {
+          item_no: "",
+          description: `${roleName} Restid`,
+          quantity: Number(entry.travel_time_hours || 0),
+          unit: "tim",
+          unit_price: Number(role?.travel_time_rate ?? 0),
+          total: Number(entry.travel_time_hours || 0) * Number(role?.travel_time_rate ?? 0),
+        });
+      }
+
+      const perDiemDays = entry.per_diem_type === "full" ? 1 : entry.per_diem_type === "half" ? 0.5 : 0;
+      if (perDiemDays) {
+        addLine(`${roleName}-perdiem`, {
+          item_no: "",
+          description: `${roleName} Traktamente`,
+          quantity: perDiemDays,
+          unit: "dag",
+          unit_price: Number(role?.per_diem_rate ?? 0),
+          total: perDiemDays * Number(role?.per_diem_rate ?? 0),
+        });
+      }
+
+      (entry.materials || []).forEach((mat) => {
+        const materialInfo = materialRates.get(String(mat.material_type_id));
+        if (!materialInfo || mat.quantity === 0) return;
+        addLine(`material-${materialInfo.id}`, {
+          item_no: "",
+          description: materialInfo.name,
+          quantity: Number(mat.quantity || 0),
+          unit: materialInfo.unit || "",
+          unit_price: Number(materialInfo.price ?? 0),
+          total: Number(mat.quantity || 0) * Number(materialInfo.price ?? 0),
+        });
+      });
+    });
+
+    orderedLines.forEach((line, idx) => {
+      line.item_no = String(idx + 1);
+    });
+
+    const subtotal = orderedLines.reduce((sum, line) => sum + line.total, 0);
+    const vatRate = 25;
+    const vat = subtotal * (vatRate / 100);
+    const total = subtotal + vat;
+
+    return {
+      lines: orderedLines,
+      totals: {
+        subtotal,
+        vat,
+        total,
+        vat_rate: vatRate,
+      },
+    };
+  };
+
   const exportCSV = () => {
     if (!filteredEntries.length) {
       toast.error("Inget att exportera.");
@@ -265,11 +535,123 @@ const Billing = () => {
     toast.success("PDF skapad.");
   };
 
+  const exportInvoicePdf = async () => {
+    if (!filteredEntries.length) {
+      toast.error("Inget att fakturera.");
+      return;
+    }
+    if (projectId === "all") {
+      toast.error("Välj ett projekt för fakturan.");
+      return;
+    }
+    setExportingInvoicePdf(true);
+    try {
+      const entryDates = filteredEntries
+        .map((entry) => (entry.date ? new Date(entry.date) : null))
+        .filter((d) => d && !Number.isNaN(d.getTime())) as Date[];
+      const periodStart = entryDates.length ? new Date(Math.min(...entryDates.map((d) => d.getTime()))) : new Date();
+      const priceListYear = periodStart.getFullYear();
+
+      const params = new URLSearchParams({ year: String(priceListYear), project_id: projectId });
+      let priceList = await apiFetch<PriceListResponse>(`/price-list?${params.toString()}`);
+      if (!hasProjectRates(priceList)) {
+        const baseParams = new URLSearchParams({ year: String(priceListYear) });
+        priceList = await apiFetch<PriceListResponse>(`/price-list?${baseParams.toString()}`);
+      }
+
+      const { lines, totals } = buildInvoiceLines(filteredEntries, priceList);
+      if (!lines.length) {
+        toast.error("Inga fakturarader kunde skapas.");
+        return;
+      }
+      if (lines.length > 18) {
+        toast.error("För många fakturarader för fakturamallen.");
+        return;
+      }
+
+      const selectedProject = projects.find((p) => String(p.id) === projectId);
+      const targetCustomer =
+        customerId !== "all"
+          ? customers.find((c) => String(c.id) === customerId)
+          : customers.find((c) => String(c.id) === String(selectedProject?.customer_id || ""));
+
+      const customerLines: string[] = [];
+      if (targetCustomer?.name) customerLines.push(targetCustomer.name);
+      if (targetCustomer?.notes) {
+        const notesLines = targetCustomer.notes
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        customerLines.push(...notesLines);
+      }
+      if (targetCustomer?.contact_name) customerLines.push(targetCustomer.contact_name);
+      if (targetCustomer?.contact_email) customerLines.push(targetCustomer.contact_email);
+      if (targetCustomer?.contact_phone) customerLines.push(targetCustomer.contact_phone);
+      if (targetCustomer?.orgnr) customerLines.push(`Org.nr ${targetCustomer.orgnr}`);
+
+      const companies = await apiFetch<CompanyInfo[]>(`/companies`);
+      const company = companyId
+        ? (companies || []).find((c) => String(c.id) === String(companyId))
+        : (companies || [])[0];
+
+      const paymentTerms = company?.invoice_payment_terms?.trim() || "30 dagar";
+      const numericDaysMatch = paymentTerms.match(/\d+/);
+      const paymentDays = numericDaysMatch ? Number(numericDaysMatch[0]) : 30;
+
+      const invoiceDate = new Date();
+      const dueDate = addDays(invoiceDate, Number.isFinite(paymentDays) ? paymentDays : 30);
+      const invoiceNumber = `${format(invoiceDate, "yyyyMMdd")}${projectId !== "all" ? projectId : ""}`;
+      const ocr = invoiceNumber ? `${invoiceNumber}0` : "";
+
+      const meta: InvoiceMeta = {
+        invoice_date: format(invoiceDate, "yyyy-MM-dd"),
+        invoice_number: invoiceNumber,
+        ocr,
+        customer_number: targetCustomer?.id ? String(targetCustomer.id) : "",
+        our_reference: company?.invoice_our_reference || user?.full_name || user?.email || "",
+        their_reference: targetCustomer?.contact_name || "",
+        order_number: selectedProject?.code || selectedProject?.name || "",
+        payment_terms: paymentTerms,
+        due_date: format(dueDate, "yyyy-MM-dd"),
+        vat_number: targetCustomer?.orgnr || "",
+        late_interest: company?.invoice_late_interest || "8%",
+        customer_address_lines: customerLines,
+      };
+
+      const footer: CompanyFooter | undefined = company
+        ? {
+            name: company.name,
+            address_line1: company.address_line1,
+            address_line2: company.address_line2,
+            postal_code: company.postal_code,
+            city: company.city,
+            country: company.country,
+            phone: company.phone,
+            billing_email: company.billing_email,
+            bankgiro: company.bankgiro,
+            bic_number: company.bic_number,
+            iban_number: company.iban_number,
+            org_number: company.org_number,
+            vat_number: company.vat_number,
+            f_skatt: company.f_skatt,
+          }
+        : undefined;
+
+      await generateInvoicePdf(meta, lines, totals, footer);
+      toast.success("Faktura skapad.");
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Kunde inte skapa faktura-PDF.");
+    } finally {
+      setExportingInvoicePdf(false);
+    }
+  };
+
   return (
-    <div className="space-y-6 p-4 md:p-6 lg:p-8">
+    <div className="container mx-auto space-y-6 p-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold">Fakturering</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Fakturering</h1>
           <p className="text-sm text-muted-foreground">
             Filtrera tidrapporter per kund, projekt och användare. Exportera till PDF eller Fortnox.
           </p>
@@ -277,7 +659,11 @@ const Billing = () => {
         <div className="flex gap-2">
           <Button variant="outline" onClick={exportPDF}>
             <FileText className="mr-2 h-4 w-4" />
-            PDF
+            Underlag PDF
+          </Button>
+          <Button variant="outline" onClick={exportInvoicePdf} disabled={exportingInvoicePdf}>
+            <FileText className="mr-2 h-4 w-4" />
+            Faktura PDF
           </Button>
           <Button onClick={exportCSV}>
             <Download className="mr-2 h-4 w-4" />

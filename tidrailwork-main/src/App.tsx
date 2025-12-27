@@ -28,6 +28,7 @@ import AdminTimeAttestations from "./pages/admin/TimeAttestations";
 import AdminDeviations from "./pages/admin/Deviations";
 import AdminOBSettings from "./pages/admin/OBSettings";
 import AdminInvoiceSettings from "./pages/admin/InvoiceSettings";
+import AdminPriceList from "./pages/admin/PriceList";
 import AdminStatistics from "./pages/admin/Statistics";
 import AdminWorkOrders from "./pages/admin/WorkOrders";
 import AdminHub from "./pages/admin/AdminHub";
@@ -295,6 +296,16 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <AdminInvoiceSettings />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/price-list"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminPriceList />
                     </Layout>
                   </ProtectedRoute>
                 }

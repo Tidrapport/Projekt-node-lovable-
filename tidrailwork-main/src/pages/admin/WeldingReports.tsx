@@ -129,7 +129,7 @@ const AdminWeldingReports = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-bold">Svetsrapporter</h1>
         <p className="text-muted-foreground">Hantera och ladda ner svetsrapporter</p>

@@ -12,9 +12,9 @@ import {
   DialogTitle,
   DialogClose,
 } from "@/components/ui/dialog";
-import { apiFetch } from "@/api/client";
+import { apiFetch, getToken } from "@/api/client";
 import { toast } from "sonner";
-import { ClipboardCheck, MessageSquare, Play, CheckCircle2, MapPin, User } from "lucide-react";
+import { ClipboardCheck, MessageSquare, Play, CheckCircle2, MapPin, User, Download } from "lucide-react";
 
 type WorkOrderAssignee = {
   id: number;
@@ -63,6 +63,7 @@ const WorkOrders = () => {
   const [startingOrder, setStartingOrder] = useState<number | null>(null);
   const [pausingOrder, setPausingOrder] = useState<number | null>(null);
   const [addingComment, setAddingComment] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchOrders();
@@ -179,6 +180,33 @@ const WorkOrders = () => {
       toast.error(error.message || "Kunde inte spara kommentar");
     } finally {
       setAddingComment(false);
+    }
+  };
+
+  const handleDownloadPdf = async (order: WorkOrder) => {
+    if (!order || downloadingId) return;
+    setDownloadingId(order.id);
+    try {
+      const token = getToken();
+      const base = import.meta.env.VITE_API_BASE_URL?.trim() || "";
+      const url = base ? `${base}/work-orders/${order.id}/pdf` : `/work-orders/${order.id}/pdf`;
+      const res = await fetch(url, {
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Kunde inte hämta arbetsorder");
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const orderCode = `${order.order_year}-${String(order.order_number).padStart(4, "0")}`;
+      a.href = downloadUrl;
+      a.download = `arbetsorder_${orderCode}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte ladda ner arbetsorder");
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -392,6 +420,16 @@ const WorkOrders = () => {
             <DialogClose asChild>
               <Button variant="outline">Stäng</Button>
             </DialogClose>
+            {selectedOrder && (
+              <Button
+                variant="outline"
+                onClick={() => handleDownloadPdf(selectedOrder)}
+                disabled={downloadingId === selectedOrder.id}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {downloadingId === selectedOrder.id ? "Laddar..." : "Ladda ner PDF"}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -393,16 +393,26 @@ app.get("/public/companies", (req, res) => {
 app.get("/companies", requireAuth, (req, res) => {
   const role = (req.user.role || "").toLowerCase();
   if (role === "super_admin") {
-    db.all("SELECT id, name, code, billing_email, created_at FROM companies ORDER BY name", [], (err, rows) => {
-      if (err) {
-        console.error("DB-fel vid /companies:", err);
-        return res.status(500).json({ error: "DB error" });
+    db.all(
+      `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
+              bankgiro, bic_number, iban_number, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
+              invoice_late_interest, created_at
+       FROM companies ORDER BY name`,
+      [],
+      (err, rows) => {
+        if (err) {
+          console.error("DB-fel vid /companies:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json(rows || []);
       }
-      res.json(rows || []);
-    });
+    );
   } else {
     db.all(
-      "SELECT id, name, code, billing_email, created_at FROM companies WHERE id = ?",
+      `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
+              bankgiro, bic_number, iban_number, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
+              invoice_late_interest, created_at
+       FROM companies WHERE id = ?`,
       [req.user.company_id],
       (err, rows) => {
         if (err) {
@@ -466,7 +476,26 @@ app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
 // Uppdatera företag (superadmin valfritt, admin endast sitt företag)
 app.put("/companies/:id", requireAuth, (req, res) => {
   const { id } = req.params;
-  const { name, billing_email, code } = req.body || {};
+  const {
+    name,
+    billing_email,
+    code,
+    address_line1,
+    address_line2,
+    postal_code,
+    city,
+    country,
+    phone,
+    bankgiro,
+    bic_number,
+    iban_number,
+    org_number,
+    vat_number,
+    f_skatt,
+    invoice_payment_terms,
+    invoice_our_reference,
+    invoice_late_interest,
+  } = req.body || {};
   const role = (req.user.role || "").toLowerCase();
   const isSuper = role === "super_admin";
   const scopedCompanyId = getScopedCompanyId(req);
@@ -494,6 +523,68 @@ app.put("/companies/:id", requireAuth, (req, res) => {
     }
     fields.push("code = ?");
     params.push(String(code).trim());
+  }
+  if (address_line1 !== undefined) {
+    fields.push("address_line1 = ?");
+    params.push(address_line1 ? String(address_line1).trim() : null);
+  }
+  if (address_line2 !== undefined) {
+    fields.push("address_line2 = ?");
+    params.push(address_line2 ? String(address_line2).trim() : null);
+  }
+  if (postal_code !== undefined) {
+    fields.push("postal_code = ?");
+    params.push(postal_code ? String(postal_code).trim() : null);
+  }
+  if (city !== undefined) {
+    fields.push("city = ?");
+    params.push(city ? String(city).trim() : null);
+  }
+  if (country !== undefined) {
+    fields.push("country = ?");
+    params.push(country ? String(country).trim() : null);
+  }
+  if (phone !== undefined) {
+    fields.push("phone = ?");
+    params.push(phone ? String(phone).trim() : null);
+  }
+  if (bankgiro !== undefined) {
+    fields.push("bankgiro = ?");
+    params.push(bankgiro ? String(bankgiro).trim() : null);
+  }
+  if (bic_number !== undefined) {
+    fields.push("bic_number = ?");
+    params.push(bic_number ? String(bic_number).trim() : null);
+  }
+  if (iban_number !== undefined) {
+    fields.push("iban_number = ?");
+    params.push(iban_number ? String(iban_number).trim() : null);
+  }
+  if (org_number !== undefined) {
+    fields.push("org_number = ?");
+    params.push(org_number ? String(org_number).trim() : null);
+  }
+  if (vat_number !== undefined) {
+    fields.push("vat_number = ?");
+    params.push(vat_number ? String(vat_number).trim() : null);
+  }
+  if (f_skatt !== undefined) {
+    const flag =
+      f_skatt === true || f_skatt === 1 || f_skatt === "1" || f_skatt === "true";
+    fields.push("f_skatt = ?");
+    params.push(flag ? 1 : 0);
+  }
+  if (invoice_payment_terms !== undefined) {
+    fields.push("invoice_payment_terms = ?");
+    params.push(invoice_payment_terms ? String(invoice_payment_terms).trim() : null);
+  }
+  if (invoice_our_reference !== undefined) {
+    fields.push("invoice_our_reference = ?");
+    params.push(invoice_our_reference ? String(invoice_our_reference).trim() : null);
+  }
+  if (invoice_late_interest !== undefined) {
+    fields.push("invoice_late_interest = ?");
+    params.push(invoice_late_interest ? String(invoice_late_interest).trim() : null);
   }
 
   if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
@@ -1440,6 +1531,146 @@ app.post("/work-orders/:id/attest", requireAuth, requireAdmin, (req, res) => {
       }
     );
   });
+});
+
+// Download work order PDF
+app.get("/work-orders/:id/pdf", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  const id = req.params.id;
+  const isAdminUser = isAdminRole(req);
+  const targetCompanyId = companyId || (allowAll && req.query.company_id ? req.query.company_id : null);
+
+  const params = [id];
+  let where = "wo.id = ?";
+  if (targetCompanyId) {
+    where += " AND wo.company_id = ?";
+    params.push(targetCompanyId);
+  }
+
+  db.get(
+    `
+      SELECT
+        wo.*,
+        p.name AS project_name,
+        c.name AS company_name,
+        (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.started_by) AS started_by_name,
+        (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.closed_by) AS closed_by_name,
+        (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.attested_by) AS attested_by_name,
+        (SELECT first_name || ' ' || last_name FROM users WHERE id = wo.report_updated_by) AS report_updated_by_name
+      FROM work_orders wo
+      LEFT JOIN projects p ON p.id = wo.project_id AND p.company_id = wo.company_id
+      LEFT JOIN companies c ON c.id = wo.company_id
+      WHERE ${where}
+    `,
+    params,
+    (err, order) => {
+      if (err) {
+        console.error("DB-fel vid SELECT work_order pdf:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!order) return res.status(404).json({ error: "Not found" });
+
+      const ensureAccess = (next) => {
+        if (isAdminUser) return next();
+        db.get(
+          `SELECT id FROM work_order_assignees WHERE work_order_id = ? AND user_id = ?`,
+          [id, userId],
+          (aErr, aRow) => {
+            if (aErr) {
+              console.error("DB-fel vid SELECT work_order_assignees pdf:", aErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            if (!aRow) return res.status(403).json({ error: "Forbidden" });
+            return next();
+          }
+        );
+      };
+
+      ensureAccess(() => {
+        db.all(
+          `SELECT u.first_name || ' ' || u.last_name AS full_name, u.email
+           FROM work_order_assignees woa
+           LEFT JOIN users u ON u.id = woa.user_id
+           WHERE woa.work_order_id = ?`,
+          [id],
+          (aErr, rows) => {
+            if (aErr) {
+              console.error("DB-fel vid SELECT work_order_assignees list:", aErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+
+            const assigneesText = (rows || [])
+              .map((row) => row.full_name || row.email)
+              .filter(Boolean)
+              .join(", ");
+            const statusValue = String(order.status || "not_started").toLowerCase();
+            const statusLabel =
+              statusValue === "attested" || statusValue === "closed"
+                ? "Avslutad"
+                : statusValue === "paused"
+                ? "Pausad"
+                : statusValue === "in_progress"
+                ? "Pågående"
+                : "Ej påbörjad";
+            const orderCode = `AO ${order.order_year}-${String(order.order_number).padStart(4, "0")}`;
+
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename=arbetsorder_${order.id}.pdf`);
+
+            const doc = new PDFDocument({ margin: 40, size: "A4" });
+            doc.pipe(res);
+
+            doc.fontSize(20).text("Arbetsorder", { align: "left" });
+            doc.moveDown(0.5);
+            doc.fontSize(10).text(`Ordernr: ${orderCode}`);
+            if (order.company_name) doc.text(`Företag: ${order.company_name}`);
+            if (order.project_name) doc.text(`Projekt: ${order.project_name}`);
+            doc.text(`Status: ${statusLabel}`);
+            doc.text(`Prioritet: ${order.priority || "-"}`);
+            doc.text(`Deadline: ${order.deadline || "-"}`);
+            doc.text(`Tilldelade: ${assigneesText || "-"}`);
+            doc.text(`Skapad: ${order.created_at || "-"}`);
+            doc.text(`Startad: ${order.started_at || "-"}`);
+            doc.text(`Startad av: ${order.started_by_name || "-"}`);
+            doc.text(`Avslutad: ${order.closed_at || "-"}`);
+            doc.text(`Avslutad av: ${order.closed_by_name || "-"}`);
+            doc.text(`Attesterad: ${order.attested_at || "-"}`);
+            doc.text(`Attesterad av: ${order.attested_by_name || "-"}`);
+            doc.text(`Rapport uppdaterad: ${order.report_updated_at || "-"}`);
+            doc.text(`Rapport uppdaterad av: ${order.report_updated_by_name || "-"}`);
+
+            doc.moveDown();
+            doc.fontSize(12).text("Beskrivning", { underline: true });
+            doc.moveDown(0.25);
+            doc.fontSize(10).text(order.description || "-", { width: 520 });
+
+            doc.moveDown();
+            doc.fontSize(12).text("Instruktioner", { underline: true });
+            doc.moveDown(0.25);
+            doc.fontSize(10).text(order.instructions || "-", { width: 520 });
+
+            doc.moveDown();
+            doc.fontSize(12).text("Utfört arbete", { underline: true });
+            doc.moveDown(0.25);
+            doc.fontSize(10).text(order.report_text || "-", { width: 520 });
+
+            doc.moveDown();
+            doc.fontSize(12).text("Kontaktuppgifter", { underline: true });
+            doc.moveDown(0.25);
+            doc.fontSize(10).text(`Adress: ${order.address || "-"}`);
+            doc.text(`Kontakt: ${order.contact_name || "-"}`);
+            doc.text(`Telefon: ${order.contact_phone || "-"}`);
+
+            doc.end();
+          }
+        );
+      });
+    }
+  );
 });
 
 // Comments
@@ -2822,6 +3053,623 @@ app.delete("/material-types/:id", requireAuth, requireAdmin, (req, res) => {
       }
 
       res.json({ success: true });
+    }
+  );
+});
+
+// ======================
+//   PRICE LISTS (prislista)
+// ======================
+
+app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
+  const scopedCompanyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  let companyId = scopedCompanyId;
+  if (!companyId && allowAll && req.query.company_id) companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const year = Number(req.query.year) || new Date().getFullYear();
+  const projectIdParam = req.query.project_id;
+  const projectId = projectIdParam ? Number(projectIdParam) : null;
+  if (projectIdParam && !Number.isFinite(projectId)) {
+    return res.status(400).json({ error: "Invalid project_id" });
+  }
+
+  const DEFAULT_SETTINGS = {
+    show_day: 1,
+    show_evening: 1,
+    show_night: 1,
+    show_weekend: 1,
+    show_overtime_weekday: 1,
+    show_overtime_weekend: 1,
+    day_start: "06:00",
+    day_end: "18:00",
+    evening_start: "18:00",
+    evening_end: "21:00",
+    night_start: "21:00",
+    night_end: "06:00",
+    weekend_start: "18:00",
+    weekend_end: "06:00",
+  };
+
+  const normalizeSettings = (row) => ({
+    show_day: row?.show_day ?? DEFAULT_SETTINGS.show_day,
+    show_evening: row?.show_evening ?? DEFAULT_SETTINGS.show_evening,
+    show_night: row?.show_night ?? DEFAULT_SETTINGS.show_night,
+    show_weekend: row?.show_weekend ?? DEFAULT_SETTINGS.show_weekend,
+    show_overtime_weekday: row?.show_overtime_weekday ?? DEFAULT_SETTINGS.show_overtime_weekday,
+    show_overtime_weekend: row?.show_overtime_weekend ?? DEFAULT_SETTINGS.show_overtime_weekend,
+    day_start: row?.day_start || DEFAULT_SETTINGS.day_start,
+    day_end: row?.day_end || DEFAULT_SETTINGS.day_end,
+    evening_start: row?.evening_start || DEFAULT_SETTINGS.evening_start,
+    evening_end: row?.evening_end || DEFAULT_SETTINGS.evening_end,
+    night_start: row?.night_start || DEFAULT_SETTINGS.night_start,
+    night_end: row?.night_end || DEFAULT_SETTINGS.night_end,
+    weekend_start: row?.weekend_start || DEFAULT_SETTINGS.weekend_start,
+    weekend_end: row?.weekend_end || DEFAULT_SETTINGS.weekend_end,
+  });
+
+  const sendResponse = (jobRows, matRows, settings, settingsSource) => {
+    res.json({
+      year,
+      project_id: projectId ? String(projectId) : null,
+      settings,
+      settings_source: settingsSource,
+      job_roles: (jobRows || []).map((row) => ({
+        id: String(row.id),
+        name: row.name,
+        day_rate: row.day_rate,
+        evening_rate: row.evening_rate,
+        night_rate: row.night_rate,
+        weekend_rate: row.weekend_rate,
+        overtime_weekday_rate: row.overtime_weekday_rate,
+        overtime_weekend_rate: row.overtime_weekend_rate,
+        per_diem_rate: row.per_diem_rate,
+        travel_time_rate: row.travel_time_rate,
+      })),
+      material_types: (matRows || []).map((row) => ({
+        id: String(row.id),
+        name: row.name,
+        price: row.price,
+        unit: row.price_unit || row.default_unit || "",
+      })),
+    });
+  };
+
+  const loadRates = (jobRolesSql, jobParams, materialSql, materialParams, settings, settingsSource) => {
+    db.all(jobRolesSql, jobParams, (jobErr, jobRows) => {
+      if (jobErr) {
+        console.error("DB-fel vid GET /price-list job_roles:", jobErr);
+        return res.status(500).json({ error: "DB error" });
+      }
+      db.all(materialSql, materialParams, (matErr, matRows) => {
+        if (matErr) {
+          console.error("DB-fel vid GET /price-list material_types:", matErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        sendResponse(jobRows, matRows, settings, settingsSource);
+      });
+    });
+  };
+
+  if (projectId) {
+    db.get(
+      `SELECT id FROM projects WHERE id = ? AND company_id = ?`,
+      [projectId, companyId],
+      (pErr, pRow) => {
+        if (pErr) {
+          console.error("DB-fel vid SELECT project /price-list:", pErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if (!pRow) return res.status(404).json({ error: "Project not found" });
+
+        const jobRolesSql = `
+          SELECT
+            jr.id,
+            jr.name,
+            pr.day_rate,
+            pr.evening_rate,
+            pr.night_rate,
+            pr.weekend_rate,
+            pr.overtime_weekday_rate,
+            pr.overtime_weekend_rate,
+            pr.per_diem_rate,
+            pr.travel_time_rate
+          FROM job_roles jr
+          LEFT JOIN project_job_role_rates pr
+            ON pr.job_role_id = jr.id
+            AND pr.company_id = jr.company_id
+            AND pr.project_id = ?
+            AND pr.year = ?
+          WHERE jr.company_id = ?
+          ORDER BY jr.name
+        `;
+
+        const materialSql = `
+          SELECT
+            mt.id,
+            mt.name,
+            mt.unit AS default_unit,
+            pm.price,
+            pm.unit AS price_unit
+          FROM material_types mt
+          LEFT JOIN project_material_type_rates pm
+            ON pm.material_type_id = mt.id
+            AND pm.company_id = mt.company_id
+            AND pm.project_id = ?
+            AND pm.year = ?
+          WHERE mt.company_id = ?
+          ORDER BY mt.name
+        `;
+
+        db.get(
+          `SELECT * FROM project_price_list_settings WHERE company_id = ? AND year = ? AND project_id = ?`,
+          [companyId, year, projectId],
+          (sErr, sRow) => {
+            if (sErr) {
+              console.error("DB-fel vid GET project_price_list_settings:", sErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            if (sRow) {
+              return loadRates(
+                jobRolesSql,
+                [projectId, year, companyId],
+                materialSql,
+                [projectId, year, companyId],
+                normalizeSettings(sRow),
+                "project"
+              );
+            }
+            db.get(
+              `SELECT * FROM price_list_settings WHERE company_id = ? AND year = ?`,
+              [companyId, year],
+              (baseErr, baseRow) => {
+                if (baseErr) {
+                  console.error("DB-fel vid GET price_list_settings fallback:", baseErr);
+                  return res.status(500).json({ error: "DB error" });
+                }
+                loadRates(
+                  jobRolesSql,
+                  [projectId, year, companyId],
+                  materialSql,
+                  [projectId, year, companyId],
+                  normalizeSettings(baseRow),
+                  baseRow ? "standard" : "default"
+                );
+              }
+            );
+          }
+        );
+      }
+    );
+  } else {
+    const jobRolesSql = `
+      SELECT
+        jr.id,
+        jr.name,
+        rr.day_rate,
+        rr.evening_rate,
+        rr.night_rate,
+        rr.weekend_rate,
+        rr.overtime_weekday_rate,
+        rr.overtime_weekend_rate,
+        rr.per_diem_rate,
+        rr.travel_time_rate
+      FROM job_roles jr
+      LEFT JOIN job_role_rates rr
+        ON rr.job_role_id = jr.id
+        AND rr.company_id = jr.company_id
+        AND rr.year = ?
+      WHERE jr.company_id = ?
+      ORDER BY jr.name
+    `;
+
+    const materialSql = `
+      SELECT
+        mt.id,
+        mt.name,
+        mt.unit AS default_unit,
+        mr.price,
+        mr.unit AS price_unit
+      FROM material_types mt
+      LEFT JOIN material_type_rates mr
+        ON mr.material_type_id = mt.id
+        AND mr.company_id = mt.company_id
+        AND mr.year = ?
+      WHERE mt.company_id = ?
+      ORDER BY mt.name
+    `;
+
+    db.get(
+      `SELECT * FROM price_list_settings WHERE company_id = ? AND year = ?`,
+      [companyId, year],
+      (sErr, sRow) => {
+        if (sErr) {
+          console.error("DB-fel vid GET price_list_settings:", sErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        loadRates(
+          jobRolesSql,
+          [year, companyId],
+          materialSql,
+          [year, companyId],
+          normalizeSettings(sRow),
+          sRow ? "standard" : "default"
+        );
+      }
+    );
+  }
+});
+
+app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
+  const scopedCompanyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  let companyId = scopedCompanyId;
+  if (!companyId && allowAll && req.query.company_id) companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const projectIdParam = req.query.project_id;
+  const projectId = projectIdParam ? Number(projectIdParam) : null;
+  if (projectIdParam && !Number.isFinite(projectId)) {
+    return res.status(400).json({ error: "Invalid project_id" });
+  }
+
+  const year = Number(req.query.year || req.body?.year) || new Date().getFullYear();
+  if (!Number.isFinite(year)) return res.status(400).json({ error: "Invalid year" });
+
+  const jobRoles = Array.isArray(req.body?.job_roles) ? req.body.job_roles : [];
+  const materialTypes = Array.isArray(req.body?.material_types) ? req.body.material_types : [];
+  const settingsInput = req.body?.settings || {};
+
+  const toNumberOrNull = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const toBool = (value) => {
+    if (value === null || value === undefined) return 1;
+    if (value === true || value === "true" || value === 1 || value === "1") return 1;
+    return 0;
+  };
+
+  const normalizeTime = (value, fallback) => {
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+    const match = raw.match(/^([0-1]\d|2[0-3]):([0-5]\d)$/);
+    return match ? raw : fallback;
+  };
+
+  const DEFAULT_SETTINGS = {
+    show_day: 1,
+    show_evening: 1,
+    show_night: 1,
+    show_weekend: 1,
+    show_overtime_weekday: 1,
+    show_overtime_weekend: 1,
+    day_start: "06:00",
+    day_end: "18:00",
+    evening_start: "18:00",
+    evening_end: "21:00",
+    night_start: "21:00",
+    night_end: "06:00",
+    weekend_start: "18:00",
+    weekend_end: "06:00",
+  };
+
+  const normalizedSettings = {
+    show_day: toBool(settingsInput.show_day),
+    show_evening: toBool(settingsInput.show_evening),
+    show_night: toBool(settingsInput.show_night),
+    show_weekend: toBool(settingsInput.show_weekend),
+    show_overtime_weekday: toBool(settingsInput.show_overtime_weekday),
+    show_overtime_weekend: toBool(settingsInput.show_overtime_weekend),
+    day_start: normalizeTime(settingsInput.day_start, DEFAULT_SETTINGS.day_start),
+    day_end: normalizeTime(settingsInput.day_end, DEFAULT_SETTINGS.day_end),
+    evening_start: normalizeTime(settingsInput.evening_start, DEFAULT_SETTINGS.evening_start),
+    evening_end: normalizeTime(settingsInput.evening_end, DEFAULT_SETTINGS.evening_end),
+    night_start: normalizeTime(settingsInput.night_start, DEFAULT_SETTINGS.night_start),
+    night_end: normalizeTime(settingsInput.night_end, DEFAULT_SETTINGS.night_end),
+    weekend_start: normalizeTime(settingsInput.weekend_start, DEFAULT_SETTINGS.weekend_start),
+    weekend_end: normalizeTime(settingsInput.weekend_end, DEFAULT_SETTINGS.weekend_end),
+  };
+
+  const runAsync = (sql, params = []) =>
+    new Promise((resolve, reject) => {
+      db.run(sql, params, function (err) {
+        if (err) reject(err);
+        else resolve(this);
+      });
+    });
+
+  try {
+    await runAsync("BEGIN");
+
+    if (projectId) {
+      const projectRow = await new Promise((resolve, reject) => {
+        db.get(
+          `SELECT id FROM projects WHERE id = ? AND company_id = ?`,
+          [projectId, companyId],
+          (pErr, pRow) => {
+            if (pErr) reject(pErr);
+            else resolve(pRow);
+          }
+        );
+      });
+      if (!projectRow) {
+        await runAsync("ROLLBACK");
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      for (const role of jobRoles) {
+        const roleId = Number(role?.id);
+        if (!Number.isFinite(roleId)) continue;
+        await runAsync(
+          `
+            INSERT INTO project_job_role_rates (
+              company_id, year, project_id, job_role_id,
+              day_rate, evening_rate, night_rate, weekend_rate,
+              overtime_weekday_rate, overtime_weekend_rate, per_diem_rate, travel_time_rate,
+              created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(company_id, year, project_id, job_role_id) DO UPDATE SET
+              day_rate = excluded.day_rate,
+              evening_rate = excluded.evening_rate,
+              night_rate = excluded.night_rate,
+              weekend_rate = excluded.weekend_rate,
+              overtime_weekday_rate = excluded.overtime_weekday_rate,
+              overtime_weekend_rate = excluded.overtime_weekend_rate,
+              per_diem_rate = excluded.per_diem_rate,
+              travel_time_rate = excluded.travel_time_rate,
+              updated_at = datetime('now')
+          `,
+          [
+            companyId,
+            year,
+            projectId,
+            roleId,
+            toNumberOrNull(role.day_rate),
+            toNumberOrNull(role.evening_rate),
+            toNumberOrNull(role.night_rate),
+            toNumberOrNull(role.weekend_rate),
+            toNumberOrNull(role.overtime_weekday_rate),
+            toNumberOrNull(role.overtime_weekend_rate),
+            toNumberOrNull(role.per_diem_rate),
+            toNumberOrNull(role.travel_time_rate),
+          ]
+        );
+      }
+
+      for (const item of materialTypes) {
+        const materialId = Number(item?.id);
+        if (!Number.isFinite(materialId)) continue;
+        const unit = String(item?.unit || "").trim() || null;
+        await runAsync(
+          `
+            INSERT INTO project_material_type_rates (
+              company_id, year, project_id, material_type_id, price, unit, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(company_id, year, project_id, material_type_id) DO UPDATE SET
+              price = excluded.price,
+              unit = excluded.unit,
+              updated_at = datetime('now')
+          `,
+          [companyId, year, projectId, materialId, toNumberOrNull(item.price), unit]
+        );
+      }
+
+      await runAsync(
+        `
+          INSERT INTO project_price_list_settings (
+            company_id, year, project_id,
+            show_day, show_evening, show_night, show_weekend,
+            show_overtime_weekday, show_overtime_weekend,
+            day_start, day_end, evening_start, evening_end,
+            night_start, night_end, weekend_start, weekend_end,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+          ON CONFLICT(company_id, year, project_id) DO UPDATE SET
+            show_day = excluded.show_day,
+            show_evening = excluded.show_evening,
+            show_night = excluded.show_night,
+            show_weekend = excluded.show_weekend,
+            show_overtime_weekday = excluded.show_overtime_weekday,
+            show_overtime_weekend = excluded.show_overtime_weekend,
+            day_start = excluded.day_start,
+            day_end = excluded.day_end,
+            evening_start = excluded.evening_start,
+            evening_end = excluded.evening_end,
+            night_start = excluded.night_start,
+            night_end = excluded.night_end,
+            weekend_start = excluded.weekend_start,
+            weekend_end = excluded.weekend_end,
+            updated_at = datetime('now')
+        `,
+        [
+          companyId,
+          year,
+          projectId,
+          normalizedSettings.show_day,
+          normalizedSettings.show_evening,
+          normalizedSettings.show_night,
+          normalizedSettings.show_weekend,
+          normalizedSettings.show_overtime_weekday,
+          normalizedSettings.show_overtime_weekend,
+          normalizedSettings.day_start,
+          normalizedSettings.day_end,
+          normalizedSettings.evening_start,
+          normalizedSettings.evening_end,
+          normalizedSettings.night_start,
+          normalizedSettings.night_end,
+          normalizedSettings.weekend_start,
+          normalizedSettings.weekend_end,
+        ]
+      );
+    } else {
+      for (const role of jobRoles) {
+        const roleId = Number(role?.id);
+        if (!Number.isFinite(roleId)) continue;
+        await runAsync(
+          `
+            INSERT INTO job_role_rates (
+              company_id, year, job_role_id,
+              day_rate, evening_rate, night_rate, weekend_rate,
+              overtime_weekday_rate, overtime_weekend_rate, per_diem_rate, travel_time_rate,
+              created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(company_id, year, job_role_id) DO UPDATE SET
+              day_rate = excluded.day_rate,
+              evening_rate = excluded.evening_rate,
+              night_rate = excluded.night_rate,
+              weekend_rate = excluded.weekend_rate,
+              overtime_weekday_rate = excluded.overtime_weekday_rate,
+              overtime_weekend_rate = excluded.overtime_weekend_rate,
+              per_diem_rate = excluded.per_diem_rate,
+              travel_time_rate = excluded.travel_time_rate,
+              updated_at = datetime('now')
+          `,
+          [
+            companyId,
+            year,
+            roleId,
+            toNumberOrNull(role.day_rate),
+            toNumberOrNull(role.evening_rate),
+            toNumberOrNull(role.night_rate),
+            toNumberOrNull(role.weekend_rate),
+            toNumberOrNull(role.overtime_weekday_rate),
+            toNumberOrNull(role.overtime_weekend_rate),
+            toNumberOrNull(role.per_diem_rate),
+            toNumberOrNull(role.travel_time_rate),
+          ]
+        );
+      }
+
+      for (const item of materialTypes) {
+        const materialId = Number(item?.id);
+        if (!Number.isFinite(materialId)) continue;
+        const unit = String(item?.unit || "").trim() || null;
+        await runAsync(
+          `
+            INSERT INTO material_type_rates (
+              company_id, year, material_type_id, price, unit, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(company_id, year, material_type_id) DO UPDATE SET
+              price = excluded.price,
+              unit = excluded.unit,
+              updated_at = datetime('now')
+          `,
+          [companyId, year, materialId, toNumberOrNull(item.price), unit]
+        );
+      }
+
+      await runAsync(
+        `
+          INSERT INTO price_list_settings (
+            company_id, year,
+            show_day, show_evening, show_night, show_weekend,
+            show_overtime_weekday, show_overtime_weekend,
+            day_start, day_end, evening_start, evening_end,
+            night_start, night_end, weekend_start, weekend_end,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+          ON CONFLICT(company_id, year) DO UPDATE SET
+            show_day = excluded.show_day,
+            show_evening = excluded.show_evening,
+            show_night = excluded.show_night,
+            show_weekend = excluded.show_weekend,
+            show_overtime_weekday = excluded.show_overtime_weekday,
+            show_overtime_weekend = excluded.show_overtime_weekend,
+            day_start = excluded.day_start,
+            day_end = excluded.day_end,
+            evening_start = excluded.evening_start,
+            evening_end = excluded.evening_end,
+            night_start = excluded.night_start,
+            night_end = excluded.night_end,
+            weekend_start = excluded.weekend_start,
+            weekend_end = excluded.weekend_end,
+            updated_at = datetime('now')
+        `,
+        [
+          companyId,
+          year,
+          normalizedSettings.show_day,
+          normalizedSettings.show_evening,
+          normalizedSettings.show_night,
+          normalizedSettings.show_weekend,
+          normalizedSettings.show_overtime_weekday,
+          normalizedSettings.show_overtime_weekend,
+          normalizedSettings.day_start,
+          normalizedSettings.day_end,
+          normalizedSettings.evening_start,
+          normalizedSettings.evening_end,
+          normalizedSettings.night_start,
+          normalizedSettings.night_end,
+          normalizedSettings.weekend_start,
+          normalizedSettings.weekend_end,
+        ]
+      );
+    }
+
+    await runAsync("COMMIT");
+    res.json({ success: true });
+  } catch (err) {
+    try {
+      await runAsync("ROLLBACK");
+    } catch (rollbackErr) {
+      console.error("DB-fel vid ROLLBACK /price-list:", rollbackErr);
+    }
+    console.error("DB-fel vid PUT /price-list:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.delete("/price-list", requireAuth, requireAdmin, (req, res) => {
+  const scopedCompanyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  let companyId = scopedCompanyId;
+  if (!companyId && allowAll && req.query.company_id) companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const projectIdParam = req.query.project_id;
+  const projectId = projectIdParam ? Number(projectIdParam) : null;
+  if (!projectId || !Number.isFinite(projectId)) {
+    return res.status(400).json({ error: "project_id required" });
+  }
+
+  const year = Number(req.query.year) || new Date().getFullYear();
+  if (!Number.isFinite(year)) return res.status(400).json({ error: "Invalid year" });
+
+  db.get(
+    `SELECT id FROM projects WHERE id = ? AND company_id = ?`,
+    [projectId, companyId],
+    (pErr, pRow) => {
+      if (pErr) {
+        console.error("DB-fel vid SELECT project /price-list delete:", pErr);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!pRow) return res.status(404).json({ error: "Project not found" });
+
+      db.run(
+        `DELETE FROM project_job_role_rates WHERE company_id = ? AND year = ? AND project_id = ?`,
+        [companyId, year, projectId],
+        (delErr) => {
+          if (delErr) {
+            console.error("DB-fel vid DELETE project_job_role_rates:", delErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          db.run(
+            `DELETE FROM project_material_type_rates WHERE company_id = ? AND year = ? AND project_id = ?`,
+            [companyId, year, projectId],
+            (delMatErr) => {
+              if (delMatErr) {
+                console.error("DB-fel vid DELETE project_material_type_rates:", delMatErr);
+                return res.status(500).json({ error: "DB error" });
+              }
+              res.json({ success: true });
+            }
+          );
+        }
+      );
     }
   );
 });

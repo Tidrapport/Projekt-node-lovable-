@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,15 +8,63 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { format, addWeeks, startOfWeek, getISOWeek, getISOWeekYear, isWithinInterval, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
-import { CheckCircle, Lock, Unlock, Pencil, CheckCircle2, AlertCircle } from "lucide-react";
-import { useRef } from "react";
+import { CheckCircle, Lock, Unlock, Pencil, CheckCircle2, AlertCircle, Download, X, FileText } from "lucide-react";
+import { calculateOBDistribution } from "@/lib/obDistribution";
 
 const REST_OPTIONS = ["0", "15", "30", "45", "60"];
+
+const DEFAULT_CUSTOMER_PDF_SETTINGS = {
+  show_day: true,
+  show_evening: true,
+  show_night: true,
+  show_weekend: true,
+  show_overtime_weekday: true,
+  show_overtime_weekend: true,
+  day_start: "06:00",
+  day_end: "18:00",
+  evening_start: "18:00",
+  evening_end: "21:00",
+  night_start: "21:00",
+  night_end: "06:00",
+  weekend_start: "18:00",
+  weekend_end: "06:00",
+};
+
+const normalizeCustomerPdfSettings = (raw?: Record<string, any>) => ({
+  show_day: Boolean(raw?.show_day ?? DEFAULT_CUSTOMER_PDF_SETTINGS.show_day),
+  show_evening: Boolean(raw?.show_evening ?? DEFAULT_CUSTOMER_PDF_SETTINGS.show_evening),
+  show_night: Boolean(raw?.show_night ?? DEFAULT_CUSTOMER_PDF_SETTINGS.show_night),
+  show_weekend: Boolean(raw?.show_weekend ?? DEFAULT_CUSTOMER_PDF_SETTINGS.show_weekend),
+  show_overtime_weekday: Boolean(
+    raw?.show_overtime_weekday ?? DEFAULT_CUSTOMER_PDF_SETTINGS.show_overtime_weekday
+  ),
+  show_overtime_weekend: Boolean(
+    raw?.show_overtime_weekend ?? DEFAULT_CUSTOMER_PDF_SETTINGS.show_overtime_weekend
+  ),
+  day_start: raw?.day_start || DEFAULT_CUSTOMER_PDF_SETTINGS.day_start,
+  day_end: raw?.day_end || DEFAULT_CUSTOMER_PDF_SETTINGS.day_end,
+  evening_start: raw?.evening_start || DEFAULT_CUSTOMER_PDF_SETTINGS.evening_start,
+  evening_end: raw?.evening_end || DEFAULT_CUSTOMER_PDF_SETTINGS.evening_end,
+  night_start: raw?.night_start || DEFAULT_CUSTOMER_PDF_SETTINGS.night_start,
+  night_end: raw?.night_end || DEFAULT_CUSTOMER_PDF_SETTINGS.night_end,
+  weekend_start: raw?.weekend_start || DEFAULT_CUSTOMER_PDF_SETTINGS.weekend_start,
+  weekend_end: raw?.weekend_end || DEFAULT_CUSTOMER_PDF_SETTINGS.weekend_end,
+});
+
+const timeToHours = (value: string, fallback: number) => {
+  const match = String(value || "").match(/^([0-1]\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return fallback;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours + minutes / 60;
+};
 
 type User = { id: string; full_name?: string; email?: string };
 type Project = { id: string; name: string };
@@ -57,6 +105,7 @@ type TimeEntry = {
   deviation_title?: string | null;
   deviation_description?: string | null;
   deviation_status?: string | null;
+  deviation_severity?: string | null;
   materials?: { id?: string | number; material_type_id: string | number; quantity: number; place?: string | null }[];
 };
 
@@ -92,6 +141,9 @@ export default function TimeAttestations() {
   const [selectedWeek, setSelectedWeek] = useState<string>("all");
   const [loading, setLoading] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
+  const [bulkAttesting, setBulkAttesting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCustomerPdf, setExportingCustomerPdf] = useState(false);
 
   const [editEntry, setEditEntry] = useState<TimeEntry | null>(null);
   const [editDescription, setEditDescription] = useState("");
@@ -189,6 +241,7 @@ export default function TimeAttestations() {
         deviation_title: e.deviation_title || null,
         deviation_description: e.deviation_description || null,
         deviation_status: e.deviation_status || null,
+        deviation_severity: e.deviation_severity || null,
         materials: (e.materials || []).map((m: any) => ({
           id: m.id,
           material_type_id: String(m.material_type_id),
@@ -241,6 +294,11 @@ export default function TimeAttestations() {
     });
   }, [entries, selectedUser, selectedStatus, selectedProject, selectedSubproject, fromDate, toDate, selectedWeek, selectedCustomer, selectedInvoiceStatus, customers]);
 
+  const pendingFilteredCount = useMemo(
+    () => filteredEntries.filter((entry) => !entry.attested_by).length,
+    [filteredEntries]
+  );
+
   const attestEntry = async (id: string, approved: boolean) => {
     try {
       await apiFetch(`/time-entries/${id}/attest`, { method: "POST", json: { approved } });
@@ -248,6 +306,622 @@ export default function TimeAttestations() {
       loadEntries();
     } catch (e: any) {
       toast.error(e.message || "Kunde inte uppdatera attest");
+    }
+  };
+
+  const attestAllFiltered = async () => {
+    const pendingEntries = filteredEntries.filter((entry) => !entry.attested_by);
+    if (pendingEntries.length === 0) {
+      toast.error("Inga ej attesterade tidrapporter i urvalet");
+      return;
+    }
+    setBulkAttesting(true);
+    try {
+      const results = await Promise.allSettled(
+        pendingEntries.map((entry) =>
+          apiFetch(`/time-entries/${entry.id}/attest`, { method: "POST", json: { approved: true } })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected");
+      if (failed.length > 0) {
+        toast.error(`Kunde inte attestera ${failed.length} av ${results.length} tidrapporter`);
+      } else {
+        toast.success(`Attesterade ${results.length} tidrapporter`);
+      }
+      loadEntries();
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte attestera tidrapporter");
+    } finally {
+      setBulkAttesting(false);
+    }
+  };
+
+  const exportToPDF = async () => {
+    if (filteredEntries.length === 0) {
+      toast.error("Inga tidrapporter att exportera");
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      const doc = new jsPDF();
+
+      const uniqueUsers = Array.from(
+        new Set(
+          filteredEntries.map((entry) =>
+            userLabel(entry.user_id, entry.user_full_name || entry.user_email || entry.user_id)
+          )
+        )
+      );
+      const reportUserName =
+        selectedUser !== "all"
+          ? userLabel(selectedUser)
+          : uniqueUsers.length === 1
+          ? uniqueUsers[0]
+          : "Alla";
+
+      const getValidDate = (value?: string | null) => {
+        if (!value) return null;
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      };
+
+      const entryDates = filteredEntries
+        .map((entry) => getValidDate(entry.date))
+        .filter(Boolean) as Date[];
+      const minDate = entryDates.length ? new Date(Math.min(...entryDates.map((d) => d.getTime()))) : null;
+      const maxDate = entryDates.length ? new Date(Math.max(...entryDates.map((d) => d.getTime()))) : null;
+      const periodStart = getValidDate(fromDate) || minDate;
+      const periodEnd = getValidDate(toDate) || maxDate;
+      const formatPeriodDate = (value: Date | null) =>
+        value ? format(value, "d MMM yyyy", { locale: sv }) : "-";
+      let periodLabel = "-";
+      if (periodStart && periodEnd) {
+        periodLabel = `${formatPeriodDate(periodStart)} - ${formatPeriodDate(periodEnd)}`;
+      } else if (periodStart) {
+        periodLabel = formatPeriodDate(periodStart);
+      }
+
+      doc.setFontSize(20);
+      doc.text("Tidrapport - Sammanställning", 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Anställd: ${reportUserName}`, 14, 30);
+      doc.text(`Exportdatum: ${format(new Date(), "d MMMM yyyy", { locale: sv })}`, 14, 37);
+      doc.text(`Period: ${periodLabel}`, 14, 44);
+
+      const sortedEntries = [...filteredEntries].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      let totalHours = 0;
+      let totalDay = 0;
+      let totalEvening = 0;
+      let totalNight = 0;
+      let totalWeekend = 0;
+      let totalTravel = 0;
+      let totalPerDiemDays = 0;
+
+      const tableRows = sortedEntries.map((entry) => {
+        const obDist =
+          entry.date && entry.start_time && entry.end_time
+            ? calculateOBDistribution(entry.date, entry.start_time, entry.end_time, entry.break_minutes || 0)
+            : { day: 0, evening: 0, night: 0, weekend: 0 };
+
+        totalHours += entry.total_hours || 0;
+        totalDay += obDist.day;
+        totalEvening += obDist.evening;
+        totalNight += obDist.night;
+        totalWeekend += obDist.weekend;
+
+        const travelHours = Number(entry.travel_time_hours || 0);
+        totalTravel += travelHours;
+
+        const perDiemDays =
+          entry.per_diem_type === "full" ? 1 : entry.per_diem_type === "half" ? 0.5 : 0;
+        totalPerDiemDays += perDiemDays;
+
+        const traktLabel =
+          entry.per_diem_type === "full"
+            ? "Hel"
+            : entry.per_diem_type === "half"
+            ? "Halv"
+            : "-";
+
+        const deviationFlag =
+          entry.deviation_title || entry.deviation_description || entry.deviation_status ? "Ja" : "-";
+
+        const timeRange =
+          entry.start_time && entry.end_time ? `${entry.start_time} - ${entry.end_time}` : "-";
+
+        return [
+          entry.date ? format(new Date(entry.date), "yyyy-MM-dd") : "-",
+          entry.project?.name || "-",
+          entry.subproject?.name || "-",
+          timeRange,
+          String(entry.break_minutes ?? 0),
+          (entry.total_hours || 0).toFixed(2),
+          obDist.day.toFixed(2),
+          obDist.evening.toFixed(2),
+          obDist.night.toFixed(2),
+          obDist.weekend.toFixed(2),
+          travelHours > 0 ? travelHours.toFixed(2) : "-",
+          traktLabel,
+          entry.work_description || "-",
+          deviationFlag,
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 54,
+        head: [[
+          "Datum",
+          "Projekt",
+          "Under-\nprojekt",
+          "Tid",
+          "Rast\n(min)",
+          "Tot\n(h)",
+          "Dag\n(h)",
+          "Kväll\n(h)",
+          "Natt\n(h)",
+          "Helg\n(h)",
+          "Restid\n(h)",
+          "Trakt.",
+          "Beskrivning",
+          "Avv.",
+        ]],
+        body: tableRows,
+        styles: { fontSize: 7, cellPadding: 1.5, valign: "middle" },
+        headStyles: { fillColor: [41, 128, 185], textColor: 255, halign: "center" },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        margin: { left: 14, right: 14 },
+        columnStyles: {
+          0: { cellWidth: 18, halign: "center" },
+          1: { cellWidth: 18, halign: "left" },
+          2: { cellWidth: 18, halign: "left" },
+          3: { cellWidth: 20, halign: "center" },
+          4: { cellWidth: 8, halign: "center" },
+          5: { cellWidth: 8, halign: "center" },
+          6: { cellWidth: 8, halign: "center" },
+          7: { cellWidth: 8, halign: "center" },
+          8: { cellWidth: 8, halign: "center" },
+          9: { cellWidth: 8, halign: "center" },
+          10: { cellWidth: 8, halign: "center" },
+          11: { cellWidth: 8, halign: "center" },
+          12: { cellWidth: 30, halign: "left" },
+          13: { cellWidth: 6, halign: "center" },
+        },
+      });
+
+      const afterTableY = (doc as any).lastAutoTable?.finalY || 60;
+      doc.setFontSize(14);
+      doc.text("Sammanfattning", 14, afterTableY + 8);
+
+      const formatDays = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1));
+
+      autoTable(doc, {
+        startY: afterTableY + 12,
+        head: [["Kategori", "Värde"]],
+        body: [
+          ["Totalt arbetstid", `${totalHours.toFixed(2)} h`],
+          ["Dagtid (07:00-18:00 Mån-Fre)", `${totalDay.toFixed(2)} h`],
+          ["Kvällstid (18:00-21:00 Mån-Tor)", `${totalEvening.toFixed(2)} h`],
+          ["Nattetid (21:00-06:00 Mån-Tor)", `${totalNight.toFixed(2)} h`],
+          ["Helgtid (18:00 Fre - 07:00 Mån)", `${totalWeekend.toFixed(2)} h`],
+          ["Restid", `${totalTravel.toFixed(2)} h`],
+          ["Traktamente", `${formatDays(totalPerDiemDays)} dagar`],
+        ],
+        styles: { fontSize: 10, cellPadding: 2 },
+        headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+        margin: { left: 14, right: 14 },
+        columnStyles: {
+          0: { cellWidth: 90 },
+          1: { cellWidth: 40, halign: "right" },
+        },
+      });
+
+      const deviations = sortedEntries
+        .filter((entry) => entry.deviation_title || entry.deviation_description || entry.deviation_status)
+        .map((entry) => ({
+          date: entry.date ? format(new Date(entry.date), "yyyy-MM-dd") : "-",
+          title: entry.deviation_title || "-",
+          description: entry.deviation_description || "-",
+          severity: entry.deviation_severity || "-",
+          status: entry.deviation_status || "-",
+        }));
+
+      if (deviations.length > 0) {
+        const afterSummaryY = (doc as any).lastAutoTable?.finalY || afterTableY + 40;
+        doc.setFontSize(14);
+        doc.text("Avvikelser", 14, afterSummaryY + 10);
+
+        autoTable(doc, {
+          startY: afterSummaryY + 14,
+          head: [["Datum", "Titel", "Beskrivning", "Allvarlighetsgrad", "Status"]],
+          body: deviations.map((d) => [d.date, d.title, d.description, d.severity, d.status]),
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [231, 76, 60], textColor: 255 },
+          margin: { left: 14, right: 14 },
+          columnStyles: {
+            0: { cellWidth: 22 },
+            1: { cellWidth: 30 },
+            2: { cellWidth: 60 },
+            3: { cellWidth: 35 },
+            4: { cellWidth: 25 },
+          },
+        });
+      }
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.text(
+          `Sida ${i} av ${pageCount}`,
+          doc.internal.pageSize.getWidth() / 2,
+          doc.internal.pageSize.getHeight() - 8,
+          { align: "center" }
+        );
+      }
+
+      const safeName = reportUserName.replace(/[^a-zA-Z0-9_-]+/g, "_");
+      const fileName = `Tidrapport_${safeName}_${format(new Date(), "yyyy-MM-dd")}.pdf`;
+      doc.save(fileName);
+      toast.success("PDF genererad!");
+    } catch (error: any) {
+      console.error("PDF error:", error);
+      toast.error("Kunde inte generera PDF");
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const exportCustomerPdf = async () => {
+    if (filteredEntries.length === 0) {
+      toast.error("Inga tidrapporter att exportera");
+      return;
+    }
+    setExportingCustomerPdf(true);
+    try {
+      const doc = new jsPDF({ orientation: "landscape" });
+
+      const customerName =
+        selectedCustomer !== "all"
+          ? customers.find((c) => c.id === selectedCustomer)?.name || "-"
+          : "Alla kunder";
+      const projectName =
+        selectedProject !== "all"
+          ? projects.find((p) => p.id === selectedProject)?.name || "-"
+          : "Alla projekt";
+      const subprojectName =
+        selectedSubproject !== "all"
+          ? subprojects.find((s) => s.id === selectedSubproject)?.name || "-"
+          : "Alla underprojekt";
+      const userName = selectedUser !== "all" ? userLabel(selectedUser) : "Alla användare";
+      const statusLabel =
+        selectedStatus === "attested"
+          ? "Attesterade"
+          : selectedStatus === "not_attested"
+          ? "Ej attesterade"
+          : "Alla";
+      const invoiceLabel =
+        selectedInvoiceStatus === "invoiced"
+          ? "Fakturerade"
+          : selectedInvoiceStatus === "not_invoiced"
+          ? "Ej fakturerade"
+          : "Alla";
+
+      const getValidDate = (value?: string | null) => {
+        if (!value) return null;
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      };
+
+      const entryDates = filteredEntries
+        .map((entry) => getValidDate(entry.date))
+        .filter(Boolean) as Date[];
+      const minDate = entryDates.length ? new Date(Math.min(...entryDates.map((d) => d.getTime()))) : null;
+      const maxDate = entryDates.length ? new Date(Math.max(...entryDates.map((d) => d.getTime()))) : null;
+      const periodStart = getValidDate(fromDate) || minDate;
+      const periodEnd = getValidDate(toDate) || maxDate;
+      const formatPeriodDate = (value: Date | null) =>
+        value ? format(value, "d MMM yyyy", { locale: sv }) : "-";
+      let periodLabel = "-";
+      if (periodStart && periodEnd) {
+        periodLabel = `${formatPeriodDate(periodStart)} - ${formatPeriodDate(periodEnd)}`;
+      } else if (periodStart) {
+        periodLabel = formatPeriodDate(periodStart);
+      }
+
+      let settings = DEFAULT_CUSTOMER_PDF_SETTINGS;
+      try {
+        const settingsYear = (periodStart || minDate || new Date()).getFullYear();
+        const params = new URLSearchParams({ year: String(settingsYear) });
+        if (selectedProject !== "all") params.set("project_id", selectedProject);
+        const data = await apiFetch<any>(`/price-list?${params.toString()}`);
+        settings = normalizeCustomerPdfSettings(data?.settings);
+      } catch (error) {
+        console.warn("Kunde inte hämta prislista-inställningar:", error);
+      }
+
+      const showDay = settings.show_day;
+      const showEvening = settings.show_evening;
+      const showNight = settings.show_night;
+      const showWeekend = settings.show_weekend;
+      const showOtWeekday = settings.show_overtime_weekday;
+      const showOtWeekend = settings.show_overtime_weekend;
+
+      const shiftWindows = {
+        day: {
+          start: timeToHours(settings.day_start, 6),
+          end: timeToHours(settings.day_end, 18),
+        },
+        evening: {
+          start: timeToHours(settings.evening_start, 18),
+          end: timeToHours(settings.evening_end, 21),
+        },
+        night: {
+          start: timeToHours(settings.night_start, 21),
+          end: timeToHours(settings.night_end, 6),
+        },
+        weekend: {
+          start: timeToHours(settings.weekend_start, 18),
+          end: timeToHours(settings.weekend_end, 6),
+        },
+      };
+
+      doc.setFontSize(20);
+      doc.text("Kundunderlag", 14, 18);
+      doc.setFontSize(11);
+      doc.text(`Kund: ${customerName}`, 14, 26);
+      doc.text(`Projekt: ${projectName}`, 14, 32);
+      doc.text(`Underprojekt: ${subprojectName}`, 14, 38);
+      doc.text(`Användare: ${userName}`, 14, 44);
+      doc.text(`Atteststatus: ${statusLabel}`, 14, 50);
+      doc.text(`Fakturering: ${invoiceLabel}`, 14, 56);
+      doc.text(`Period: ${periodLabel}`, 14, 62);
+      doc.text(`Exportdatum: ${format(new Date(), "d MMMM yyyy", { locale: sv })}`, 14, 68);
+
+      const sortedEntries = [...filteredEntries].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+      let totalHours = 0;
+      let totalDay = 0;
+      let totalEvening = 0;
+      let totalNight = 0;
+      let totalWeekend = 0;
+      let totalTravel = 0;
+      let totalOvertimeWeekday = 0;
+      let totalOvertimeWeekend = 0;
+      let totalPerDiemDays = 0;
+
+      const materialTotals = new Map<string, { name: string; unit: string; total: number }>();
+
+      const columns: { key: string; label: string }[] = [
+        { key: "date", label: "Datum" },
+        { key: "user", label: "Anställd" },
+        { key: "project", label: "Projekt" },
+        { key: "subproject", label: "Underprojekt" },
+        { key: "jobrole", label: "Yrkesroll" },
+        { key: "time", label: "Tid" },
+        { key: "break", label: "Rast" },
+        { key: "total", label: "Timmar" },
+      ];
+
+      if (showDay) columns.push({ key: "day", label: "Dag" });
+      if (showEvening) columns.push({ key: "evening", label: "Kväll" });
+      if (showNight) columns.push({ key: "night", label: "Natt" });
+      if (showWeekend) columns.push({ key: "weekend", label: "Helg" });
+      if (showOtWeekday) columns.push({ key: "ot_weekday", label: "ÖT vardag" });
+      if (showOtWeekend) columns.push({ key: "ot_weekend", label: "ÖT helg" });
+
+      columns.push({ key: "travel", label: "Restid" });
+      columns.push({ key: "per_diem", label: "Trakt." });
+      columns.push({ key: "materials", label: "Tillägg" });
+      columns.push({ key: "comment", label: "Kommentar" });
+
+      const entriesTable = sortedEntries.map((entry) => {
+        totalHours += entry.total_hours || 0;
+        totalTravel += Number(entry.travel_time_hours || 0);
+        totalOvertimeWeekday += Number(entry.overtime_weekday_hours || 0);
+        totalOvertimeWeekend += Number(entry.overtime_weekend_hours || 0);
+
+        const perDiemDays =
+          entry.per_diem_type === "full" ? 1 : entry.per_diem_type === "half" ? 0.5 : 0;
+        totalPerDiemDays += perDiemDays;
+
+        const jobRoleName =
+          entry.job_role?.name || jobRoles.find((role) => role.id === entry.job_role_id)?.name || "-";
+        const timeRange =
+          entry.start_time && entry.end_time ? `${entry.start_time} - ${entry.end_time}` : "-";
+
+        const materialSummary = (entry.materials || [])
+          .map((m) => {
+            const mt = materialTypes.find((t) => t.id === String(m.material_type_id));
+            const unit = mt?.unit ? ` ${mt.unit}` : "";
+            if (m.quantity != null) {
+              const current = materialTotals.get(String(m.material_type_id));
+              const nextTotal = (current?.total || 0) + Number(m.quantity || 0);
+              materialTotals.set(String(m.material_type_id), {
+                name: mt?.name || String(m.material_type_id),
+                unit: mt?.unit || "",
+                total: nextTotal,
+              });
+            }
+            return `${mt?.name || m.material_type_id}: ${m.quantity}${unit}`;
+          })
+          .join(", ");
+
+        const perDiemLabel =
+          entry.per_diem_type === "full"
+            ? "Hel"
+            : entry.per_diem_type === "half"
+            ? "Halv"
+            : "-";
+
+        let obDist = { day: 0, evening: 0, night: 0, weekend: 0 };
+        if (showDay || showEvening || showNight || showWeekend) {
+          obDist =
+            entry.date && entry.start_time && entry.end_time
+              ? calculateOBDistribution(entry.date, entry.start_time, entry.end_time, entry.break_minutes || 0, shiftWindows)
+              : { day: 0, evening: 0, night: 0, weekend: 0 };
+        }
+
+        totalDay += obDist.day;
+        totalEvening += obDist.evening;
+        totalNight += obDist.night;
+        totalWeekend += obDist.weekend;
+
+        const row: Record<string, string> = {
+          date: entry.date ? format(new Date(entry.date), "yyyy-MM-dd") : "-",
+          user: userLabel(entry.user_id, entry.user_full_name || entry.user_email || entry.user_id),
+          project: entry.project?.name || "-",
+          subproject: entry.subproject?.name || "-",
+          jobrole: jobRoleName,
+          time: timeRange,
+          break: String(entry.break_minutes ?? 0),
+          total: (entry.total_hours || 0).toFixed(2),
+          day: obDist.day.toFixed(2),
+          evening: obDist.evening.toFixed(2),
+          night: obDist.night.toFixed(2),
+          weekend: obDist.weekend.toFixed(2),
+          ot_weekday: Number(entry.overtime_weekday_hours || 0).toFixed(2),
+          ot_weekend: Number(entry.overtime_weekend_hours || 0).toFixed(2),
+          travel: Number(entry.travel_time_hours || 0).toFixed(2),
+          per_diem: perDiemLabel,
+          materials: materialSummary || "-",
+          comment: entry.work_description || "-",
+        };
+
+        return columns.map((col) => row[col.key] ?? "-");
+      });
+
+      doc.setFontSize(14);
+      doc.text("Rapporterade tider", 14, 78);
+
+      autoTable(doc, {
+        startY: 82,
+        head: [columns.map((col) => col.label)],
+        body: entriesTable,
+        styles: { fontSize: 6.5, cellPadding: 1.4, valign: "middle" },
+        headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        margin: { left: 14, right: 14 },
+      });
+
+      let cursorY = (doc as any).lastAutoTable?.finalY + 10;
+
+      doc.setFontSize(14);
+      doc.text("Sammanställning", 14, cursorY);
+      cursorY += 4;
+
+      const summaryRows = [
+        ["Antal tidrapporter", String(filteredEntries.length)],
+        ["Totala timmar", `${totalHours.toFixed(2)} h`],
+      ];
+      if (showDay) summaryRows.push(["Dag", `${totalDay.toFixed(2)} h`]);
+      if (showEvening) summaryRows.push(["Kväll", `${totalEvening.toFixed(2)} h`]);
+      if (showNight) summaryRows.push(["Natt", `${totalNight.toFixed(2)} h`]);
+      if (showWeekend) summaryRows.push(["Helg", `${totalWeekend.toFixed(2)} h`]);
+      summaryRows.push(["Restid", `${totalTravel.toFixed(2)} h`]);
+      if (showOtWeekday) summaryRows.push(["Övertid vardag", `${totalOvertimeWeekday.toFixed(2)} h`]);
+      if (showOtWeekend) summaryRows.push(["Övertid helg", `${totalOvertimeWeekend.toFixed(2)} h`]);
+      summaryRows.push(["Traktamente", `${totalPerDiemDays.toFixed(1)} dagar`]);
+
+      autoTable(doc, {
+        startY: cursorY,
+        head: [["Kategori", "Värde"]],
+        body: summaryRows,
+        styles: { fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+        margin: { left: 14, right: 14 },
+        columnStyles: {
+          0: { cellWidth: 60 },
+          1: { cellWidth: 30, halign: "right" },
+        },
+      });
+
+      cursorY = (doc as any).lastAutoTable?.finalY + 10;
+
+      if (materialTotals.size > 0) {
+        doc.setFontSize(14);
+        doc.text("Tillägg", 14, cursorY);
+        cursorY += 4;
+
+        const materialRows = Array.from(materialTotals.values()).map((item) => [
+          item.name,
+          item.total.toFixed(2),
+          item.unit || "-",
+        ]);
+
+        autoTable(doc, {
+          startY: cursorY,
+          head: [["Tillägg", "Antal", "Enhet"]],
+          body: materialRows,
+          styles: { fontSize: 9, cellPadding: 2 },
+          headStyles: { fillColor: [46, 204, 113], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+          margin: { left: 14, right: 14 },
+          columnStyles: {
+            0: { cellWidth: 70 },
+            1: { cellWidth: 20, halign: "right" },
+            2: { cellWidth: 20 },
+          },
+        });
+
+        cursorY = (doc as any).lastAutoTable?.finalY + 10;
+      }
+
+      const deviations = sortedEntries.filter(
+        (entry) => entry.deviation_title || entry.deviation_description || entry.deviation_status
+      );
+
+      if (deviations.length > 0) {
+        doc.setFontSize(14);
+        doc.text("Avvikelser", 14, cursorY);
+        cursorY += 4;
+
+        autoTable(doc, {
+          startY: cursorY,
+          head: [["Rapport ID", "Datum", "Anställd", "Projekt", "Titel", "Beskrivning", "Status"]],
+          body: deviations.map((entry) => [
+            entry.id,
+            entry.date ? format(new Date(entry.date), "yyyy-MM-dd") : "-",
+            userLabel(entry.user_id, entry.user_full_name || entry.user_email || entry.user_id),
+            entry.project?.name || "-",
+            entry.deviation_title || "-",
+            entry.deviation_description || "-",
+            entry.deviation_status || "-",
+          ]),
+          styles: { fontSize: 8, cellPadding: 2 },
+          headStyles: { fillColor: [231, 76, 60], textColor: 255 },
+          alternateRowStyles: { fillColor: [245, 245, 245] },
+          margin: { left: 14, right: 14 },
+          columnStyles: {
+            0: { cellWidth: 20 },
+            1: { cellWidth: 22 },
+            2: { cellWidth: 30 },
+            3: { cellWidth: 30 },
+            4: { cellWidth: 35 },
+            5: { cellWidth: 70 },
+            6: { cellWidth: 20 },
+          },
+        });
+      }
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.text(
+          `Sida ${i} av ${pageCount}`,
+          doc.internal.pageSize.getWidth() / 2,
+          doc.internal.pageSize.getHeight() - 8,
+          { align: "center" }
+        );
+      }
+
+      const safeName = projectName.replace(/[^a-zA-Z0-9_-]+/g, "_");
+      doc.save(`kundunderlag_${safeName || "alla"}_${format(new Date(), "yyyy-MM-dd")}.pdf`);
+    } catch (error) {
+      console.error("PDF error:", error);
+      toast.error("Kunde inte skapa PDF");
+    } finally {
+      setExportingCustomerPdf(false);
     }
   };
 
@@ -662,6 +1336,37 @@ export default function TimeAttestations() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
+        <Button
+          className="w-full md:flex-1 bg-gradient-primary"
+          onClick={attestAllFiltered}
+          disabled={bulkAttesting || pendingFilteredCount === 0}
+        >
+          <CheckCircle className="h-4 w-4 mr-2" />
+          {bulkAttesting ? "Attesterar..." : "Attestera alla filtrerade"}
+        </Button>
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          <Button
+            variant="outline"
+            className="w-full md:w-auto"
+            onClick={exportToPDF}
+            disabled={exportingPdf || filteredEntries.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {exportingPdf ? "Exporterar..." : "Exportera PDF"}
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full md:w-auto"
+            onClick={exportCustomerPdf}
+            disabled={exportingCustomerPdf || filteredEntries.length === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            {exportingCustomerPdf ? "Exporterar..." : "Exportera kundunderlag PDF"}
+          </Button>
+        </div>
+      </div>
 
       <div className="grid gap-4">
         {filteredEntries.length === 0 && (

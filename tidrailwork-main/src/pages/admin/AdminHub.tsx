@@ -1,61 +1,133 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Building2, Copy, Check, Users, Upload, X, ImageIcon } from "lucide-react";
+import { Building2, Copy, Check, Users } from "lucide-react";
 
 interface CompanyInfo {
   id: string;
   name: string;
-  slug: string;
-  company_code: string;
-  logo_url: string | null;
-  created_at: string;
+  code?: string | null;
+  created_at?: string | null;
   user_count: number;
 }
 
+type CompanyInvoiceForm = {
+  billing_email: string;
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  phone: string;
+  bankgiro: string;
+  bic_number: string;
+  iban_number: string;
+  org_number: string;
+  vat_number: string;
+  f_skatt: boolean;
+  invoice_payment_terms: string;
+  invoice_our_reference: string;
+  invoice_late_interest: string;
+};
+
+const toDigits = (value: string) => value.replace(/\D/g, "");
+
+const formatVatNumber = (value: string) => {
+  const digits = toDigits(value || "");
+  if (!digits) return "";
+  let base = digits;
+  if (digits.length >= 12 && digits.endsWith("01")) {
+    base = digits.slice(0, -2);
+  } else if (digits.length > 10) {
+    base = digits.slice(0, 10);
+  }
+  return `SE${base}01`;
+};
+
 const AdminHub = () => {
-  const { company, companyId } = useAuth();
+  const { companyId } = useAuth();
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
+  const [companyName, setCompanyName] = useState("");
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [uploadingLogo, setUploadingLogo] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [savingName, setSavingName] = useState(false);
+  const [invoiceForm, setInvoiceForm] = useState<CompanyInvoiceForm>({
+    billing_email: "",
+    address_line1: "",
+    address_line2: "",
+    postal_code: "",
+    city: "",
+    country: "",
+    phone: "",
+    bankgiro: "",
+    bic_number: "",
+    iban_number: "",
+    org_number: "",
+    vat_number: "",
+    f_skatt: false,
+    invoice_payment_terms: "",
+    invoice_our_reference: "",
+    invoice_late_interest: "",
+  });
 
   useEffect(() => {
-    if (companyId) {
-      fetchCompanyInfo();
-    }
+    fetchCompanyInfo();
   }, [companyId]);
 
-  const fetchCompanyInfo = async () => {
-    if (!companyId) return;
-
+  const fetchCompanyInfo = async (preserveInvoiceForm = false) => {
     setLoading(true);
     try {
-      // Fetch company details
-      const { data: companyData, error: companyError } = await supabase
-        .from("companies")
-        .select("*")
-        .eq("id", companyId)
-        .single();
+      const companies = await apiFetch<any[]>("/companies");
+      const selected = companyId
+        ? (companies || []).find((c) => String(c.id) === String(companyId))
+        : (companies || [])[0];
 
-      if (companyError) throw companyError;
+      if (!selected) {
+        setCompanyInfo(null);
+        return;
+      }
 
-      // Fetch user count for this company
-      const { count } = await supabase
-        .from("profiles")
-        .select("*", { count: "exact", head: true })
-        .eq("company_id", companyId);
+      const users = await apiFetch<any[]>(`/admin/users?company_id=${selected.id}&include_inactive=1`);
 
       setCompanyInfo({
-        ...companyData,
-        user_count: count || 0,
-      } as CompanyInfo);
+        id: String(selected.id),
+        name: selected.name,
+        code: selected.code || selected.company_code || null,
+        created_at: selected.created_at || null,
+        user_count: (users || []).length,
+      });
+      setCompanyName(selected.name || "");
+      if (!preserveInvoiceForm) {
+        setInvoiceForm({
+          billing_email: selected.billing_email || "",
+          address_line1: selected.address_line1 || "",
+          address_line2: selected.address_line2 || "",
+          postal_code: selected.postal_code || "",
+          city: selected.city || "",
+          country: selected.country || "",
+        phone: selected.phone || "",
+        bankgiro: selected.bankgiro || "",
+        bic_number: selected.bic_number || "",
+        iban_number: selected.iban_number || "",
+        org_number: selected.org_number || "",
+        vat_number: formatVatNumber(selected.vat_number || ""),
+          f_skatt:
+            selected.f_skatt === true ||
+            selected.f_skatt === 1 ||
+            selected.f_skatt === "1" ||
+            selected.f_skatt === "true",
+          invoice_payment_terms: selected.invoice_payment_terms || "",
+          invoice_our_reference: selected.invoice_our_reference || "",
+          invoice_late_interest: selected.invoice_late_interest || "",
+        });
+      }
     } catch (error: any) {
       console.error("Error fetching company info:", error);
       toast.error("Kunde inte hämta företagsinformation");
@@ -75,96 +147,65 @@ const AdminHub = () => {
     }
   };
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !companyId) return;
-
-    // Validate file type
-    if (!file.type.startsWith("image/")) {
-      toast.error("Endast bildfiler är tillåtna");
-      return;
-    }
-
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error("Bilden får vara max 2MB");
-      return;
-    }
-
-    setUploadingLogo(true);
+  const saveInvoiceSettings = async () => {
+    if (!companyInfo) return;
     try {
-      // Create a unique file name
-      const fileExt = file.name.split(".").pop();
-      const fileName = `company-logos/${companyId}/logo.${fileExt}`;
-
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from("company-logos")
-        .upload(fileName, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("company-logos")
-        .getPublicUrl(fileName);
-
-      // Add cache buster to URL
-      const logoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
-
-      // Update company record
-      const { error: updateError } = await supabase
-        .from("companies")
-        .update({ logo_url: logoUrl })
-        .eq("id", companyId);
-
-      if (updateError) throw updateError;
-
-      // Update local state
-      setCompanyInfo((prev) =>
-        prev ? { ...prev, logo_url: logoUrl } : null
-      );
-      toast.success("Logotyp uppdaterad!");
+      await apiFetch(`/companies/${companyInfo.id}`, {
+        method: "PUT",
+        json: {
+        billing_email: invoiceForm.billing_email || null,
+        address_line1: invoiceForm.address_line1 || null,
+        address_line2: invoiceForm.address_line2 || null,
+        postal_code: invoiceForm.postal_code || null,
+        city: invoiceForm.city || null,
+        country: invoiceForm.country || null,
+          phone: invoiceForm.phone || null,
+          bankgiro: invoiceForm.bankgiro || null,
+          bic_number: invoiceForm.bic_number || null,
+          iban_number: invoiceForm.iban_number || null,
+          org_number: invoiceForm.org_number || null,
+        vat_number: formatVatNumber(invoiceForm.vat_number || "") || null,
+        f_skatt: invoiceForm.f_skatt ? 1 : 0,
+          invoice_payment_terms: invoiceForm.invoice_payment_terms || null,
+          invoice_our_reference: invoiceForm.invoice_our_reference || null,
+          invoice_late_interest: invoiceForm.invoice_late_interest || null,
+        },
+      });
+      toast.success("Fakturauppgifter sparade.");
+      setInvoiceForm((prev) => ({
+        ...prev,
+        vat_number: formatVatNumber(prev.vat_number || ""),
+      }));
+      fetchCompanyInfo(true);
     } catch (error: any) {
-      console.error("Error uploading logo:", error);
-      toast.error("Kunde inte ladda upp logotyp");
-    } finally {
-      setUploadingLogo(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      console.error("Kunde inte spara fakturauppgifter:", error);
+      toast.error("Kunde inte spara fakturauppgifter");
     }
   };
 
-  const handleRemoveLogo = async () => {
-    if (!companyId) return;
-
-    setUploadingLogo(true);
+  const saveCompanyName = async () => {
+    if (!companyInfo) return;
+    const nextName = companyName.trim();
+    if (!nextName) {
+      toast.error("Företagsnamn krävs.");
+      return;
+    }
+    setSavingName(true);
     try {
-      // Update company record to remove logo URL
-      const { error: updateError } = await supabase
-        .from("companies")
-        .update({ logo_url: null })
-        .eq("id", companyId);
-
-      if (updateError) throw updateError;
-
-      // Update local state
-      setCompanyInfo((prev) =>
-        prev ? { ...prev, logo_url: null } : null
-      );
-      toast.success("Logotyp borttagen");
-    } catch (error: any) {
-      console.error("Error removing logo:", error);
-      toast.error("Kunde inte ta bort logotyp");
+      await apiFetch(`/companies/${companyInfo.id}`, { method: "PUT", json: { name: nextName } });
+      toast.success("Företagsnamn uppdaterat.");
+      fetchCompanyInfo();
+    } catch (error) {
+      console.error("Kunde inte uppdatera företagsnamn:", error);
+      toast.error("Kunde inte uppdatera företagsnamn");
     } finally {
-      setUploadingLogo(false);
+      setSavingName(false);
     }
   };
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="container mx-auto space-y-6 p-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">AdminHub</h1>
           <p className="text-muted-foreground">Laddar...</p>
@@ -175,7 +216,7 @@ const AdminHub = () => {
 
   if (!companyInfo) {
     return (
-      <div className="space-y-6">
+      <div className="container mx-auto space-y-6 p-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">AdminHub</h1>
           <p className="text-muted-foreground">
@@ -187,7 +228,7 @@ const AdminHub = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto space-y-6 p-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">AdminHub</h1>
         <p className="text-muted-foreground">
@@ -207,73 +248,18 @@ const AdminHub = () => {
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Company Logo Section */}
-          <div className="border rounded-lg p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">Företagslogotyp</h3>
-                <p className="text-sm text-muted-foreground">
-                  Visas på inloggningssidan för dina anställda
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              <div className="w-24 h-24 border rounded-lg flex items-center justify-center bg-muted/50 overflow-hidden">
-                {companyInfo.logo_url ? (
-                  <img 
-                    src={companyInfo.logo_url} 
-                    alt={companyInfo.name}
-                    className="w-full h-full object-contain"
-                  />
-                ) : (
-                  <ImageIcon className="h-10 w-10 text-muted-foreground" />
-                )}
-              </div>
-              
-              <div className="flex flex-col gap-2">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleLogoUpload}
-                  accept="image/*"
-                  className="hidden"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingLogo}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  {uploadingLogo ? "Laddar upp..." : companyInfo.logo_url ? "Byt logotyp" : "Ladda upp logotyp"}
-                </Button>
-                {companyInfo.logo_url && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleRemoveLogo}
-                    disabled={uploadingLogo}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Ta bort
-                  </Button>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Max 2MB, PNG/JPG/SVG
-                </p>
-              </div>
-            </div>
-          </div>
-
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Företagsnamn</p>
-              <p className="font-medium">{companyInfo.name}</p>
+              <Input
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="Företagsnamn"
+              />
             </div>
             <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Slug</p>
-              <Badge variant="secondary">{companyInfo.slug}</Badge>
+              <p className="text-sm text-muted-foreground">Företagskod</p>
+              <Badge variant="secondary">{companyInfo.code || "–"}</Badge>
             </div>
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Antal användare</p>
@@ -285,9 +271,14 @@ const AdminHub = () => {
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Registrerad</p>
               <p className="font-medium">
-                {new Date(companyInfo.created_at).toLocaleDateString("sv-SE")}
+                {companyInfo.created_at ? new Date(companyInfo.created_at).toLocaleDateString("sv-SE") : "–"}
               </p>
             </div>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={saveCompanyName} disabled={savingName}>
+              Spara företagsnamn
+            </Button>
           </div>
 
           <div className="border-t pt-6">
@@ -297,11 +288,12 @@ const AdminHub = () => {
             </p>
             <div className="flex items-center gap-3">
               <code className="bg-muted px-4 py-2 rounded text-lg font-mono">
-                {companyInfo.company_code}
+                {companyInfo.code || "–"}
               </code>
               <Button
                 variant="outline"
-                onClick={() => copyToClipboard(companyInfo.company_code)}
+                onClick={() => companyInfo.code && copyToClipboard(companyInfo.code)}
+                disabled={!companyInfo.code}
               >
                 {copied ? (
                   <>
@@ -316,6 +308,167 @@ const AdminHub = () => {
                 )}
               </Button>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Fakturauppgifter</CardTitle>
+          <CardDescription>Uppgifter som visas på fakturan.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Adressrad 1</Label>
+              <Input
+                value={invoiceForm.address_line1}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, address_line1: e.target.value }))}
+                placeholder="Gatuadress"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Adressrad 2</Label>
+              <Input
+                value={invoiceForm.address_line2}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, address_line2: e.target.value }))}
+                placeholder="C/O, våning, etc."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Postnummer</Label>
+              <Input
+                value={invoiceForm.postal_code}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, postal_code: e.target.value }))}
+                placeholder="123 45"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Stad</Label>
+              <Input
+                value={invoiceForm.city}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, city: e.target.value }))}
+                placeholder="Ort"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Land</Label>
+              <Input
+                value={invoiceForm.country}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, country: e.target.value }))}
+                placeholder="Sverige"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Telefon</Label>
+              <Input
+                value={invoiceForm.phone}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, phone: e.target.value }))}
+                placeholder="07x..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>E-post</Label>
+              <Input
+                value={invoiceForm.billing_email}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, billing_email: e.target.value }))}
+                placeholder="faktura@foretag.se"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Bankgiro</Label>
+              <Input
+                value={invoiceForm.bankgiro}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, bankgiro: e.target.value }))}
+                placeholder="1234-5678"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Kontonummer / IBAN</Label>
+              <Input
+                value={invoiceForm.iban_number}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, iban_number: e.target.value }))}
+                placeholder="SE00 0000 0000 0000 0000"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>BIC nummer</Label>
+              <Input
+                value={invoiceForm.bic_number}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, bic_number: e.target.value }))}
+                placeholder="SWEDSESS"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Organisationsnr</Label>
+              <Input
+                value={invoiceForm.org_number}
+                onChange={(e) => {
+                  const orgNumber = e.target.value;
+                  const autoVat = formatVatNumber(orgNumber);
+                  setInvoiceForm((prev) => ({
+                    ...prev,
+                    org_number: orgNumber,
+                    vat_number: autoVat,
+                  }));
+                }}
+                placeholder="559999-9999"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Momsreg. nr</Label>
+              <Input
+                value={invoiceForm.vat_number}
+                onChange={(e) => {
+                  const formatted = formatVatNumber(e.target.value);
+                  setInvoiceForm((prev) => ({ ...prev, vat_number: formatted }));
+                }}
+                placeholder="SE559999999901"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-6">
+              <Checkbox
+                checked={invoiceForm.f_skatt}
+                onCheckedChange={(checked) =>
+                  setInvoiceForm((prev) => ({ ...prev, f_skatt: checked === true }))
+                }
+              />
+              <Label>Godkänd för F-skatt</Label>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Betalningsvillkor</Label>
+              <Input
+                value={invoiceForm.invoice_payment_terms}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, invoice_payment_terms: e.target.value }))}
+                placeholder="30 dagar"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Vår referens</Label>
+              <Input
+                value={invoiceForm.invoice_our_reference}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, invoice_our_reference: e.target.value }))}
+                placeholder="Namn"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Dröjsmålsränta</Label>
+              <Input
+                value={invoiceForm.invoice_late_interest}
+                onChange={(e) => setInvoiceForm((prev) => ({ ...prev, invoice_late_interest: e.target.value }))}
+                placeholder="8%"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={saveInvoiceSettings}>Spara uppgifter</Button>
           </div>
         </CardContent>
       </Card>
