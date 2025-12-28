@@ -44,6 +44,7 @@ type InvoiceMeta = {
   due_date: string;
   vat_number: string;
   late_interest: string;
+  vat_label?: string;
   customer_address_lines: string[];
 };
 
@@ -274,26 +275,25 @@ export async function generateInvoicePdf(
   const rowCount = Math.min(max_rows, lines.length);
   for (let i = 0; i < max_rows; i += 1) {
     const y = start_y - i * row_h;
-    clearTextArea(cols.item_no.x, y, cols.item_no.w, 9);
-    clearTextArea(cols.description.x, y, cols.description.w, 9);
-    clearTextArea(cols.quantity.x, y, cols.quantity.w, 9);
-    clearTextArea(cols.unit.x, y, cols.unit.w, 9);
-    clearTextArea(cols.unit_price.x, y, cols.unit_price.w, 9);
-    clearTextArea(cols.total.x, y, cols.total.w, 9);
+    clearTextArea(cols.item_no.x - 4, y, cols.item_no.w + 8, 9);
+    clearTextArea(cols.description.x - 4, y, cols.description.w + 8, 9);
+    clearTextArea(cols.quantity.x - 20, y, cols.quantity.w + 40, 9);
+    clearTextArea(cols.unit.x - 4, y, cols.unit.w + 8, 9);
+    clearTextArea(cols.unit_price.x - 20, y, cols.unit_price.w + 40, 9);
+    clearTextArea(cols.total.x - 20, y, cols.total.w + 40, 9);
   }
 
   for (let i = 0; i < rowCount; i += 1) {
     const line = lines[i];
     const y = start_y - i * row_h;
-    const quantityValue = Number(line.quantity || 0);
-    const quantityText =
-      quantityValue === 0 ? "" : formatNumber(Math.abs(quantityValue));
+    const quantityValue = Math.max(0, Number(line.quantity || 0));
+    const quantityText = quantityValue === 0 ? "" : formatNumber(quantityValue);
     drawText(line.item_no, cols.item_no.x, y);
     drawText(line.description, cols.description.x, y);
     drawText(quantityText, cols.quantity.x, y);
     drawText(line.unit, cols.unit.x, y);
-    drawText(formatNumber(line.unit_price), cols.unit_price.x, y);
-    drawText(formatNumber(line.total), cols.total.x, y);
+    drawText(formatNumber(Math.max(0, Number(line.unit_price || 0))), cols.unit_price.x, y);
+    drawText(formatNumber(Math.max(0, Number(line.total || 0))), cols.total.x, y);
   }
 
   drawValue(formatNumber(totals.subtotal), COORDS.totals.subtotal.x, COORDS.totals.subtotal.y, COORDS.totals.subtotal.w);
@@ -303,7 +303,9 @@ export async function generateInvoicePdf(
   const totalText = `SEK ${formatNumber(totals.total)}`;
   drawValue(totalText, COORDS.totals.total_big.x, COORDS.totals.total_big.y, COORDS.totals.total_big.w, { bold: true, size: 11 });
 
-  const vatLine = `Moms ${formatNumber(totals.vat_rate, 0)}% ${formatNumber(totals.vat)} (${formatNumber(totals.subtotal)})`;
+  const vatLine = meta.vat_label
+    ? meta.vat_label
+    : `Moms ${formatNumber(totals.vat_rate, 0)}% ${formatNumber(totals.vat)} (${formatNumber(totals.subtotal)})`;
   drawValue(vatLine, COORDS.totals.vat_line.x, COORDS.totals.vat_line.y, COORDS.totals.vat_line.w);
 
   const ibanValue = companyFooter?.iban_number ? String(companyFooter.iban_number).trim() : "";

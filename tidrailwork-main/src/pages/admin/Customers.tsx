@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
 import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,6 +24,7 @@ interface Customer {
   customer_type?: string | null;
   orgnr?: string | null;
   vat_number?: string | null;
+  reverse_vat?: boolean | number | null;
   invoice_address1?: string | null;
   invoice_address2?: string | null;
   postal_code?: string | null;
@@ -30,6 +32,8 @@ interface Customer {
   country?: string | null;
   contact_phone?: string | null;
   phone_secondary?: string | null;
+  invoice_email?: string | null;
+  payment_terms?: string | null;
   contact_email?: string | null;
   their_reference?: string | null;
 }
@@ -110,7 +114,10 @@ const AdminCustomers = () => {
     contact_phone: "",
     phone_secondary: "",
     contact_email: "",
+    invoice_email: "",
+    payment_terms: "30 dagar",
     their_reference: "",
+    reverse_vat: false,
   });
 
   // Filtered data
@@ -210,7 +217,10 @@ const AdminCustomers = () => {
         contact_phone: customer.contact_phone || "",
         phone_secondary: customer.phone_secondary || "",
         contact_email: customer.contact_email || "",
+        invoice_email: customer.invoice_email || "",
+        payment_terms: customer.payment_terms || "30 dagar",
         their_reference: customer.their_reference || "",
+        reverse_vat: Boolean(customer.reverse_vat),
       });
     } else {
       setEditingCustomerId(null);
@@ -228,7 +238,10 @@ const AdminCustomers = () => {
         contact_phone: "",
         phone_secondary: "",
         contact_email: "",
+        invoice_email: "",
+        payment_terms: "30 dagar",
         their_reference: "",
+        reverse_vat: false,
       });
     }
     setShowCustomerDialog(true);
@@ -260,7 +273,10 @@ const AdminCustomers = () => {
         contact_phone: customerForm.contact_phone.trim() || null,
         phone_secondary: customerForm.phone_secondary.trim() || null,
         contact_email: customerForm.contact_email.trim() || null,
+        invoice_email: customerForm.invoice_email.trim() || null,
+        payment_terms: customerForm.payment_terms.trim() || null,
         their_reference: customerForm.their_reference.trim() || null,
+        reverse_vat: customerForm.reverse_vat ? 1 : 0,
         company_id: companyId,
       };
       if (editingCustomerId) {
@@ -286,7 +302,10 @@ const AdminCustomers = () => {
         contact_phone: "",
         phone_secondary: "",
         contact_email: "",
+        invoice_email: "",
+        payment_terms: "30 dagar",
         their_reference: "",
+        reverse_vat: false,
       });
       setEditingCustomerId(null);
       fetchData();
@@ -654,6 +673,24 @@ const AdminCustomers = () => {
                   placeholder="SE556000000001"
                 />
               </div>
+              <div className="space-y-2">
+                <Label>Betalningsvillkor</Label>
+                <Input
+                  value={customerForm.payment_terms}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, payment_terms: e.target.value }))}
+                  placeholder="30 dagar"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-2 md:col-span-2">
+                <Checkbox
+                  id="reverseVat"
+                  checked={customerForm.reverse_vat}
+                  onCheckedChange={(value) =>
+                    setCustomerForm((prev) => ({ ...prev, reverse_vat: value === true }))
+                  }
+                />
+                <Label htmlFor="reverseVat">Omvänd byggmoms</Label>
+              </div>
               <div className="space-y-2 md:col-span-2">
                 <Label>Fakturaadress</Label>
                 <Input
@@ -716,6 +753,14 @@ const AdminCustomers = () => {
                   value={customerForm.contact_email}
                   onChange={(e) => setCustomerForm((prev) => ({ ...prev, contact_email: e.target.value }))}
                   placeholder="kund@foretag.se"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Faktura-e-post</Label>
+                <Input
+                  value={customerForm.invoice_email}
+                  onChange={(e) => setCustomerForm((prev) => ({ ...prev, invoice_email: e.target.value }))}
+                  placeholder="faktura@foretag.se"
                 />
               </div>
               <div className="space-y-2">

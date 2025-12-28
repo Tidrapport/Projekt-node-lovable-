@@ -367,6 +367,15 @@ db.serialize(() => {
       company_id INTEGER NOT NULL,
       year INTEGER NOT NULL,
       job_role_id INTEGER NOT NULL,
+      article_number TEXT,
+      day_article_number TEXT,
+      evening_article_number TEXT,
+      night_article_number TEXT,
+      weekend_article_number TEXT,
+      overtime_weekday_article_number TEXT,
+      overtime_weekend_article_number TEXT,
+      per_diem_article_number TEXT,
+      travel_time_article_number TEXT,
       base_rate REAL,
       day_rate REAL,
       evening_rate REAL,
@@ -384,6 +393,46 @@ db.serialize(() => {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_job_role_rates_company_year ON job_role_rates(company_id, year);`);
+  db.all(`PRAGMA table_info(job_role_rates);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för job_role_rates:", err);
+      return;
+    }
+    const hasColumn = (name) => columns.some((col) => col.name === name);
+    const addColumn = (sql, label) => {
+      db.run(sql, (alterErr) => {
+        if (alterErr) {
+          console.error(`Kunde inte lägga till kolumnen ${label}:`, alterErr);
+        }
+      });
+    };
+    if (!hasColumn("article_number")) addColumn(`ALTER TABLE job_role_rates ADD COLUMN article_number TEXT;`, "article_number");
+    if (!hasColumn("day_article_number"))
+      addColumn(`ALTER TABLE job_role_rates ADD COLUMN day_article_number TEXT;`, "day_article_number");
+    if (!hasColumn("evening_article_number"))
+      addColumn(`ALTER TABLE job_role_rates ADD COLUMN evening_article_number TEXT;`, "evening_article_number");
+    if (!hasColumn("night_article_number"))
+      addColumn(`ALTER TABLE job_role_rates ADD COLUMN night_article_number TEXT;`, "night_article_number");
+    if (!hasColumn("weekend_article_number"))
+      addColumn(`ALTER TABLE job_role_rates ADD COLUMN weekend_article_number TEXT;`, "weekend_article_number");
+    if (!hasColumn("overtime_weekday_article_number"))
+      addColumn(
+        `ALTER TABLE job_role_rates ADD COLUMN overtime_weekday_article_number TEXT;`,
+        "overtime_weekday_article_number"
+      );
+    if (!hasColumn("overtime_weekend_article_number"))
+      addColumn(
+        `ALTER TABLE job_role_rates ADD COLUMN overtime_weekend_article_number TEXT;`,
+        "overtime_weekend_article_number"
+      );
+    if (!hasColumn("per_diem_article_number"))
+      addColumn(`ALTER TABLE job_role_rates ADD COLUMN per_diem_article_number TEXT;`, "per_diem_article_number");
+    if (!hasColumn("travel_time_article_number"))
+      addColumn(
+        `ALTER TABLE job_role_rates ADD COLUMN travel_time_article_number TEXT;`,
+        "travel_time_article_number"
+      );
+  });
 
   db.run(`
     CREATE TABLE IF NOT EXISTS material_type_rates (
@@ -391,6 +440,7 @@ db.serialize(() => {
       company_id INTEGER NOT NULL,
       year INTEGER NOT NULL,
       material_type_id INTEGER NOT NULL,
+      article_number TEXT,
       price REAL,
       unit TEXT,
       created_at TEXT DEFAULT (datetime('now')),
@@ -401,6 +451,20 @@ db.serialize(() => {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_material_type_rates_company_year ON material_type_rates(company_id, year);`);
+  db.all(`PRAGMA table_info(material_type_rates);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för material_type_rates:", err);
+      return;
+    }
+    const hasColumn = (name) => columns.some((col) => col.name === name);
+    if (!hasColumn("article_number")) {
+      db.run(`ALTER TABLE material_type_rates ADD COLUMN article_number TEXT;`, (alterErr) => {
+        if (alterErr) {
+          console.error("Kunde inte lägga till kolumnen article_number:", alterErr);
+        }
+      });
+    }
+  });
 
   // --- Project-specific price lists (external) ---
   db.run(`
@@ -429,6 +493,34 @@ db.serialize(() => {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_list_settings_company_year ON price_list_settings(company_id, year);`);
+  db.all(`PRAGMA table_info(price_list_settings);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för price_list_settings:", err);
+      return;
+    }
+    const hasColumn = (name) => columns.some((col) => col.name === name);
+    const addColumn = (sql, label) => {
+      db.run(sql, (alterErr) => {
+        if (alterErr) console.error(`Kunde inte lägga till ${label}:`, alterErr);
+      });
+    };
+    if (!hasColumn("show_day")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN show_day INTEGER DEFAULT 1;`, "show_day");
+    if (!hasColumn("show_evening")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN show_evening INTEGER DEFAULT 1;`, "show_evening");
+    if (!hasColumn("show_night")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN show_night INTEGER DEFAULT 1;`, "show_night");
+    if (!hasColumn("show_weekend")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN show_weekend INTEGER DEFAULT 1;`, "show_weekend");
+    if (!hasColumn("show_overtime_weekday")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN show_overtime_weekday INTEGER DEFAULT 1;`, "show_overtime_weekday");
+    if (!hasColumn("show_overtime_weekend")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN show_overtime_weekend INTEGER DEFAULT 1;`, "show_overtime_weekend");
+    if (!hasColumn("day_start")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN day_start TEXT;`, "day_start");
+    if (!hasColumn("day_end")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN day_end TEXT;`, "day_end");
+    if (!hasColumn("evening_start")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN evening_start TEXT;`, "evening_start");
+    if (!hasColumn("evening_end")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN evening_end TEXT;`, "evening_end");
+    if (!hasColumn("night_start")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN night_start TEXT;`, "night_start");
+    if (!hasColumn("night_end")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN night_end TEXT;`, "night_end");
+    if (!hasColumn("weekend_start")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN weekend_start TEXT;`, "weekend_start");
+    if (!hasColumn("weekend_end")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN weekend_end TEXT;`, "weekend_end");
+    if (!hasColumn("created_at")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN created_at TEXT;`, "created_at");
+    if (!hasColumn("updated_at")) addColumn(`ALTER TABLE price_list_settings ADD COLUMN updated_at TEXT;`, "updated_at");
+  });
 
   db.run(`
     CREATE TABLE IF NOT EXISTS project_price_list_settings (
@@ -458,6 +550,34 @@ db.serialize(() => {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_project_price_list_settings_company_year ON project_price_list_settings(company_id, year);`);
+  db.all(`PRAGMA table_info(project_price_list_settings);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för project_price_list_settings:", err);
+      return;
+    }
+    const hasColumn = (name) => columns.some((col) => col.name === name);
+    const addColumn = (sql, label) => {
+      db.run(sql, (alterErr) => {
+        if (alterErr) console.error(`Kunde inte lägga till ${label}:`, alterErr);
+      });
+    };
+    if (!hasColumn("show_day")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN show_day INTEGER DEFAULT 1;`, "show_day");
+    if (!hasColumn("show_evening")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN show_evening INTEGER DEFAULT 1;`, "show_evening");
+    if (!hasColumn("show_night")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN show_night INTEGER DEFAULT 1;`, "show_night");
+    if (!hasColumn("show_weekend")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN show_weekend INTEGER DEFAULT 1;`, "show_weekend");
+    if (!hasColumn("show_overtime_weekday")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN show_overtime_weekday INTEGER DEFAULT 1;`, "show_overtime_weekday");
+    if (!hasColumn("show_overtime_weekend")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN show_overtime_weekend INTEGER DEFAULT 1;`, "show_overtime_weekend");
+    if (!hasColumn("day_start")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN day_start TEXT;`, "day_start");
+    if (!hasColumn("day_end")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN day_end TEXT;`, "day_end");
+    if (!hasColumn("evening_start")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN evening_start TEXT;`, "evening_start");
+    if (!hasColumn("evening_end")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN evening_end TEXT;`, "evening_end");
+    if (!hasColumn("night_start")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN night_start TEXT;`, "night_start");
+    if (!hasColumn("night_end")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN night_end TEXT;`, "night_end");
+    if (!hasColumn("weekend_start")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN weekend_start TEXT;`, "weekend_start");
+    if (!hasColumn("weekend_end")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN weekend_end TEXT;`, "weekend_end");
+    if (!hasColumn("created_at")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN created_at TEXT;`, "created_at");
+    if (!hasColumn("updated_at")) addColumn(`ALTER TABLE project_price_list_settings ADD COLUMN updated_at TEXT;`, "updated_at");
+  });
 
   db.run(`
     CREATE TABLE IF NOT EXISTS project_job_role_rates (
@@ -466,6 +586,15 @@ db.serialize(() => {
       year INTEGER NOT NULL,
       project_id INTEGER NOT NULL,
       job_role_id INTEGER NOT NULL,
+      article_number TEXT,
+      day_article_number TEXT,
+      evening_article_number TEXT,
+      night_article_number TEXT,
+      weekend_article_number TEXT,
+      overtime_weekday_article_number TEXT,
+      overtime_weekend_article_number TEXT,
+      per_diem_article_number TEXT,
+      travel_time_article_number TEXT,
       day_rate REAL,
       evening_rate REAL,
       night_rate REAL,
@@ -483,6 +612,54 @@ db.serialize(() => {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_project_job_role_rates_company_year ON project_job_role_rates(company_id, year);`);
+  db.all(`PRAGMA table_info(project_job_role_rates);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för project_job_role_rates:", err);
+      return;
+    }
+    const hasColumn = (name) => columns.some((col) => col.name === name);
+    const addColumn = (sql, label) => {
+      db.run(sql, (alterErr) => {
+        if (alterErr) console.error(`Kunde inte lägga till ${label}:`, alterErr);
+      });
+    };
+    if (!hasColumn("day_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN day_rate REAL;`, "day_rate");
+    if (!hasColumn("article_number")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN article_number TEXT;`, "article_number");
+    if (!hasColumn("day_article_number"))
+      addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN day_article_number TEXT;`, "day_article_number");
+    if (!hasColumn("evening_article_number"))
+      addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN evening_article_number TEXT;`, "evening_article_number");
+    if (!hasColumn("night_article_number"))
+      addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN night_article_number TEXT;`, "night_article_number");
+    if (!hasColumn("weekend_article_number"))
+      addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN weekend_article_number TEXT;`, "weekend_article_number");
+    if (!hasColumn("overtime_weekday_article_number"))
+      addColumn(
+        `ALTER TABLE project_job_role_rates ADD COLUMN overtime_weekday_article_number TEXT;`,
+        "overtime_weekday_article_number"
+      );
+    if (!hasColumn("overtime_weekend_article_number"))
+      addColumn(
+        `ALTER TABLE project_job_role_rates ADD COLUMN overtime_weekend_article_number TEXT;`,
+        "overtime_weekend_article_number"
+      );
+    if (!hasColumn("per_diem_article_number"))
+      addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN per_diem_article_number TEXT;`, "per_diem_article_number");
+    if (!hasColumn("travel_time_article_number"))
+      addColumn(
+        `ALTER TABLE project_job_role_rates ADD COLUMN travel_time_article_number TEXT;`,
+        "travel_time_article_number"
+      );
+    if (!hasColumn("evening_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN evening_rate REAL;`, "evening_rate");
+    if (!hasColumn("night_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN night_rate REAL;`, "night_rate");
+    if (!hasColumn("weekend_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN weekend_rate REAL;`, "weekend_rate");
+    if (!hasColumn("overtime_weekday_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN overtime_weekday_rate REAL;`, "overtime_weekday_rate");
+    if (!hasColumn("overtime_weekend_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN overtime_weekend_rate REAL;`, "overtime_weekend_rate");
+    if (!hasColumn("per_diem_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN per_diem_rate REAL;`, "per_diem_rate");
+    if (!hasColumn("travel_time_rate")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN travel_time_rate REAL;`, "travel_time_rate");
+    if (!hasColumn("created_at")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN created_at TEXT;`, "created_at");
+    if (!hasColumn("updated_at")) addColumn(`ALTER TABLE project_job_role_rates ADD COLUMN updated_at TEXT;`, "updated_at");
+  });
 
   db.run(`
     CREATE TABLE IF NOT EXISTS project_material_type_rates (
@@ -491,6 +668,7 @@ db.serialize(() => {
       year INTEGER NOT NULL,
       project_id INTEGER NOT NULL,
       material_type_id INTEGER NOT NULL,
+      article_number TEXT,
       price REAL,
       unit TEXT,
       created_at TEXT DEFAULT (datetime('now')),
@@ -502,6 +680,24 @@ db.serialize(() => {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_project_material_type_rates_company_year ON project_material_type_rates(company_id, year);`);
+  db.all(`PRAGMA table_info(project_material_type_rates);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för project_material_type_rates:", err);
+      return;
+    }
+    const hasColumn = (name) => columns.some((col) => col.name === name);
+    const addColumn = (sql, label) => {
+      db.run(sql, (alterErr) => {
+        if (alterErr) console.error(`Kunde inte lägga till ${label}:`, alterErr);
+      });
+    };
+    if (!hasColumn("article_number"))
+      addColumn(`ALTER TABLE project_material_type_rates ADD COLUMN article_number TEXT;`, "article_number");
+    if (!hasColumn("price")) addColumn(`ALTER TABLE project_material_type_rates ADD COLUMN price REAL;`, "price");
+    if (!hasColumn("unit")) addColumn(`ALTER TABLE project_material_type_rates ADD COLUMN unit TEXT;`, "unit");
+    if (!hasColumn("created_at")) addColumn(`ALTER TABLE project_material_type_rates ADD COLUMN created_at TEXT;`, "created_at");
+    if (!hasColumn("updated_at")) addColumn(`ALTER TABLE project_material_type_rates ADD COLUMN updated_at TEXT;`, "updated_at");
+  });
 
   // Standard‑företag (id = 1)
   db.run(
@@ -992,10 +1188,13 @@ db.serialize(() => {
       country TEXT,
       contact_name TEXT,
       contact_email TEXT,
+      invoice_email TEXT,
       contact_phone TEXT,
       phone_secondary TEXT,
       their_reference TEXT,
       notes TEXT,
+      payment_terms TEXT,
+      reverse_vat INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -1063,6 +1262,24 @@ db.serialize(() => {
     if (!hasTheirReference) {
       db.run(`ALTER TABLE customers ADD COLUMN their_reference TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till their_reference:", e);
+      });
+    }
+    const hasInvoiceEmail = cols.some((c) => c.name === "invoice_email");
+    if (!hasInvoiceEmail) {
+      db.run(`ALTER TABLE customers ADD COLUMN invoice_email TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till invoice_email:", e);
+      });
+    }
+    const hasPaymentTerms = cols.some((c) => c.name === "payment_terms");
+    if (!hasPaymentTerms) {
+      db.run(`ALTER TABLE customers ADD COLUMN payment_terms TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till payment_terms:", e);
+      });
+    }
+    const hasReverseVat = cols.some((c) => c.name === "reverse_vat");
+    if (!hasReverseVat) {
+      db.run(`ALTER TABLE customers ADD COLUMN reverse_vat INTEGER DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till reverse_vat:", e);
       });
     }
   });

@@ -15,6 +15,15 @@ import { Download } from "lucide-react";
 type JobRoleRate = {
   id: string;
   name: string;
+  article_number: string;
+  day_article_number: string;
+  evening_article_number: string;
+  night_article_number: string;
+  weekend_article_number: string;
+  overtime_weekday_article_number: string;
+  overtime_weekend_article_number: string;
+  per_diem_article_number: string;
+  travel_time_article_number: string;
   day_rate: string;
   evening_rate: string;
   night_rate: string;
@@ -28,6 +37,7 @@ type JobRoleRate = {
 type MaterialRate = {
   id: string;
   name: string;
+  article_number: string;
   price: string;
   unit: string;
 };
@@ -146,6 +156,15 @@ const PriceList = () => {
       const jobRolesData = (data?.job_roles || []).map((role: any) => ({
         id: String(role.id),
         name: role.name || "-",
+        article_number: String(role.article_number || ""),
+        day_article_number: String(role.day_article_number || ""),
+        evening_article_number: String(role.evening_article_number || ""),
+        night_article_number: String(role.night_article_number || ""),
+        weekend_article_number: String(role.weekend_article_number || ""),
+        overtime_weekday_article_number: String(role.overtime_weekday_article_number || ""),
+        overtime_weekend_article_number: String(role.overtime_weekend_article_number || ""),
+        per_diem_article_number: String(role.per_diem_article_number || ""),
+        travel_time_article_number: String(role.travel_time_article_number || ""),
         day_rate: toRateString(role.day_rate),
         evening_rate: toRateString(role.evening_rate),
         night_rate: toRateString(role.night_rate),
@@ -159,6 +178,7 @@ const PriceList = () => {
       const materialData = (data?.material_types || []).map((item: any) => ({
         id: String(item.id),
         name: item.name || "-",
+        article_number: String(item.article_number || ""),
         price: toRateString(item.price),
         unit: normalizeUnit(item.unit),
       }));
@@ -220,6 +240,15 @@ const PriceList = () => {
           year: Number(year),
           job_roles: jobRoles.map((role) => ({
             id: role.id,
+            article_number: role.article_number,
+            day_article_number: role.day_article_number,
+            evening_article_number: role.evening_article_number,
+            night_article_number: role.night_article_number,
+            weekend_article_number: role.weekend_article_number,
+            overtime_weekday_article_number: role.overtime_weekday_article_number,
+            overtime_weekend_article_number: role.overtime_weekend_article_number,
+            per_diem_article_number: role.per_diem_article_number,
+            travel_time_article_number: role.travel_time_article_number,
             day_rate: role.day_rate,
             evening_rate: role.evening_rate,
             night_rate: role.night_rate,
@@ -231,6 +260,7 @@ const PriceList = () => {
           })),
           material_types: materials.map((item) => ({
             id: item.id,
+            article_number: item.article_number,
             price: item.price,
             unit: item.unit,
           })),
@@ -326,8 +356,9 @@ const PriceList = () => {
 
         autoTable(doc, {
           startY: yPos,
-          head: [["Tillägg", "Pris", "Enhet"]],
+          head: [["Artnr", "Tillägg", "Pris", "Enhet"]],
           body: materials.map((item) => [
+            item.article_number || "-",
             item.name,
             formatRate(item.price),
             item.unit || "-",
@@ -337,9 +368,10 @@ const PriceList = () => {
           alternateRowStyles: { fillColor: [245, 245, 245] },
           margin: { left: 14, right: 14 },
           columnStyles: {
-            0: { cellWidth: 90 },
-            1: { cellWidth: 30, halign: "right" },
-            2: { cellWidth: 30 },
+            0: { cellWidth: 30 },
+            1: { cellWidth: 70 },
+            2: { cellWidth: 30, halign: "right" },
+            3: { cellWidth: 30 },
           },
         });
       }
@@ -605,95 +637,173 @@ const PriceList = () => {
             <p className="text-sm text-muted-foreground">Inga yrkesroller att visa.</p>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="w-full table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Yrkesroll</TableHead>
-                    <TableHead>Dag</TableHead>
-                    <TableHead>Kväll</TableHead>
-                    <TableHead>Natt</TableHead>
-                    <TableHead>Helg</TableHead>
-                    <TableHead>ÖT vardag</TableHead>
-                    <TableHead>ÖT helg</TableHead>
-                    <TableHead>Traktamente</TableHead>
-                    <TableHead>Restid</TableHead>
+                    <TableHead className="w-36 text-xs">Yrkesroll</TableHead>
+                    <TableHead className="w-24 text-xs">Dag - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">Kväll - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">Natt - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">Helg - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">ÖT vardag - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">ÖT helg - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">Traktamente - Pris</TableHead>
+                    <TableHead className="w-24 text-xs">Restid - Pris</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {jobRoles.map((role) => (
                     <TableRow key={role.id}>
-                      <TableCell className="font-medium">{role.name}</TableCell>
+                      <TableCell className="font-medium text-sm align-top">{role.name}</TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.day_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "day_rate", e.target.value)}
-                          className="w-24"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.day_article_number}
+                            onChange={(e) => updateJobRoleRate(role.id, "day_article_number", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.day_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "day_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.evening_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "evening_rate", e.target.value)}
-                          className="w-24"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.evening_article_number}
+                            onChange={(e) => updateJobRoleRate(role.id, "evening_article_number", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.evening_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "evening_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.night_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "night_rate", e.target.value)}
-                          className="w-24"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.night_article_number}
+                            onChange={(e) => updateJobRoleRate(role.id, "night_article_number", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.night_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "night_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.weekend_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "weekend_rate", e.target.value)}
-                          className="w-24"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.weekend_article_number}
+                            onChange={(e) => updateJobRoleRate(role.id, "weekend_article_number", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.weekend_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "weekend_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.overtime_weekday_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "overtime_weekday_rate", e.target.value)}
-                          className="w-28"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.overtime_weekday_article_number}
+                            onChange={(e) =>
+                              updateJobRoleRate(role.id, "overtime_weekday_article_number", e.target.value)
+                            }
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.overtime_weekday_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "overtime_weekday_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.overtime_weekend_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "overtime_weekend_rate", e.target.value)}
-                          className="w-28"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.overtime_weekend_article_number}
+                            onChange={(e) =>
+                              updateJobRoleRate(role.id, "overtime_weekend_article_number", e.target.value)
+                            }
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.overtime_weekend_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "overtime_weekend_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.per_diem_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "per_diem_rate", e.target.value)}
-                          className="w-28"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.per_diem_article_number}
+                            onChange={(e) => updateJobRoleRate(role.id, "per_diem_article_number", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.per_diem_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "per_diem_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={role.travel_time_rate}
-                          onChange={(e) => updateJobRoleRate(role.id, "travel_time_rate", e.target.value)}
-                          className="w-24"
-                        />
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <Input
+                            value={role.travel_time_article_number}
+                            onChange={(e) =>
+                              updateJobRoleRate(role.id, "travel_time_article_number", e.target.value)
+                            }
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Artnr"
+                          />
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={role.travel_time_rate}
+                            onChange={(e) => updateJobRoleRate(role.id, "travel_time_rate", e.target.value)}
+                            className="h-7 text-[11px] px-2"
+                            placeholder="Pris"
+                          />
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -717,6 +827,7 @@ const PriceList = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Artnr</TableHead>
                     <TableHead>Tillägg</TableHead>
                     <TableHead>Pris</TableHead>
                     <TableHead>Enhet</TableHead>
@@ -725,6 +836,13 @@ const PriceList = () => {
                 <TableBody>
                   {materials.map((item) => (
                     <TableRow key={item.id}>
+                      <TableCell>
+                        <Input
+                          value={item.article_number}
+                          onChange={(e) => updateMaterial(item.id, "article_number", e.target.value)}
+                          className="w-20"
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">{item.name}</TableCell>
                       <TableCell>
                         <Input

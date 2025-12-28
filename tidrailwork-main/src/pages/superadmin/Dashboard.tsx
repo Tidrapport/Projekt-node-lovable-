@@ -9,14 +9,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/api/client";
+import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 import { toast } from "sonner";
-import { Building2, Copy, Eye, Plus, Trash2, Users } from "lucide-react";
+import { Building2, Copy, Eye, FileText, Plus, Trash2, Users } from "lucide-react";
+import { addDays, format } from "date-fns";
 
 type Company = {
   id: string;
   name: string;
   code?: string | null;
   billing_email?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  bankgiro?: string | null;
+  bic_number?: string | null;
+  iban_number?: string | null;
+  logo_url?: string | null;
+  org_number?: string | null;
+  vat_number?: string | null;
+  f_skatt?: number | boolean | null;
+  invoice_payment_terms?: string | null;
+  invoice_our_reference?: string | null;
+  invoice_late_interest?: string | null;
   created_at?: string | null;
   user_count?: number;
 };
@@ -36,6 +54,20 @@ type BillingUser = {
   created_at?: string | null;
 };
 
+const toDigits = (value: string) => value.replace(/\D/g, "");
+
+const formatVatNumber = (value: string) => {
+  const digits = toDigits(value || "");
+  if (!digits) return "";
+  let base = digits;
+  if (digits.length >= 12 && digits.endsWith("01")) {
+    base = digits.slice(0, -2);
+  } else if (digits.length > 10) {
+    base = digits.slice(0, 10);
+  }
+  return `SE${base}01`;
+};
+
 const SuperAdminDashboard = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +76,14 @@ const SuperAdminDashboard = () => {
 
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyBillingEmail, setNewCompanyBillingEmail] = useState("");
+  const [newCompanyOrgNumber, setNewCompanyOrgNumber] = useState("");
+  const [newCompanyVatNumber, setNewCompanyVatNumber] = useState("");
+  const [newCompanyAddress1, setNewCompanyAddress1] = useState("");
+  const [newCompanyAddress2, setNewCompanyAddress2] = useState("");
+  const [newCompanyPostalCode, setNewCompanyPostalCode] = useState("");
+  const [newCompanyCity, setNewCompanyCity] = useState("");
+  const [newCompanyCountry, setNewCompanyCountry] = useState("");
+  const [newCompanyPhone, setNewCompanyPhone] = useState("");
   const [adminFirstName, setAdminFirstName] = useState("");
   const [adminLastName, setAdminLastName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
@@ -62,6 +102,7 @@ const SuperAdminDashboard = () => {
   const [passwordDialogValue, setPasswordDialogValue] = useState("");
 
   const [billingUsers, setBillingUsers] = useState<BillingUser[]>([]);
+  const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null);
 
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -92,7 +133,9 @@ const SuperAdminDashboard = () => {
         apiFetch<Company[]>(`/companies`),
         apiFetch<BillingUser[]>(`/admin/users?include_inactive=1&all=1`),
       ]);
-      const users = usersData || [];
+      const users = (usersData || []).filter(
+        (u) => String(u.role || "").toLowerCase() !== "super_admin"
+      );
       setBillingUsers(users);
       const withCounts = (companiesData || []).map((company) => ({
         ...company,
@@ -178,6 +221,14 @@ const SuperAdminDashboard = () => {
         json: {
           name: newCompanyName,
           billing_email: newCompanyBillingEmail || null,
+          org_number: newCompanyOrgNumber || null,
+          vat_number: formatVatNumber(newCompanyVatNumber || newCompanyOrgNumber) || null,
+          address_line1: newCompanyAddress1 || null,
+          address_line2: newCompanyAddress2 || null,
+          postal_code: newCompanyPostalCode || null,
+          city: newCompanyCity || null,
+          country: newCompanyCountry || null,
+          phone: newCompanyPhone || null,
           admin_first_name: adminFirstName,
           admin_last_name: adminLastName,
           admin_email: adminEmail,
@@ -188,6 +239,14 @@ const SuperAdminDashboard = () => {
       setShowNewCompanyDialog(false);
       setNewCompanyName("");
       setNewCompanyBillingEmail("");
+      setNewCompanyOrgNumber("");
+      setNewCompanyVatNumber("");
+      setNewCompanyAddress1("");
+      setNewCompanyAddress2("");
+      setNewCompanyPostalCode("");
+      setNewCompanyCity("");
+      setNewCompanyCountry("");
+      setNewCompanyPhone("");
       setAdminFirstName("");
       setAdminLastName("");
       setAdminEmail("");
@@ -262,9 +321,12 @@ const SuperAdminDashboard = () => {
         company_id: string;
         company_name: string;
         total: number;
+        adminCount: number;
+        userCount: number;
+        userFullPrice: number;
+        userDiscounted: number;
         fullPrice: number;
         discounted: number;
-        roles: { admin: number; user: number; other: number };
       }
     >();
 
@@ -273,9 +335,12 @@ const SuperAdminDashboard = () => {
         company_id: String(company.id),
         company_name: company.name,
         total: 0,
+        adminCount: 0,
+        userCount: 0,
+        userFullPrice: 0,
+        userDiscounted: 0,
         fullPrice: 0,
         discounted: 0,
-        roles: { admin: 0, user: 0, other: 0 },
       });
     });
 
@@ -293,23 +358,28 @@ const SuperAdminDashboard = () => {
           company_id: key,
           company_name: `Bolag ${key}`,
           total: 0,
+          adminCount: 0,
+          userCount: 0,
+          userFullPrice: 0,
+          userDiscounted: 0,
           fullPrice: 0,
           discounted: 0,
-          roles: { admin: 0, user: 0, other: 0 },
         });
       }
       const entry = summaryMap.get(key)!;
       entry.total += 1;
       if (role === "admin") {
+        entry.adminCount += 1;
         entry.fullPrice += 1;
       } else if (createdAt.getDate() > 15) {
+        entry.userCount += 1;
+        entry.userDiscounted += 1;
         entry.discounted += 1;
       } else {
+        entry.userCount += 1;
+        entry.userFullPrice += 1;
         entry.fullPrice += 1;
       }
-      if (role === "admin") entry.roles.admin += 1;
-      else if (role === "user") entry.roles.user += 1;
-      else entry.roles.other += 1;
     });
 
     return Array.from(summaryMap.values()).sort((a, b) => a.company_name.localeCompare(b.company_name, "sv-SE"));
@@ -318,6 +388,139 @@ const SuperAdminDashboard = () => {
   const formatBillable = (value: number) => {
     if (Number.isNaN(value)) return "0";
     return value % 1 === 0 ? String(Math.trunc(value)) : value.toFixed(1);
+  };
+
+  const findOperoCompany = () =>
+    companies.find((c) => (c.name || "").toLowerCase() === "opero systems ab") ||
+    companies.find((c) => (c.name || "").toLowerCase() === "opero-system ab") ||
+    companies[0];
+
+  const handleGenerateSubscriptionInvoice = async (item: {
+    company_id: string;
+    company_name: string;
+    adminCount: number;
+    userFullPrice: number;
+    userDiscounted: number;
+  }) => {
+    if (invoiceLoadingId) return;
+    const targetCompany = companies.find((c) => String(c.id) === String(item.company_id));
+    if (!targetCompany) {
+      toast.error("Kunde inte hitta företaget.");
+      return;
+    }
+    const issuerCompany = findOperoCompany();
+    if (!issuerCompany) {
+      toast.error("Opero Systems AB saknas i företagslistan.");
+      return;
+    }
+
+    const lines: InvoiceLine[] = [];
+    let itemIndex = 1;
+    if (item.adminCount > 0) {
+      lines.push({
+        item_no: String(itemIndex++),
+        description: "Admin (månadsavgift)",
+        quantity: item.adminCount,
+        unit: "st",
+        unit_price: 250,
+        total: item.adminCount * 250,
+      });
+    }
+    if (item.userFullPrice > 0) {
+      lines.push({
+        item_no: String(itemIndex++),
+        description: "Användare (månadsavgift)",
+        quantity: item.userFullPrice,
+        unit: "st",
+        unit_price: 160,
+        total: item.userFullPrice * 160,
+      });
+    }
+    if (item.userDiscounted > 0) {
+      lines.push({
+        item_no: String(itemIndex++),
+        description: "Användare (50% rabatt efter 15:e)",
+        quantity: item.userDiscounted,
+        unit: "st",
+        unit_price: 80,
+        total: item.userDiscounted * 80,
+      });
+    }
+
+    if (!lines.length) {
+      toast.error("Ingen faktura att skapa för denna månad.");
+      return;
+    }
+
+    const subtotal = lines.reduce((sum, line) => sum + line.total, 0);
+    const vatRate = 25;
+    const vat = subtotal * (vatRate / 100);
+    const total = subtotal + vat;
+    const totals: InvoiceTotals = {
+      subtotal,
+      vat,
+      total,
+      vat_rate: vatRate,
+    };
+
+    const customerLines: string[] = [];
+    if (targetCompany.name) customerLines.push(targetCompany.name);
+    if (targetCompany.address_line1) customerLines.push(targetCompany.address_line1);
+    if (targetCompany.address_line2) customerLines.push(targetCompany.address_line2);
+    const postalCity = [targetCompany.postal_code, targetCompany.city].filter(Boolean).join(" ");
+    if (postalCity) customerLines.push(postalCity);
+    if (targetCompany.country) customerLines.push(targetCompany.country);
+
+    const invoiceDate = new Date();
+    const paymentTerms = issuerCompany.invoice_payment_terms?.trim() || "30 dagar";
+    const numericDaysMatch = paymentTerms.match(/\d+/);
+    const paymentDays = numericDaysMatch ? Number(numericDaysMatch[0]) : 30;
+    const dueDate = addDays(invoiceDate, Number.isFinite(paymentDays) ? paymentDays : 30);
+    const invoiceNumber = `${format(invoiceDate, "yyyyMM")}${item.company_id}`;
+    const ocr = invoiceNumber ? `${invoiceNumber}0` : "";
+
+    const meta: InvoiceMeta = {
+      invoice_date: format(invoiceDate, "yyyy-MM-dd"),
+      invoice_number: invoiceNumber,
+      ocr,
+      customer_number: targetCompany.code || String(targetCompany.id || ""),
+      our_reference: issuerCompany.invoice_our_reference || "Opero Systems AB",
+      their_reference: "",
+      order_number: `Abonnemang ${monthLabel}`,
+      payment_terms: paymentTerms,
+      due_date: format(dueDate, "yyyy-MM-dd"),
+      vat_number: targetCompany.vat_number || targetCompany.org_number || "",
+      late_interest: issuerCompany.invoice_late_interest || "8%",
+      customer_address_lines: customerLines,
+    };
+
+    const footer: CompanyFooter = {
+      name: issuerCompany.name,
+      address_line1: issuerCompany.address_line1,
+      address_line2: issuerCompany.address_line2,
+      postal_code: issuerCompany.postal_code,
+      city: issuerCompany.city,
+      country: issuerCompany.country,
+      phone: issuerCompany.phone,
+      billing_email: issuerCompany.billing_email,
+      bankgiro: issuerCompany.bankgiro,
+      bic_number: issuerCompany.bic_number,
+      iban_number: issuerCompany.iban_number,
+      logo_url: issuerCompany.logo_url,
+      org_number: issuerCompany.org_number,
+      vat_number: issuerCompany.vat_number,
+      f_skatt: issuerCompany.f_skatt,
+    };
+
+    setInvoiceLoadingId(String(item.company_id));
+    try {
+      await generateInvoicePdf(meta, lines, totals, footer);
+      toast.success(`Faktura skapad för ${item.company_name}.`);
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte skapa faktura-PDF.");
+    } finally {
+      setInvoiceLoadingId(null);
+    }
   };
 
   const totalNewUsers = billingSummary.reduce((sum, item) => sum + item.total, 0);
@@ -382,7 +585,7 @@ const SuperAdminDashboard = () => {
                 Nytt företag
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-slate-950 text-slate-100 border-slate-800">
+            <DialogContent className="bg-slate-950 text-slate-100 border-slate-800 max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-blue-200">Skapa nytt företag + admin</DialogTitle>
             </DialogHeader>
@@ -403,6 +606,86 @@ const SuperAdminDashboard = () => {
                   value={newCompanyBillingEmail}
                   onChange={(e) => setNewCompanyBillingEmail(e.target.value)}
                   placeholder="faktura@foretag.se"
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label className="text-blue-200">Organisationsnr</Label>
+                  <Input
+                    value={newCompanyOrgNumber}
+                    onChange={(e) => {
+                      const orgNumber = e.target.value;
+                      setNewCompanyOrgNumber(orgNumber);
+                      setNewCompanyVatNumber(formatVatNumber(orgNumber));
+                    }}
+                    placeholder="559999-9999"
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-blue-200">Momsreg. nr</Label>
+                  <Input
+                    value={newCompanyVatNumber}
+                    onChange={(e) => setNewCompanyVatNumber(formatVatNumber(e.target.value))}
+                    placeholder="SE559999999901"
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Fakturaadress</Label>
+                <Input
+                  value={newCompanyAddress1}
+                  onChange={(e) => setNewCompanyAddress1(e.target.value)}
+                  placeholder="Gatuadress"
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Fakturaadress 2</Label>
+                <Input
+                  value={newCompanyAddress2}
+                  onChange={(e) => setNewCompanyAddress2(e.target.value)}
+                  placeholder="C/O, våning, etc."
+                  className="text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-2">
+                  <Label className="text-blue-200">Postnr</Label>
+                  <Input
+                    value={newCompanyPostalCode}
+                    onChange={(e) => setNewCompanyPostalCode(e.target.value)}
+                    placeholder="123 45"
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-blue-200">Ort</Label>
+                  <Input
+                    value={newCompanyCity}
+                    onChange={(e) => setNewCompanyCity(e.target.value)}
+                    placeholder="Stad"
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-blue-200">Land</Label>
+                  <Input
+                    value={newCompanyCountry}
+                    onChange={(e) => setNewCompanyCountry(e.target.value)}
+                    placeholder="Sverige"
+                    className="text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Telefon</Label>
+                <Input
+                  value={newCompanyPhone}
+                  onChange={(e) => setNewCompanyPhone(e.target.value)}
+                  placeholder="070..."
                   className="text-slate-900 placeholder:text-slate-400"
                 />
               </div>
@@ -526,7 +809,7 @@ const SuperAdminDashboard = () => {
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                 <p className="text-xs uppercase text-slate-400">Fullpris</p>
                 <p className="text-2xl font-semibold">{totalFullPrice}</p>
-                <p className="text-xs text-slate-500">Skapade t.o.m 15:e</p>
+                <p className="text-xs text-slate-500">Admins + skapade t.o.m 15:e</p>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                 <p className="text-xs uppercase text-slate-400">50% rabatt</p>
@@ -550,18 +833,13 @@ const SuperAdminDashboard = () => {
                     <TableHead className="text-slate-400">Fullpris</TableHead>
                     <TableHead className="text-slate-400">50% rabatt</TableHead>
                     <TableHead className="text-slate-400">Faktura denna månad</TableHead>
+                    <TableHead className="text-slate-400">Faktura PDF</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {billingSummary.map((item) => {
                     const billable = item.fullPrice + item.discounted * 0.5;
-                    const roleSummary = [
-                      item.roles.admin ? `Admin ${item.roles.admin}` : null,
-                      item.roles.user ? `Användare ${item.roles.user}` : null,
-                      item.roles.other ? `Övriga ${item.roles.other}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" • ");
+                    const roleSummary = `Admin ${item.adminCount} • Användare ${item.userCount}`;
                     return (
                       <TableRow key={item.company_id} className="border-slate-800">
                         <TableCell className="font-medium">{item.company_name}</TableCell>
@@ -573,6 +851,26 @@ const SuperAdminDashboard = () => {
                           {item.total === 0
                             ? "Ingen faktura denna månad"
                             : `Denna månad får ${item.company_name} faktura för ${formatBillable(billable)} användare`}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-slate-700 text-slate-200 hover:text-slate-900"
+                            onClick={() =>
+                              handleGenerateSubscriptionInvoice({
+                                company_id: item.company_id,
+                                company_name: item.company_name,
+                                adminCount: item.adminCount,
+                                userFullPrice: item.userFullPrice,
+                                userDiscounted: item.userDiscounted,
+                              })
+                            }
+                            disabled={item.total === 0 || invoiceLoadingId === String(item.company_id)}
+                          >
+                            <FileText className="h-4 w-4 mr-1" />
+                            {invoiceLoadingId === String(item.company_id) ? "Skapar..." : "Faktura"}
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );

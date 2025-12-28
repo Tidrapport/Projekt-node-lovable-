@@ -442,13 +442,54 @@ app.get("/companies", requireAuth, (req, res) => {
 
 // Skapa företag (superadmin) + valfri admin-användare
 app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
-  const { name, billing_email = null, code, admin_first_name, admin_last_name, admin_email, admin_password } = req.body || {};
+  const {
+    name,
+    billing_email = null,
+    code,
+    address_line1,
+    address_line2,
+    postal_code,
+    city,
+    country,
+    phone,
+    org_number,
+    vat_number,
+    admin_first_name,
+    admin_last_name,
+    admin_email,
+    admin_password,
+  } = req.body || {};
   if (!name) return res.status(400).json({ error: "name required" });
   const companyCode = code || generateCompanyCode();
+  const clean = (value) => (value ? String(value).trim() : null);
 
   db.run(
-    `INSERT INTO companies (name, code, billing_email) VALUES (?, ?, ?)`,
-    [name.trim(), companyCode.trim(), billing_email ? String(billing_email).trim() : null],
+    `INSERT INTO companies (
+      name,
+      code,
+      billing_email,
+      address_line1,
+      address_line2,
+      postal_code,
+      city,
+      country,
+      phone,
+      org_number,
+      vat_number
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      String(name).trim(),
+      companyCode.trim(),
+      clean(billing_email),
+      clean(address_line1),
+      clean(address_line2),
+      clean(postal_code),
+      clean(city),
+      clean(country),
+      clean(phone),
+      clean(org_number),
+      clean(vat_number),
+    ],
     function (err) {
       if (err) {
         console.error("DB-fel vid POST /companies:", err);
@@ -726,12 +767,17 @@ app.post("/customers", requireAuth, requireAdmin, (req, res) => {
     country,
     contact_name,
     contact_email,
+    invoice_email,
     contact_phone,
     phone_secondary,
     their_reference,
-    notes
+    notes,
+    payment_terms,
+    reverse_vat
   } = req.body || {};
   if (!name) return res.status(400).json({ error: "name required" });
+  const reverseVatValue =
+    reverse_vat === true || reverse_vat === 1 || reverse_vat === "1" || reverse_vat === "true" ? 1 : 0;
 
   db.run(
     `INSERT INTO customers (
@@ -748,12 +794,15 @@ app.post("/customers", requireAuth, requireAdmin, (req, res) => {
       country,
       contact_name,
       contact_email,
+      invoice_email,
       contact_phone,
       phone_secondary,
       their_reference,
-      notes
+      notes,
+      payment_terms,
+      reverse_vat
     )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       companyId,
       customer_number || null,
@@ -768,10 +817,13 @@ app.post("/customers", requireAuth, requireAdmin, (req, res) => {
       country || null,
       contact_name || null,
       contact_email || null,
+      invoice_email || null,
       contact_phone || null,
       phone_secondary || null,
       their_reference || null,
-      notes || null
+      notes || null,
+      payment_terms || null,
+      reverseVatValue
     ],
     function (err) {
       if (err) {
@@ -808,11 +860,16 @@ app.put("/customers/:id", requireAuth, requireAdmin, (req, res) => {
     country,
     contact_name,
     contact_email,
+    invoice_email,
     contact_phone,
     phone_secondary,
     their_reference,
-    notes
+    notes,
+    payment_terms,
+    reverse_vat
   } = req.body || {};
+  const reverseVatValue =
+    reverse_vat === true || reverse_vat === 1 || reverse_vat === "1" || reverse_vat === "true" ? 1 : 0;
 
   db.get("SELECT id FROM customers WHERE id = ? AND company_id = ?", [id, companyId], (err, exists) => {
     if (err) {
@@ -835,10 +892,13 @@ app.put("/customers/:id", requireAuth, requireAdmin, (req, res) => {
            country = COALESCE(?, country),
            contact_name = COALESCE(?, contact_name),
            contact_email = COALESCE(?, contact_email),
+           invoice_email = COALESCE(?, invoice_email),
            contact_phone = COALESCE(?, contact_phone),
            phone_secondary = COALESCE(?, phone_secondary),
            their_reference = COALESCE(?, their_reference),
-           notes = COALESCE(?, notes)
+           notes = COALESCE(?, notes),
+           payment_terms = COALESCE(?, payment_terms),
+           reverse_vat = COALESCE(?, reverse_vat)
        WHERE id = ? AND company_id = ?`,
       [
         name ?? null,
@@ -853,10 +913,13 @@ app.put("/customers/:id", requireAuth, requireAdmin, (req, res) => {
         country ?? null,
         contact_name ?? null,
         contact_email ?? null,
+        invoice_email ?? null,
         contact_phone ?? null,
         phone_secondary ?? null,
         their_reference ?? null,
         notes ?? null,
+        payment_terms ?? null,
+        reverseVatValue,
         id,
         companyId
       ],
@@ -3348,6 +3411,15 @@ app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
       job_roles: (jobRows || []).map((row) => ({
         id: String(row.id),
         name: row.name,
+        article_number: row.article_number || "",
+        day_article_number: row.day_article_number || "",
+        evening_article_number: row.evening_article_number || "",
+        night_article_number: row.night_article_number || "",
+        weekend_article_number: row.weekend_article_number || "",
+        overtime_weekday_article_number: row.overtime_weekday_article_number || "",
+        overtime_weekend_article_number: row.overtime_weekend_article_number || "",
+        per_diem_article_number: row.per_diem_article_number || "",
+        travel_time_article_number: row.travel_time_article_number || "",
         day_rate: row.day_rate,
         evening_rate: row.evening_rate,
         night_rate: row.night_rate,
@@ -3360,6 +3432,7 @@ app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
       material_types: (matRows || []).map((row) => ({
         id: String(row.id),
         name: row.name,
+        article_number: row.article_number || "",
         price: row.price,
         unit: row.price_unit || row.default_unit || "",
       })),
@@ -3397,6 +3470,15 @@ app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
           SELECT
             jr.id,
             jr.name,
+            pr.article_number,
+            pr.day_article_number,
+            pr.evening_article_number,
+            pr.night_article_number,
+            pr.weekend_article_number,
+            pr.overtime_weekday_article_number,
+            pr.overtime_weekend_article_number,
+            pr.per_diem_article_number,
+            pr.travel_time_article_number,
             pr.day_rate,
             pr.evening_rate,
             pr.night_rate,
@@ -3420,6 +3502,7 @@ app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
             mt.id,
             mt.name,
             mt.unit AS default_unit,
+            pm.article_number,
             pm.price,
             pm.unit AS price_unit
           FROM material_types mt
@@ -3477,6 +3560,15 @@ app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
       SELECT
         jr.id,
         jr.name,
+        rr.article_number,
+        rr.day_article_number,
+        rr.evening_article_number,
+        rr.night_article_number,
+        rr.weekend_article_number,
+        rr.overtime_weekday_article_number,
+        rr.overtime_weekend_article_number,
+        rr.per_diem_article_number,
+        rr.travel_time_article_number,
         rr.day_rate,
         rr.evening_rate,
         rr.night_rate,
@@ -3499,6 +3591,7 @@ app.get("/price-list", requireAuth, requireAdmin, (req, res) => {
         mt.id,
         mt.name,
         mt.unit AS default_unit,
+        mr.article_number,
         mr.price,
         mr.unit AS price_unit
       FROM material_types mt
@@ -3555,6 +3648,10 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
     if (value === null || value === undefined || value === "") return null;
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
+  };
+  const normalizeArticleNumber = (value) => {
+    const raw = String(value ?? "").trim();
+    return raw ? raw : null;
   };
 
   const toBool = (value) => {
@@ -3634,15 +3731,36 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
       for (const role of jobRoles) {
         const roleId = Number(role?.id);
         if (!Number.isFinite(roleId)) continue;
+        const articleNumber = normalizeArticleNumber(role.article_number ?? role.artnr);
+        const dayArticle = normalizeArticleNumber(role.day_article_number);
+        const eveningArticle = normalizeArticleNumber(role.evening_article_number);
+        const nightArticle = normalizeArticleNumber(role.night_article_number);
+        const weekendArticle = normalizeArticleNumber(role.weekend_article_number);
+        const overtimeWeekdayArticle = normalizeArticleNumber(role.overtime_weekday_article_number);
+        const overtimeWeekendArticle = normalizeArticleNumber(role.overtime_weekend_article_number);
+        const perDiemArticle = normalizeArticleNumber(role.per_diem_article_number);
+        const travelArticle = normalizeArticleNumber(role.travel_time_article_number);
         await runAsync(
           `
             INSERT INTO project_job_role_rates (
-              company_id, year, project_id, job_role_id,
+              company_id, year, project_id, job_role_id, article_number,
+              day_article_number, evening_article_number, night_article_number, weekend_article_number,
+              overtime_weekday_article_number, overtime_weekend_article_number,
+              per_diem_article_number, travel_time_article_number,
               day_rate, evening_rate, night_rate, weekend_rate,
               overtime_weekday_rate, overtime_weekend_rate, per_diem_rate, travel_time_rate,
               created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             ON CONFLICT(company_id, year, project_id, job_role_id) DO UPDATE SET
+              article_number = excluded.article_number,
+              day_article_number = excluded.day_article_number,
+              evening_article_number = excluded.evening_article_number,
+              night_article_number = excluded.night_article_number,
+              weekend_article_number = excluded.weekend_article_number,
+              overtime_weekday_article_number = excluded.overtime_weekday_article_number,
+              overtime_weekend_article_number = excluded.overtime_weekend_article_number,
+              per_diem_article_number = excluded.per_diem_article_number,
+              travel_time_article_number = excluded.travel_time_article_number,
               day_rate = excluded.day_rate,
               evening_rate = excluded.evening_rate,
               night_rate = excluded.night_rate,
@@ -3658,6 +3776,15 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
             year,
             projectId,
             roleId,
+            articleNumber,
+            dayArticle,
+            eveningArticle,
+            nightArticle,
+            weekendArticle,
+            overtimeWeekdayArticle,
+            overtimeWeekendArticle,
+            perDiemArticle,
+            travelArticle,
             toNumberOrNull(role.day_rate),
             toNumberOrNull(role.evening_rate),
             toNumberOrNull(role.night_rate),
@@ -3674,17 +3801,19 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
         const materialId = Number(item?.id);
         if (!Number.isFinite(materialId)) continue;
         const unit = String(item?.unit || "").trim() || null;
+        const materialArticle = normalizeArticleNumber(item.article_number ?? item.artnr);
         await runAsync(
           `
             INSERT INTO project_material_type_rates (
-              company_id, year, project_id, material_type_id, price, unit, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+              company_id, year, project_id, material_type_id, article_number, price, unit, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             ON CONFLICT(company_id, year, project_id, material_type_id) DO UPDATE SET
+              article_number = excluded.article_number,
               price = excluded.price,
               unit = excluded.unit,
               updated_at = datetime('now')
           `,
-          [companyId, year, projectId, materialId, toNumberOrNull(item.price), unit]
+          [companyId, year, projectId, materialId, materialArticle, toNumberOrNull(item.price), unit]
         );
       }
 
@@ -3697,7 +3826,7 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
             day_start, day_end, evening_start, evening_end,
             night_start, night_end, weekend_start, weekend_end,
             created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
           ON CONFLICT(company_id, year, project_id) DO UPDATE SET
             show_day = excluded.show_day,
             show_evening = excluded.show_evening,
@@ -3739,15 +3868,36 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
       for (const role of jobRoles) {
         const roleId = Number(role?.id);
         if (!Number.isFinite(roleId)) continue;
+        const articleNumber = normalizeArticleNumber(role.article_number ?? role.artnr);
+        const dayArticle = normalizeArticleNumber(role.day_article_number);
+        const eveningArticle = normalizeArticleNumber(role.evening_article_number);
+        const nightArticle = normalizeArticleNumber(role.night_article_number);
+        const weekendArticle = normalizeArticleNumber(role.weekend_article_number);
+        const overtimeWeekdayArticle = normalizeArticleNumber(role.overtime_weekday_article_number);
+        const overtimeWeekendArticle = normalizeArticleNumber(role.overtime_weekend_article_number);
+        const perDiemArticle = normalizeArticleNumber(role.per_diem_article_number);
+        const travelArticle = normalizeArticleNumber(role.travel_time_article_number);
         await runAsync(
           `
             INSERT INTO job_role_rates (
-              company_id, year, job_role_id,
+              company_id, year, job_role_id, article_number,
+              day_article_number, evening_article_number, night_article_number, weekend_article_number,
+              overtime_weekday_article_number, overtime_weekend_article_number,
+              per_diem_article_number, travel_time_article_number,
               day_rate, evening_rate, night_rate, weekend_rate,
               overtime_weekday_rate, overtime_weekend_rate, per_diem_rate, travel_time_rate,
               created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             ON CONFLICT(company_id, year, job_role_id) DO UPDATE SET
+              article_number = excluded.article_number,
+              day_article_number = excluded.day_article_number,
+              evening_article_number = excluded.evening_article_number,
+              night_article_number = excluded.night_article_number,
+              weekend_article_number = excluded.weekend_article_number,
+              overtime_weekday_article_number = excluded.overtime_weekday_article_number,
+              overtime_weekend_article_number = excluded.overtime_weekend_article_number,
+              per_diem_article_number = excluded.per_diem_article_number,
+              travel_time_article_number = excluded.travel_time_article_number,
               day_rate = excluded.day_rate,
               evening_rate = excluded.evening_rate,
               night_rate = excluded.night_rate,
@@ -3762,6 +3912,15 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
             companyId,
             year,
             roleId,
+            articleNumber,
+            dayArticle,
+            eveningArticle,
+            nightArticle,
+            weekendArticle,
+            overtimeWeekdayArticle,
+            overtimeWeekendArticle,
+            perDiemArticle,
+            travelArticle,
             toNumberOrNull(role.day_rate),
             toNumberOrNull(role.evening_rate),
             toNumberOrNull(role.night_rate),
@@ -3778,17 +3937,19 @@ app.put("/price-list", requireAuth, requireAdmin, async (req, res) => {
         const materialId = Number(item?.id);
         if (!Number.isFinite(materialId)) continue;
         const unit = String(item?.unit || "").trim() || null;
+        const materialArticle = normalizeArticleNumber(item.article_number ?? item.artnr);
         await runAsync(
           `
             INSERT INTO material_type_rates (
-              company_id, year, material_type_id, price, unit, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+              company_id, year, material_type_id, article_number, price, unit, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
             ON CONFLICT(company_id, year, material_type_id) DO UPDATE SET
+              article_number = excluded.article_number,
               price = excluded.price,
               unit = excluded.unit,
               updated_at = datetime('now')
           `,
-          [companyId, year, materialId, toNumberOrNull(item.price), unit]
+          [companyId, year, materialId, materialArticle, toNumberOrNull(item.price), unit]
         );
       }
 

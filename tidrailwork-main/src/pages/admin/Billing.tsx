@@ -65,6 +65,7 @@ interface Customer {
   customer_type?: string | null;
   orgnr?: string | null;
   vat_number?: string | null;
+  reverse_vat?: boolean | number | null;
   invoice_address1?: string | null;
   invoice_address2?: string | null;
   postal_code?: string | null;
@@ -74,6 +75,8 @@ interface Customer {
   contact_email?: string | null;
   contact_phone?: string | null;
   phone_secondary?: string | null;
+  invoice_email?: string | null;
+  payment_terms?: string | null;
   their_reference?: string | null;
   notes?: string | null;
 }
@@ -122,6 +125,15 @@ type CompanyInfo = {
 type PriceListJobRole = {
   id: string;
   name: string;
+  article_number?: string | null;
+  day_article_number?: string | null;
+  evening_article_number?: string | null;
+  night_article_number?: string | null;
+  weekend_article_number?: string | null;
+  overtime_weekday_article_number?: string | null;
+  overtime_weekend_article_number?: string | null;
+  per_diem_article_number?: string | null;
+  travel_time_article_number?: string | null;
   day_rate: number | null;
   evening_rate: number | null;
   night_rate: number | null;
@@ -135,6 +147,7 @@ type PriceListJobRole = {
 type PriceListMaterial = {
   id: string;
   name: string;
+  article_number?: string | null;
   price: number | null;
   unit: string;
 };
@@ -325,6 +338,19 @@ const Billing = () => {
     const jobRoleRates = new Map(priceList.job_roles.map((role) => [role.id, role]));
     const materialRates = new Map(priceList.material_types.map((mat) => [mat.id, mat]));
 
+    const toPositive = (value: number | string | null | undefined) => {
+      if (value === null || value === undefined) return 0;
+      const numeric =
+        typeof value === "string" ? Number(value.replace(",", ".")) : Number(value);
+      return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+    };
+    const getArticleNumber = (value?: string | null, fallback?: string | null) => {
+      const raw = String(value ?? "").trim();
+      if (raw) return raw;
+      const base = String(fallback ?? "").trim();
+      return base;
+    };
+
     const settings = priceList.settings || {};
     const shiftWindows = {
       day: { start: timeToHours(settings.day_start, 6), end: timeToHours(settings.day_end, 18) },
@@ -337,7 +363,7 @@ const Billing = () => {
     const orderedLines: InvoiceLine[] = [];
 
     const addLine = (key: string, line: InvoiceLine) => {
-      if (!Number.isFinite(line.quantity) || line.quantity === 0) return;
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0) return;
       const existing = lineMap.get(key);
       if (existing) {
         existing.quantity += line.quantity;
@@ -351,7 +377,8 @@ const Billing = () => {
     invoiceEntries.forEach((entry) => {
       const role = entry.job_role_id ? jobRoleRates.get(entry.job_role_id) : null;
       const roleName = role?.name || "Yrkesroll";
-      const totalHours = Number(entry.total_hours || 0);
+      const baseArticleNumber = role?.article_number ? String(role.article_number).trim() : "";
+      const totalHours = toPositive(entry.total_hours);
 
       let distribution = { day: totalHours, evening: 0, night: 0, weekend: 0 };
       if (entry.date && entry.start_time && entry.end_time) {
@@ -363,9 +390,15 @@ const Billing = () => {
           shiftWindows
         );
       }
+      distribution = {
+        day: toPositive(distribution.day),
+        evening: toPositive(distribution.evening),
+        night: toPositive(distribution.night),
+        weekend: toPositive(distribution.weekend),
+      };
 
       addLine(`${roleName}-day`, {
-        item_no: "",
+        item_no: getArticleNumber(role?.day_article_number, baseArticleNumber),
         description: `${roleName} Dag`,
         quantity: distribution.day,
         unit: "tim",
@@ -373,7 +406,7 @@ const Billing = () => {
         total: distribution.day * Number(role?.day_rate ?? 0),
       });
       addLine(`${roleName}-evening`, {
-        item_no: "",
+        item_no: getArticleNumber(role?.evening_article_number, baseArticleNumber),
         description: `${roleName} Kväll`,
         quantity: distribution.evening,
         unit: "tim",
@@ -381,7 +414,7 @@ const Billing = () => {
         total: distribution.evening * Number(role?.evening_rate ?? 0),
       });
       addLine(`${roleName}-night`, {
-        item_no: "",
+        item_no: getArticleNumber(role?.night_article_number, baseArticleNumber),
         description: `${roleName} Natt`,
         quantity: distribution.night,
         unit: "tim",
@@ -389,7 +422,7 @@ const Billing = () => {
         total: distribution.night * Number(role?.night_rate ?? 0),
       });
       addLine(`${roleName}-weekend`, {
-        item_no: "",
+        item_no: getArticleNumber(role?.weekend_article_number, baseArticleNumber),
         description: `${roleName} Helg`,
         quantity: distribution.weekend,
         unit: "tim",
@@ -398,42 +431,45 @@ const Billing = () => {
       });
 
       if (entry.overtime_weekday_hours) {
+        const overtimeWeekday = toPositive(entry.overtime_weekday_hours);
         addLine(`${roleName}-overtime-weekday`, {
-          item_no: "",
+          item_no: getArticleNumber(role?.overtime_weekday_article_number, baseArticleNumber),
           description: `${roleName} Övertid vardag`,
-          quantity: Number(entry.overtime_weekday_hours || 0),
+          quantity: overtimeWeekday,
           unit: "tim",
           unit_price: Number(role?.overtime_weekday_rate ?? 0),
-          total: Number(entry.overtime_weekday_hours || 0) * Number(role?.overtime_weekday_rate ?? 0),
+          total: overtimeWeekday * Number(role?.overtime_weekday_rate ?? 0),
         });
       }
 
       if (entry.overtime_weekend_hours) {
+        const overtimeWeekend = toPositive(entry.overtime_weekend_hours);
         addLine(`${roleName}-overtime-weekend`, {
-          item_no: "",
+          item_no: getArticleNumber(role?.overtime_weekend_article_number, baseArticleNumber),
           description: `${roleName} Övertid helg`,
-          quantity: Number(entry.overtime_weekend_hours || 0),
+          quantity: overtimeWeekend,
           unit: "tim",
           unit_price: Number(role?.overtime_weekend_rate ?? 0),
-          total: Number(entry.overtime_weekend_hours || 0) * Number(role?.overtime_weekend_rate ?? 0),
+          total: overtimeWeekend * Number(role?.overtime_weekend_rate ?? 0),
         });
       }
 
       if (entry.travel_time_hours) {
+        const travelHours = toPositive(entry.travel_time_hours);
         addLine(`${roleName}-travel`, {
-          item_no: "",
+          item_no: getArticleNumber(role?.travel_time_article_number, baseArticleNumber),
           description: `${roleName} Restid`,
-          quantity: Number(entry.travel_time_hours || 0),
+          quantity: travelHours,
           unit: "tim",
           unit_price: Number(role?.travel_time_rate ?? 0),
-          total: Number(entry.travel_time_hours || 0) * Number(role?.travel_time_rate ?? 0),
+          total: travelHours * Number(role?.travel_time_rate ?? 0),
         });
       }
 
       const perDiemDays = entry.per_diem_type === "full" ? 1 : entry.per_diem_type === "half" ? 0.5 : 0;
       if (perDiemDays) {
         addLine(`${roleName}-perdiem`, {
-          item_no: "",
+          item_no: getArticleNumber(role?.per_diem_article_number, baseArticleNumber),
           description: `${roleName} Traktamente`,
           quantity: perDiemDays,
           unit: "dag",
@@ -444,20 +480,17 @@ const Billing = () => {
 
       (entry.materials || []).forEach((mat) => {
         const materialInfo = materialRates.get(String(mat.material_type_id));
-        if (!materialInfo || mat.quantity === 0) return;
+        const quantity = toPositive(mat.quantity);
+        if (!materialInfo || quantity === 0) return;
         addLine(`material-${materialInfo.id}`, {
-          item_no: "",
+          item_no: materialInfo.article_number ? String(materialInfo.article_number).trim() : "",
           description: materialInfo.name,
-          quantity: Number(mat.quantity || 0),
+          quantity,
           unit: materialInfo.unit || "",
           unit_price: Number(materialInfo.price ?? 0),
-          total: Number(mat.quantity || 0) * Number(materialInfo.price ?? 0),
+          total: quantity * Number(materialInfo.price ?? 0),
         });
       });
-    });
-
-    orderedLines.forEach((line, idx) => {
-      line.item_no = String(idx + 1);
     });
 
     const subtotal = orderedLines.reduce((sum, line) => sum + line.total, 0);
@@ -599,7 +632,8 @@ const Billing = () => {
         ? (companies || []).find((c) => String(c.id) === String(companyId))
         : (companies || [])[0];
 
-      const paymentTerms = company?.invoice_payment_terms?.trim() || "30 dagar";
+      const paymentTerms =
+        targetCustomer?.payment_terms?.trim() || company?.invoice_payment_terms?.trim() || "30 dagar";
       const numericDaysMatch = paymentTerms.match(/\d+/);
       const paymentDays = numericDaysMatch ? Number(numericDaysMatch[0]) : 30;
 
@@ -607,6 +641,11 @@ const Billing = () => {
       const dueDate = addDays(invoiceDate, Number.isFinite(paymentDays) ? paymentDays : 30);
       const invoiceNumber = `${format(invoiceDate, "yyyyMMdd")}${projectId !== "all" ? projectId : ""}`;
       const ocr = invoiceNumber ? `${invoiceNumber}0` : "";
+
+      const reverseVat = Boolean(targetCustomer?.reverse_vat);
+      const adjustedTotals = reverseVat
+        ? { ...totals, vat_rate: 0, vat: 0, total: totals.subtotal }
+        : totals;
 
       const meta: InvoiceMeta = {
         invoice_date: format(invoiceDate, "yyyy-MM-dd"),
@@ -620,6 +659,7 @@ const Billing = () => {
         due_date: format(dueDate, "yyyy-MM-dd"),
         vat_number: targetCustomer?.vat_number || targetCustomer?.orgnr || "",
         late_interest: company?.invoice_late_interest || "8%",
+        vat_label: reverseVat ? "Omvänd byggmoms" : "",
         customer_address_lines: customerLines,
       };
 
@@ -643,7 +683,7 @@ const Billing = () => {
           }
         : undefined;
 
-      await generateInvoicePdf(meta, lines, totals, footer);
+      await generateInvoicePdf(meta, lines, adjustedTotals, footer);
       toast.success("Faktura skapad.");
     } catch (error: any) {
       console.error(error);
