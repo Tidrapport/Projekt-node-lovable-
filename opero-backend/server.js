@@ -2328,8 +2328,8 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
 
   // Enforce company scoping: non-super_admin can only create users for their company
   const actorRole = (req.user.role || "").toLowerCase();
-  if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(cleanRole)) {
-    return res.status(403).json({ error: "Endast superadmin kan skapa admin-användare." });
+  if (actorRole !== "super_admin" && cleanRole === "super_admin") {
+    return res.status(403).json({ error: "Endast superadmin kan skapa superadmin." });
   }
   let targetCompanyId = company_id || null;
   if (actorRole !== "super_admin") {
@@ -2478,13 +2478,13 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "Endast superadmin kan ändra admin-användare." });
+    if (actorRole !== "super_admin" && String(row.role || "").toLowerCase() === "super_admin") {
+      return res.status(403).json({ error: "Endast superadmin kan ändra superadmin." });
     }
     if (actorRole !== "super_admin" && role !== undefined) {
       const nextRole = String(role || "").toLowerCase();
-      if (["admin", "super_admin"].includes(nextRole)) {
-        return res.status(403).json({ error: "Endast superadmin kan ändra roll till admin." });
+      if (nextRole === "super_admin") {
+        return res.status(403).json({ error: "Endast superadmin kan ändra roll till superadmin." });
       }
     }
 
@@ -2519,8 +2519,8 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "Endast superadmin kan avaktivera admin-användare." });
+    if (actorRole !== "super_admin" && String(row.role || "").toLowerCase() === "super_admin") {
+      return res.status(403).json({ error: "Endast superadmin kan avaktivera superadmin." });
     }
 
     db.run(
@@ -2561,8 +2561,8 @@ app.post("/admin/users/:id/reactivate", requireAuth, requireAdmin, (req, res) =>
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "Endast superadmin kan aktivera admin-användare." });
+    if (actorRole !== "super_admin" && String(row.role || "").toLowerCase() === "super_admin") {
+      return res.status(403).json({ error: "Endast superadmin kan aktivera superadmin." });
     }
 
     db.run(
@@ -2602,8 +2602,8 @@ app.post("/admin/users/:id/reset-password", requireAuth, requireAdmin, (req, res
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "Endast superadmin kan återställa admin-lösenord." });
+    if (actorRole !== "super_admin" && String(row.role || "").toLowerCase() === "super_admin") {
+      return res.status(403).json({ error: "Endast superadmin kan återställa lösenord för superadmin." });
     }
 
     const hash = bcrypt.hashSync(password, 10);

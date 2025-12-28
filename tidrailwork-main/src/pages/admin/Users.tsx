@@ -44,7 +44,7 @@ const employeeTypes = [
 ];
 
 const AdminUsers = () => {
-  const { companyId, isSuperAdmin } = useAuth();
+  const { companyId, isAdmin, isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -73,10 +73,10 @@ const AdminUsers = () => {
   const [passwordDialogDescription, setPasswordDialogDescription] = useState("");
   const [passwordDialogValue, setPasswordDialogValue] = useState("");
 
-  const availableRoles = useMemo(
-    () => (isSuperAdmin ? roleOptions : roleOptions.filter((role) => role.value === "user")),
-    [isSuperAdmin]
-  );
+  const availableRoles = useMemo(() => {
+    if (isAdmin || isSuperAdmin) return roleOptions;
+    return roleOptions.filter((role) => role.value === "user");
+  }, [isAdmin, isSuperAdmin]);
 
   // Edit form state
   const [editName, setEditName] = useState("");
@@ -506,9 +506,7 @@ const AdminUsers = () => {
                       </div>
                     </div>
                     {(() => {
-                      const isPrivileged =
-                        (user.role || "").toLowerCase() === "admin" ||
-                        (user.role || "").toLowerCase() === "super_admin";
+                      const isPrivileged = (user.role || "").toLowerCase() === "super_admin";
                       const canManageUser = isSuperAdmin || !isPrivileged;
                       if (!canManageUser) return null;
                       return (
