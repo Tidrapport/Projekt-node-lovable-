@@ -241,6 +241,20 @@ db.serialize(() => {
         else console.log('Kolumnen "is_active" har lagts till i users.');
       });
     }
+    const hasDeactivatedAt = columns.some((col) => col.name === "deactivated_at");
+    if (!hasDeactivatedAt) {
+      db.run(`ALTER TABLE users ADD COLUMN deactivated_at TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till deactivated_at:", alterErr);
+        else console.log('Kolumnen "deactivated_at" har lagts till i users.');
+      });
+    }
+    const hasReactivatedAt = columns.some((col) => col.name === "reactivated_at");
+    if (!hasReactivatedAt) {
+      db.run(`ALTER TABLE users ADD COLUMN reactivated_at TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till reactivated_at:", alterErr);
+        else console.log('Kolumnen "reactivated_at" har lagts till i users.');
+      });
+    }
   });
 
   // --- Job roles (Yrkesroller) per företag ---

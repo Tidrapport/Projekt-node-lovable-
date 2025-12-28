@@ -33,7 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
-import { calculateOBDistribution } from "@/lib/obDistribution";
+import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 
 interface TimeEntry {
@@ -379,14 +379,18 @@ const Billing = () => {
       const roleName = role?.name || "Yrkesroll";
       const baseArticleNumber = role?.article_number ? String(role.article_number).trim() : "";
       const totalHours = toPositive(entry.total_hours);
+      const overtimeWeekday = toPositive(entry.overtime_weekday_hours);
+      const overtimeWeekend = toPositive(entry.overtime_weekend_hours);
 
       let distribution = { day: totalHours, evening: 0, night: 0, weekend: 0 };
       if (entry.date && entry.start_time && entry.end_time) {
-        distribution = calculateOBDistribution(
+        distribution = calculateOBDistributionWithOvertime(
           entry.date,
           entry.start_time,
           entry.end_time,
           entry.break_minutes || 0,
+          overtimeWeekday,
+          overtimeWeekend,
           shiftWindows
         );
       }
@@ -430,8 +434,7 @@ const Billing = () => {
         total: distribution.weekend * Number(role?.weekend_rate ?? 0),
       });
 
-      if (entry.overtime_weekday_hours) {
-        const overtimeWeekday = toPositive(entry.overtime_weekday_hours);
+      if (overtimeWeekday > 0) {
         addLine(`${roleName}-overtime-weekday`, {
           item_no: getArticleNumber(role?.overtime_weekday_article_number, baseArticleNumber),
           description: `${roleName} Övertid vardag`,
@@ -442,8 +445,7 @@ const Billing = () => {
         });
       }
 
-      if (entry.overtime_weekend_hours) {
-        const overtimeWeekend = toPositive(entry.overtime_weekend_hours);
+      if (overtimeWeekend > 0) {
         addLine(`${roleName}-overtime-weekend`, {
           item_no: getArticleNumber(role?.overtime_weekend_article_number, baseArticleNumber),
           description: `${roleName} Övertid helg`,

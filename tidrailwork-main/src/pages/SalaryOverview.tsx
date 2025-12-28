@@ -293,16 +293,16 @@ const SalaryOverview = () => {
 
     // Calculate overtime compensation (multiplier includes base pay)
     const overtimeWeekdayCompensation =
-      obSummary.overtimeWeekday * baseHourlyRate * (shiftMultipliers.overtime_day || 1);
+      obSummary.overtimeWeekday * baseHourlyRate * ((shiftMultipliers.overtime_day || 1) - 1);
     const overtimeWeekendCompensation =
-      obSummary.overtimeWeekend * baseHourlyRate * (shiftMultipliers.overtime_weekend || 1);
+      obSummary.overtimeWeekend * baseHourlyRate * ((shiftMultipliers.overtime_weekend || 1) - 1);
     const compTimeDeduction =
       compTimeSavedWeekday * baseHourlyRate * ((shiftMultipliers.overtime_day || 1) - 1) +
       compTimeSavedWeekend * baseHourlyRate * ((shiftMultipliers.overtime_weekend || 1) - 1);
 
     const perDiemDays = Object.keys(perDiemByDate).length;
-    const totalHoursWorked = Object.values(shiftBreakdown).reduce((sum, s) => sum + s.hours, 0);
-    const totalHours = Math.max(0, totalHoursWorked - compTimeSavedHours);
+    const totalReportedHours = timeEntries.reduce((sum, entry) => sum + (Number(entry.total_hours) || 0), 0);
+    const totalHours = Math.max(0, totalReportedHours - compTimeSavedHours);
     const grossSalary = monthlySalary > 0 ? monthlySalary : totalHours * hourlyWage;
     const obCompensation = Object.values(shiftBreakdown).reduce(
       (sum, s) => sum + s.compensation,
@@ -430,10 +430,6 @@ const SalaryOverview = () => {
     const baseSalaryDetail = showMonthlySalary
       ? "Fast månadslön"
       : `${salaryData.totalHours.toFixed(1)} h × ${hourlyWage} kr`;
-    const compTimeDeductionLabel =
-      salaryData.compTimeDeduction > 0
-        ? `-${salaryData.compTimeDeduction.toFixed(0)} kr`
-        : "0 kr";
     const salaryRows = [
       [baseSalaryLabel, baseSalaryDetail, `${salaryData.grossSalary.toLocaleString("sv-SE")} kr`],
       ["OB-tillägg (Dag)", `${salaryData.shiftBreakdown.day.hours.toFixed(1)} h`, `${salaryData.shiftBreakdown.day.compensation.toFixed(0)} kr`],
@@ -443,9 +439,6 @@ const SalaryOverview = () => {
       ["Övertid vardag", `${salaryData.overtimeWeekdayHours.toFixed(1)} h (+${overtimeWeekdayPercent}%)`, `+${salaryData.overtimeWeekdayCompensation.toFixed(0)} kr`],
       ["Övertid helg", `${salaryData.overtimeWeekendHours.toFixed(1)} h (+${overtimeWeekendPercent}%)`, `+${salaryData.overtimeWeekendCompensation.toFixed(0)} kr`],
       ["Restidsersättning", `${travelRate} kr/h`, `${salaryData.travelCompensation.toLocaleString("sv-SE")} kr`],
-      ...(salaryData.compTimeSavedHours > 0
-        ? [["Sparad komptid", `${salaryData.compTimeSavedHours.toFixed(1)} h`, compTimeDeductionLabel]]
-        : []),
       ["Totalt sparad komptid (saldo)", `${compTimeBalanceHours.toFixed(1)} h`, ""],
       ["", "", ""],
       ["BRUTTOLÖN", "", `${salaryData.totalGrossSalary.toLocaleString("sv-SE")} kr`],
@@ -775,11 +768,6 @@ const SalaryOverview = () => {
             {salaryData.compTimeSavedHours > 0 && (
               <p className="text-xs text-emerald-600 dark:text-emerald-300 mt-1">
                 Denna period: {salaryData.compTimeSavedHours.toFixed(1)} h
-              </p>
-            )}
-            {salaryData.compTimeDeduction > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Avdrag: -{salaryData.compTimeDeduction.toLocaleString("sv-SE")} kr
               </p>
             )}
           </CardContent>

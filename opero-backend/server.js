@@ -2227,7 +2227,9 @@ app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, r
 // Hämta användare (admin) – scoped per company via getScopedCompanyId
 app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
   const actorRole = (req.user.role || "").toLowerCase();
-  const wantsAll = actorRole === "super_admin" && ["1", "true", "yes", "all"].includes(String(req.query.all || req.query.company_id || "").toLowerCase());
+  const wantsAll =
+    actorRole === "super_admin" &&
+    ["1", "true", "yes", "all"].includes(String(req.query.all || "").toLowerCase());
   const companyId = wantsAll ? null : getScopedCompanyId(req);
   const allowAll = wantsAll || req.company_scope_all === true;
   if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
@@ -2252,7 +2254,9 @@ app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
       employee_type,
      employee_number,
      tax_table,
-     created_at
+     created_at,
+     deactivated_at,
+     reactivated_at
      FROM users
      WHERE ${baseWhere}${activeWhere}
      ORDER BY id DESC`;
@@ -2296,6 +2300,9 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
 
   // Enforce company scoping: non-super_admin can only create users for their company
   const actorRole = (req.user.role || "").toLowerCase();
+  if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(cleanRole)) {
+    return res.status(403).json({ error: "Endast superadmin kan skapa admin-användare." });
+  }
   let targetCompanyId = company_id || null;
   if (actorRole !== "super_admin") {
     targetCompanyId = req.user.company_id;
@@ -2431,7 +2438,7 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
 
   params.push(id);
   // Ensure target user belongs to same company unless super_admin
-  db.get(`SELECT company_id FROM users WHERE id = ?`, [id], (gErr, row) => {
+  db.get(`SELECT company_id, role FROM users WHERE id = ?`, [id], (gErr, row) => {
     if (gErr) {
       console.error("DB-fel vid SELECT users for PUT:", gErr);
       return res.status(500).json({ error: "DB error" });
@@ -2442,6 +2449,15 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     const scopedCompany = getScopedCompanyId(req);
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
+    }
+    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "Endast superadmin kan ändra admin-användare." });
+    }
+    if (actorRole !== "super_admin" && role !== undefined) {
+      const nextRole = String(role || "").toLowerCase();
+      if (["admin", "super_admin"].includes(nextRole)) {
+        return res.status(403).json({ error: "Endast superadmin kan ändra roll till admin." });
+      }
     }
 
     const sql = `UPDATE users SET ${fields.join(", ")} WHERE id = ?`;
@@ -2463,7 +2479,7 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
   const { id } = req.params;
 
   // Check target user's company
-  db.get(`SELECT company_id FROM users WHERE id = ?`, [id], (gErr, row) => {
+  db.get(`SELECT company_id, role FROM users WHERE id = ?`, [id], (gErr, row) => {
     if (gErr) {
       console.error("DB-fel vid SELECT users for DELETE:", gErr);
       return res.status(500).json({ error: "DB error" });
@@ -2475,10 +2491,14 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
+    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "Endast superadmin kan avaktivera admin-användare." });
+    }
 
     db.run(
       `UPDATE users
-       SET is_active = 0
+       SET is_active = 0,
+           deactivated_at = datetime('now')
        WHERE id = ?`,
       [id],
       function (err) {
@@ -2501,7 +2521,7 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
 app.post("/admin/users/:id/reactivate", requireAuth, requireAdmin, (req, res) => {
   const { id } = req.params;
 
-  db.get(`SELECT company_id FROM users WHERE id = ?`, [id], (gErr, row) => {
+  db.get(`SELECT company_id, role FROM users WHERE id = ?`, [id], (gErr, row) => {
     if (gErr) {
       console.error("DB-fel vid SELECT users for REACTIVATE:", gErr);
       return res.status(500).json({ error: "DB error" });
@@ -2513,8 +2533,17 @@ app.post("/admin/users/:id/reactivate", requireAuth, requireAdmin, (req, res) =>
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
+    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "Endast superadmin kan aktivera admin-användare." });
+    }
 
-    db.run(`UPDATE users SET is_active = 1 WHERE id = ?`, [id], function (err) {
+    db.run(
+      `UPDATE users
+       SET is_active = 1,
+           reactivated_at = datetime('now')
+       WHERE id = ?`,
+      [id],
+      function (err) {
       if (err) {
         console.error("DB-fel vid REACTIVATE /admin/users/:id:", err);
         return res.status(500).json({ error: "Kunde inte aktivera användare." });
@@ -2533,7 +2562,7 @@ app.post("/admin/users/:id/reset-password", requireAuth, requireAdmin, (req, res
   const { password } = req.body || {};
   if (!password) return res.status(400).json({ error: "password required" });
 
-  db.get(`SELECT company_id FROM users WHERE id = ?`, [id], (err, row) => {
+  db.get(`SELECT company_id, role FROM users WHERE id = ?`, [id], (err, row) => {
     if (err) {
       console.error("DB-fel vid SELECT user for reset:", err);
       return res.status(500).json({ error: "DB error" });
@@ -2544,6 +2573,9 @@ app.post("/admin/users/:id/reset-password", requireAuth, requireAdmin, (req, res
     const scopedCompany = getScopedCompanyId(req);
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
+    }
+    if (actorRole !== "super_admin" && ["admin", "super_admin"].includes(String(row.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "Endast superadmin kan återställa admin-lösenord." });
     }
 
     const hash = bcrypt.hashSync(password, 10);

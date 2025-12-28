@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -12,7 +12,8 @@ import { apiFetch } from "@/api/client";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 import { toast } from "sonner";
 import { Building2, Copy, Eye, FileText, Plus, Trash2, Users } from "lucide-react";
-import { addDays, format } from "date-fns";
+import { addDays, addMonths, endOfMonth, format, getMonth, getYear, startOfMonth, subMonths } from "date-fns";
+import { sv } from "date-fns/locale";
 
 type Company = {
   id: string;
@@ -52,7 +53,55 @@ type BillingUser = {
   company_id: string | number | null;
   role?: string | null;
   created_at?: string | null;
+  is_active?: number | null;
+  deactivated_at?: string | null;
+  reactivated_at?: string | null;
 };
+
+const parseSqlDate = (value?: string | null) => {
+  if (!value) return null;
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.valueOf())) return null;
+  return date;
+};
+
+const MAX_DATE = new Date(8640000000000000);
+
+const buildActiveIntervals = (user: BillingUser) => {
+  const createdAt = parseSqlDate(user.created_at);
+  if (!createdAt) return { createdAt: null, intervals: [] as { start: Date; end: Date }[] };
+
+  const deactivatedAt = parseSqlDate(user.deactivated_at);
+  const reactivatedAt = parseSqlDate(user.reactivated_at);
+  const hasValidDeactivation = deactivatedAt && deactivatedAt >= createdAt;
+  const hasValidReactivation =
+    reactivatedAt && (!hasValidDeactivation || reactivatedAt > deactivatedAt);
+
+  if (user.is_active === 0 && !hasValidDeactivation) {
+    return { createdAt, intervals: [] as { start: Date; end: Date }[] };
+  }
+
+  if (user.is_active === 1 && hasValidDeactivation && !hasValidReactivation) {
+    return { createdAt, intervals: [{ start: createdAt, end: MAX_DATE }] };
+  }
+
+  const intervals: { start: Date; end: Date }[] = [];
+  const firstEnd = hasValidDeactivation ? deactivatedAt! : MAX_DATE;
+  intervals.push({ start: createdAt, end: firstEnd });
+
+  if (hasValidDeactivation && hasValidReactivation) {
+    intervals.push({ start: reactivatedAt!, end: MAX_DATE });
+  }
+
+  return { createdAt, intervals };
+};
+
+const intervalOverlaps = (start: Date, end: Date, rangeStart: Date, rangeEnd: Date) =>
+  start <= rangeEnd && end >= rangeStart;
+
+const isActiveOnDate = (intervals: { start: Date; end: Date }[], date: Date) =>
+  intervals.some((interval) => interval.start <= date && interval.end >= date);
 
 const toDigits = (value: string) => value.replace(/\D/g, "");
 
@@ -67,6 +116,14 @@ const formatVatNumber = (value: string) => {
   }
   return `SE${base}01`;
 };
+
+const monthOptions = Array.from({ length: 12 }, (_, i) => {
+  const date = subMonths(new Date(), i);
+  return {
+    value: `${getYear(date)}-${String(getMonth(date) + 1).padStart(2, "0")}`,
+    label: format(date, "MMMM yyyy", { locale: sv }),
+  };
+});
 
 const SuperAdminDashboard = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -102,6 +159,7 @@ const SuperAdminDashboard = () => {
   const [passwordDialogValue, setPasswordDialogValue] = useState("");
 
   const [billingUsers, setBillingUsers] = useState<BillingUser[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState(monthOptions[0].value);
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null);
 
   const [aiInput, setAiInput] = useState("");
@@ -298,23 +356,21 @@ const SuperAdminDashboard = () => {
     toast.success("Företagskod kopierad");
   };
 
-  const parseSqlDate = (value?: string | null) => {
-    if (!value) return null;
-    const normalized = value.includes("T") ? value : value.replace(" ", "T");
-    const date = new Date(normalized);
-    if (Number.isNaN(date.valueOf())) return null;
-    return date;
-  };
+  const periodDates = useMemo(() => {
+    const [year, month] = selectedPeriod.split("-").map(Number);
+    const date = new Date(year, month - 1, 1);
+    return { start: startOfMonth(date), end: endOfMonth(date) };
+  }, [selectedPeriod]);
 
-  const monthLabel = new Date().toLocaleDateString("sv-SE", {
-    month: "long",
-    year: "numeric",
-  });
+  const nextPeriodDates = useMemo(() => {
+    const next = addMonths(periodDates.start, 1);
+    return { start: startOfMonth(next), end: endOfMonth(next) };
+  }, [periodDates.start]);
 
-  const billingSummary = (() => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
+  const monthLabel = format(periodDates.start, "MMMM yyyy", { locale: sv });
+  const nextMonthLabel = format(nextPeriodDates.start, "MMMM yyyy", { locale: sv });
+
+  const billingSummary = useMemo(() => {
     const summaryMap = new Map<
       string,
       {
@@ -327,6 +383,9 @@ const SuperAdminDashboard = () => {
         userDiscounted: number;
         fullPrice: number;
         discounted: number;
+        activeTotal: number;
+        activeAdmins: number;
+        activeUsers: number;
       }
     >();
 
@@ -341,6 +400,9 @@ const SuperAdminDashboard = () => {
         userDiscounted: 0,
         fullPrice: 0,
         discounted: 0,
+        activeTotal: 0,
+        activeAdmins: 0,
+        activeUsers: 0,
       });
     });
 
@@ -348,9 +410,9 @@ const SuperAdminDashboard = () => {
       if (!user.company_id) return;
       const role = String(user.role || "user").toLowerCase();
       if (role === "super_admin") return;
-      const createdAt = parseSqlDate(user.created_at);
+
+      const { createdAt, intervals } = buildActiveIntervals(user);
       if (!createdAt) return;
-      if (createdAt.getFullYear() !== currentYear || createdAt.getMonth() !== currentMonth) return;
 
       const key = String(user.company_id);
       if (!summaryMap.has(key)) {
@@ -364,26 +426,47 @@ const SuperAdminDashboard = () => {
           userDiscounted: 0,
           fullPrice: 0,
           discounted: 0,
+          activeTotal: 0,
+          activeAdmins: 0,
+          activeUsers: 0,
         });
       }
       const entry = summaryMap.get(key)!;
-      entry.total += 1;
+      const createdInPeriod =
+        createdAt >= periodDates.start && createdAt <= periodDates.end;
+      const wasActiveInPeriod = intervals.some((interval) =>
+        intervalOverlaps(interval.start, interval.end, periodDates.start, periodDates.end)
+      );
+
+      if (createdInPeriod) {
+        entry.total += 1;
+      }
+
+      if (wasActiveInPeriod && isActiveOnDate(intervals, nextPeriodDates.start)) {
+        entry.activeTotal += 1;
+        if (role === "admin") entry.activeAdmins += 1;
+        else entry.activeUsers += 1;
+      }
+
+      if (!wasActiveInPeriod) return;
+
       if (role === "admin") {
         entry.adminCount += 1;
         entry.fullPrice += 1;
-      } else if (createdAt.getDate() > 15) {
-        entry.userCount += 1;
-        entry.userDiscounted += 1;
-        entry.discounted += 1;
       } else {
         entry.userCount += 1;
-        entry.userFullPrice += 1;
-        entry.fullPrice += 1;
+        if (createdInPeriod && createdAt.getDate() > 15) {
+          entry.userDiscounted += 1;
+          entry.discounted += 1;
+        } else {
+          entry.userFullPrice += 1;
+          entry.fullPrice += 1;
+        }
       }
     });
 
     return Array.from(summaryMap.values()).sort((a, b) => a.company_name.localeCompare(b.company_name, "sv-SE"));
-  })();
+  }, [billingUsers, companies, nextPeriodDates.start, periodDates.end, periodDates.start]);
 
   const formatBillable = (value: number) => {
     if (Number.isNaN(value)) return "0";
@@ -448,7 +531,7 @@ const SuperAdminDashboard = () => {
     }
 
     if (!lines.length) {
-      toast.error("Ingen faktura att skapa för denna månad.");
+      toast.error("Ingen faktura att skapa för vald period.");
       return;
     }
 
@@ -471,12 +554,12 @@ const SuperAdminDashboard = () => {
     if (postalCity) customerLines.push(postalCity);
     if (targetCompany.country) customerLines.push(targetCompany.country);
 
-    const invoiceDate = new Date();
+    const invoiceDate = periodDates.end;
     const paymentTerms = issuerCompany.invoice_payment_terms?.trim() || "30 dagar";
     const numericDaysMatch = paymentTerms.match(/\d+/);
     const paymentDays = numericDaysMatch ? Number(numericDaysMatch[0]) : 30;
     const dueDate = addDays(invoiceDate, Number.isFinite(paymentDays) ? paymentDays : 30);
-    const invoiceNumber = `${format(invoiceDate, "yyyyMM")}${item.company_id}`;
+    const invoiceNumber = `${format(periodDates.start, "yyyyMM")}${item.company_id}`;
     const ocr = invoiceNumber ? `${invoiceNumber}0` : "";
 
     const meta: InvoiceMeta = {
@@ -527,6 +610,7 @@ const SuperAdminDashboard = () => {
   const totalFullPrice = billingSummary.reduce((sum, item) => sum + item.fullPrice, 0);
   const totalDiscounted = billingSummary.reduce((sum, item) => sum + item.discounted, 0);
   const totalBillable = billingSummary.reduce((sum, item) => sum + item.fullPrice + item.discounted * 0.5, 0);
+  const totalCarryover = billingSummary.reduce((sum, item) => sum + item.activeTotal, 0);
 
   const sendAi = async () => {
     const content = aiInput.trim();
@@ -793,18 +877,37 @@ const SuperAdminDashboard = () => {
         </div>
 
         <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100">
-          <CardHeader>
-            <CardTitle>Fakturering – {monthLabel}</CardTitle>
-            <CardDescription className="text-slate-400">
-              Fakturering sker sista dagen i månaden. Nya användare efter den 15:e faktureras med 50% rabatt.
-            </CardDescription>
+          <CardHeader className="space-y-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Fakturering – {monthLabel}</CardTitle>
+                <CardDescription className="text-slate-400">
+                  Fakturering sker sista dagen i månaden. Nya användare efter den 15:e faktureras med 50% rabatt.
+                </CardDescription>
+              </div>
+              <div className="w-full md:w-64 space-y-1">
+                <Label className="text-xs uppercase text-slate-400">Period</Label>
+                <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                  <SelectTrigger className="border-slate-800 bg-slate-950/70 text-slate-100">
+                    <SelectValue placeholder="Välj period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {monthOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="text-xs uppercase text-slate-400">Nya användare</p>
+                <p className="text-xs uppercase text-slate-400">Tillagda användare</p>
                 <p className="text-2xl font-semibold">{totalNewUsers}</p>
-                <p className="text-xs text-slate-500">Denna månad</p>
+                <p className="text-xs text-slate-500">Vald period</p>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                 <p className="text-xs uppercase text-slate-400">Fullpris</p>
@@ -821,6 +924,11 @@ const SuperAdminDashboard = () => {
                 <p className="text-2xl font-semibold">{formatBillable(totalBillable)}</p>
                 <p className="text-xs text-slate-500">Användare (vägt)</p>
               </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-xs uppercase text-slate-400">Kvar nästa månad</p>
+                <p className="text-2xl font-semibold">{totalCarryover}</p>
+                <p className="text-xs text-slate-500">{nextMonthLabel}</p>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -832,7 +940,8 @@ const SuperAdminDashboard = () => {
                     <TableHead className="text-slate-400">Användartyper</TableHead>
                     <TableHead className="text-slate-400">Fullpris</TableHead>
                     <TableHead className="text-slate-400">50% rabatt</TableHead>
-                    <TableHead className="text-slate-400">Faktura denna månad</TableHead>
+                    <TableHead className="text-slate-400">Kvar nästa månad</TableHead>
+                    <TableHead className="text-slate-400">Faktura vald period</TableHead>
                     <TableHead className="text-slate-400">Faktura PDF</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -840,6 +949,7 @@ const SuperAdminDashboard = () => {
                   {billingSummary.map((item) => {
                     const billable = item.fullPrice + item.discounted * 0.5;
                     const roleSummary = `Admin ${item.adminCount} • Användare ${item.userCount}`;
+                    const carryoverSummary = `Admin ${item.activeAdmins} • Användare ${item.activeUsers}`;
                     return (
                       <TableRow key={item.company_id} className="border-slate-800">
                         <TableCell className="font-medium">{item.company_name}</TableCell>
@@ -847,10 +957,14 @@ const SuperAdminDashboard = () => {
                         <TableCell className="text-sm text-slate-400">{roleSummary || "—"}</TableCell>
                         <TableCell>{item.fullPrice}</TableCell>
                         <TableCell>{item.discounted}</TableCell>
+                        <TableCell className="text-sm text-slate-400">
+                          {item.activeTotal}
+                          <div className="text-xs text-slate-500">{carryoverSummary}</div>
+                        </TableCell>
                         <TableCell className="text-sm">
-                          {item.total === 0
-                            ? "Ingen faktura denna månad"
-                            : `Denna månad får ${item.company_name} faktura för ${formatBillable(billable)} användare`}
+                          {billable === 0
+                            ? "Ingen faktura för vald period"
+                            : `${monthLabel} får ${item.company_name} faktura för ${formatBillable(billable)} användare`}
                         </TableCell>
                         <TableCell>
                           <Button
@@ -866,7 +980,7 @@ const SuperAdminDashboard = () => {
                                 userDiscounted: item.userDiscounted,
                               })
                             }
-                            disabled={item.total === 0 || invoiceLoadingId === String(item.company_id)}
+                            disabled={billable === 0 || invoiceLoadingId === String(item.company_id)}
                           >
                             <FileText className="h-4 w-4 mr-1" />
                             {invoiceLoadingId === String(item.company_id) ? "Skapar..." : "Faktura"}

@@ -1,8 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/api/client";
 import { BarChart3, Users, Clock, TrendingUp, Briefcase } from "lucide-react";
+import { format, startOfMonth, endOfMonth, subMonths, getMonth, getYear } from "date-fns";
+import { sv } from "date-fns/locale";
 
 interface JobRoleStats {
   job_role_id: string;
@@ -33,8 +37,17 @@ interface OverallStats {
   avgHoursPerEntry: number;
 }
 
+const monthOptions = Array.from({ length: 12 }, (_, i) => {
+  const date = subMonths(new Date(), i);
+  return {
+    value: `${getYear(date)}-${String(getMonth(date) + 1).padStart(2, "0")}`,
+    label: format(date, "MMMM yyyy", { locale: sv }),
+  };
+});
+
 const AdminStatistics = () => {
   const [loading, setLoading] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState(monthOptions[0].value);
   const [overallStats, setOverallStats] = useState<OverallStats>({
     totalHours: 0,
     totalEntries: 0,
@@ -45,15 +58,36 @@ const AdminStatistics = () => {
   const [projectStats, setProjectStats] = useState<ProjectStats[]>([]);
   const [userStats, setUserStats] = useState<UserStats[]>([]);
 
+  const periodDates = useMemo(() => {
+    const [year, month] = selectedPeriod.split("-").map(Number);
+    const date = new Date(year, month - 1, 1);
+    return {
+      start: startOfMonth(date),
+      end: endOfMonth(date),
+    };
+  }, [selectedPeriod]);
+
   useEffect(() => {
     fetchStatistics();
-  }, []);
+  }, [selectedPeriod]);
 
   const fetchStatistics = async () => {
     setLoading(true);
     try {
-      // Hämta tidrapporter via backend-API
-      const timeEntries: any[] = await apiFetch("/time-entries").catch(() => []);
+      const params = new URLSearchParams({
+        from: format(periodDates.start, "yyyy-MM-dd"),
+        to: format(periodDates.end, "yyyy-MM-dd"),
+      });
+      const rawEntries: any[] = await apiFetch(`/time-entries?${params.toString()}`).catch(() => []);
+      const timeEntries = (rawEntries || []).map((entry) => ({
+        job_role_id: entry.job_role_id != null ? String(entry.job_role_id) : "unknown",
+        job_role_name: entry.job_role_name || entry.job_role?.name || "Okänd",
+        project_id: entry.project_id != null ? String(entry.project_id) : "unknown",
+        project_name: entry.project_name || entry.project?.name || "Okänt",
+        user_id: entry.user_id != null ? String(entry.user_id) : "unknown",
+        user_name: entry.user_full_name || entry.user_name || entry.user_email || "Okänd",
+        total_hours: entry.timmar != null ? Number(entry.timmar) : Number(entry.total_hours) || 0,
+      }));
 
       // Calculate overall stats
       const totalHours = timeEntries.reduce((sum, entry) => sum + Number(entry.total_hours || 0), 0);
@@ -71,8 +105,8 @@ const AdminStatistics = () => {
       // Calculate job role stats
       const jobRoleMap = new Map<string, JobRoleStats>();
       timeEntries.forEach(entry => {
-        const roleId = entry.job_role_id;
-        const roleName = entry.job_role_name || entry.job_role?.name || "Okänd";
+        const roleId = entry.job_role_id || "unknown";
+        const roleName = entry.job_role_name || "Okänd";
         const hours = Number(entry.total_hours || 0);
 
         if (!jobRoleMap.has(roleId)) {
@@ -100,8 +134,8 @@ const AdminStatistics = () => {
       // Calculate project stats
       const projectMap = new Map<string, ProjectStats>();
       timeEntries.forEach(entry => {
-        const projectId = entry.project_id;
-        const projectName = entry.project_name || entry.project?.name || "Okänt";
+        const projectId = entry.project_id || "unknown";
+        const projectName = entry.project_name || "Okänt";
         const hours = Number(entry.total_hours || 0);
 
         if (!projectMap.has(projectId)) {
@@ -125,8 +159,8 @@ const AdminStatistics = () => {
       // Calculate user stats
       const userMap = new Map<string, UserStats>();
       timeEntries.forEach(entry => {
-        const userId = entry.user_id;
-        const userName = entry.user_full_name || entry.profiles?.full_name || "Okänd";
+        const userId = entry.user_id || "unknown";
+        const userName = entry.user_name || "Okänd";
         const hours = Number(entry.total_hours || 0);
 
         if (!userMap.has(userId)) {
@@ -170,6 +204,32 @@ const AdminStatistics = () => {
         <h2 className="text-3xl font-bold font-heading">Statistik</h2>
         <p className="text-muted-foreground">Översikt över rapporterade timmar och aktivitet</p>
       </div>
+
+      <Card className="mb-6 shadow-card">
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="space-y-2">
+              <Label>Period</Label>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger className="w-52">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {monthOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="text-sm text-muted-foreground pb-2">
+              Visar {format(periodDates.start, "d MMM", { locale: sv })} –{" "}
+              {format(periodDates.end, "d MMM yyyy", { locale: sv })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">

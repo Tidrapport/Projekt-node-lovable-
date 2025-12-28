@@ -87,8 +87,7 @@ const AdminWeldingReports = () => {
     if (!deleteReport) return;
 
     try {
-      const res = await apiFetch(`/welding_reports/${deleteReport.id}`, { method: 'DELETE' });
-      if (!res) throw new Error('Kunde inte radera rapport');
+      await apiFetch(`/welding_reports/${deleteReport.id}`, { method: 'DELETE' });
 
       toast.success("Rapport raderad");
       setDeleteReport(null);

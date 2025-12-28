@@ -15,7 +15,7 @@ import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { calculateOBDistribution } from "@/lib/obDistribution";
+import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
 
 interface Customer {
   id: string;
@@ -378,11 +378,13 @@ const AdminCustomers = () => {
         totalHours += entry.total_hours;
         totalTravel += entry.travel_time_hours || 0;
 
-        const obDist = calculateOBDistribution(
+        const obDist = calculateOBDistributionWithOvertime(
           entry.date,
           entry.start_time,
           entry.end_time,
-          entry.break_minutes
+          entry.break_minutes,
+          entry.overtime_weekday_hours,
+          entry.overtime_weekend_hours
         );
         totalDay += obDist.day;
         totalEvening += obDist.evening;

@@ -16,7 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { format, addWeeks, startOfWeek, getISOWeek, getISOWeekYear, isWithinInterval, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
 import { CheckCircle, Lock, Unlock, Pencil, CheckCircle2, AlertCircle, Download, X, FileText } from "lucide-react";
-import { calculateOBDistribution } from "@/lib/obDistribution";
+import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
 
 const REST_OPTIONS = ["0", "15", "30", "45", "60"];
 
@@ -102,6 +102,9 @@ type TimeEntry = {
   save_travel_compensation?: boolean;
   overtime_weekday_hours?: number | null;
   overtime_weekend_hours?: number | null;
+  save_comp_time?: boolean;
+  comp_time_saved_hours?: number | null;
+  comp_time_taken_hours?: number | null;
   deviation_title?: string | null;
   deviation_description?: string | null;
   deviation_status?: string | null;
@@ -160,6 +163,8 @@ export default function TimeAttestations() {
   const [editSaveTravelComp, setEditSaveTravelComp] = useState(false);
   const [editOvertimeWeekday, setEditOvertimeWeekday] = useState("0");
   const [editOvertimeWeekend, setEditOvertimeWeekend] = useState("0");
+  const [editCompTimeAction, setEditCompTimeAction] = useState<"none" | "save" | "take">("none");
+  const [editCompTimeHours, setEditCompTimeHours] = useState("0");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editMaterials, setEditMaterials] = useState<{ material_type_id: string; quantity: number; id?: string | number }[]>([]);
   const [selectedMaterialType, setSelectedMaterialType] = useState("");
@@ -238,6 +243,9 @@ export default function TimeAttestations() {
         save_travel_compensation: e.save_travel_compensation ?? false,
         overtime_weekday_hours: e.overtime_weekday_hours ?? null,
         overtime_weekend_hours: e.overtime_weekend_hours ?? null,
+        save_comp_time: e.save_comp_time ?? false,
+        comp_time_saved_hours: e.comp_time_saved_hours ?? 0,
+        comp_time_taken_hours: e.comp_time_taken_hours ?? 0,
         deviation_title: e.deviation_title || null,
         deviation_description: e.deviation_description || null,
         deviation_status: e.deviation_status || null,
@@ -400,7 +408,14 @@ export default function TimeAttestations() {
       const tableRows = sortedEntries.map((entry) => {
         const obDist =
           entry.date && entry.start_time && entry.end_time
-            ? calculateOBDistribution(entry.date, entry.start_time, entry.end_time, entry.break_minutes || 0)
+            ? calculateOBDistributionWithOvertime(
+                entry.date,
+                entry.start_time,
+                entry.end_time,
+                entry.break_minutes || 0,
+                entry.overtime_weekday_hours,
+                entry.overtime_weekend_hours
+              )
             : { day: 0, evening: 0, night: 0, weekend: 0 };
 
         totalHours += entry.total_hours || 0;
@@ -757,7 +772,15 @@ export default function TimeAttestations() {
         if (showDay || showEvening || showNight || showWeekend) {
           obDist =
             entry.date && entry.start_time && entry.end_time
-              ? calculateOBDistribution(entry.date, entry.start_time, entry.end_time, entry.break_minutes || 0, shiftWindows)
+              ? calculateOBDistributionWithOvertime(
+                  entry.date,
+                  entry.start_time,
+                  entry.end_time,
+                  entry.break_minutes || 0,
+                  entry.overtime_weekday_hours,
+                  entry.overtime_weekend_hours,
+                  shiftWindows
+                )
               : { day: 0, evening: 0, night: 0, weekend: 0 };
         }
 
@@ -941,6 +964,20 @@ export default function TimeAttestations() {
     setEditSaveTravelComp(Boolean((entry as any).save_travel_compensation));
     setEditOvertimeWeekday(String((entry as any).overtime_weekday_hours ?? "0"));
     setEditOvertimeWeekend(String((entry as any).overtime_weekend_hours ?? "0"));
+    if ((entry.comp_time_taken_hours || 0) > 0) {
+      setEditCompTimeAction("take");
+      setEditCompTimeHours(entry.comp_time_taken_hours?.toString() || "0");
+    } else if ((entry.comp_time_saved_hours || 0) > 0 || entry.save_comp_time) {
+      const fallbackSaved =
+        (entry.comp_time_saved_hours || 0) > 0
+          ? entry.comp_time_saved_hours
+          : (entry.overtime_weekday_hours || 0) + (entry.overtime_weekend_hours || 0);
+      setEditCompTimeAction("save");
+      setEditCompTimeHours(fallbackSaved.toString());
+    } else {
+      setEditCompTimeAction("none");
+      setEditCompTimeHours("0");
+    }
     setEditMaterials(
       (entry.materials || []).map((m) => ({
         id: m.id,
@@ -958,6 +995,10 @@ export default function TimeAttestations() {
   const saveEdit = async () => {
     if (!editEntry) return;
     try {
+      const compTimeHoursValue = Number(editCompTimeHours) || 0;
+      const saveCompTime = editCompTimeAction === "save" && compTimeHoursValue > 0;
+      const compTimeSavedValue = editCompTimeAction === "save" ? compTimeHoursValue : 0;
+      const compTimeTakenValue = editCompTimeAction === "take" ? compTimeHoursValue : 0;
       await apiFetch(`/time-entries/${editEntry.id}`, {
         method: "PUT",
         json: {
@@ -975,6 +1016,9 @@ export default function TimeAttestations() {
           save_travel_compensation: editSaveTravelComp,
           overtime_weekday_hours: editOvertimeWeekday ? Number(editOvertimeWeekday) : 0,
           overtime_weekend_hours: editOvertimeWeekend ? Number(editOvertimeWeekend) : 0,
+          save_comp_time: saveCompTime,
+          comp_time_saved_hours: compTimeSavedValue,
+          comp_time_taken_hours: compTimeTakenValue,
           materials: editMaterials.map((m) => ({
             material_type_id: m.material_type_id,
             quantity: m.quantity,
@@ -1597,6 +1641,46 @@ export default function TimeAttestations() {
                   value={editOvertimeWeekend}
                   onChange={(e) => setEditOvertimeWeekend(e.target.value)}
                   placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-sm text-muted-foreground">Komptid</Label>
+                <Select
+                  value={editCompTimeAction}
+                  onValueChange={(value) => {
+                    const next = value as "none" | "save" | "take";
+                    setEditCompTimeAction(next);
+                    if (next === "none") setEditCompTimeHours("0");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Välj" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ingen</SelectItem>
+                    <SelectItem value="save">Spara komptid</SelectItem>
+                    <SelectItem value="take">Uttag komptid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm text-muted-foreground">
+                  {editCompTimeAction === "take"
+                    ? "Uttag komptid (timmar)"
+                    : editCompTimeAction === "save"
+                    ? "Spara komptid (timmar)"
+                    : "Komptid (timmar)"}
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={editCompTimeHours}
+                  onChange={(e) => setEditCompTimeHours(e.target.value)}
+                  disabled={editCompTimeAction === "none"}
                 />
               </div>
             </div>

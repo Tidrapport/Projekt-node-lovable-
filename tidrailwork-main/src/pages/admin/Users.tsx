@@ -73,6 +73,11 @@ const AdminUsers = () => {
   const [passwordDialogDescription, setPasswordDialogDescription] = useState("");
   const [passwordDialogValue, setPasswordDialogValue] = useState("");
 
+  const availableRoles = useMemo(
+    () => (isSuperAdmin ? roleOptions : roleOptions.filter((role) => role.value === "user")),
+    [isSuperAdmin]
+  );
+
   // Edit form state
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
@@ -397,7 +402,7 @@ const AdminUsers = () => {
                       <SelectValue placeholder="Välj roll" />
                     </SelectTrigger>
                     <SelectContent>
-                      {roleOptions.map((r) => (
+                      {availableRoles.map((r) => (
                         <SelectItem key={r.value} value={r.value}>
                           {r.label}
                         </SelectItem>
@@ -500,33 +505,47 @@ const AdminUsers = () => {
                         </div>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(user)}>
-                        <Pencil className="h-4 w-4 mr-1" />
-                        Redigera
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setResetUser(user);
-                          setIsResetDialogOpen(true);
-                        }}
-                      >
-                        <Key className="h-4 w-4 mr-1" />
-                        Återställ lösenord
-                      </Button>
-                      {inactive ? (
-                        <Button variant="outline" size="sm" onClick={() => handleReactivate(user.id)}>
-                          Aktivera
-                        </Button>
-                      ) : (
-                        <Button variant="outline" size="sm" className="text-destructive" onClick={() => handleDelete(user.id)}>
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Avaktivera
-                        </Button>
-                      )}
-                    </div>
+                    {(() => {
+                      const isPrivileged =
+                        (user.role || "").toLowerCase() === "admin" ||
+                        (user.role || "").toLowerCase() === "super_admin";
+                      const canManageUser = isSuperAdmin || !isPrivileged;
+                      if (!canManageUser) return null;
+                      return (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openEdit(user)}>
+                            <Pencil className="h-4 w-4 mr-1" />
+                            Redigera
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setResetUser(user);
+                              setIsResetDialogOpen(true);
+                            }}
+                          >
+                            <Key className="h-4 w-4 mr-1" />
+                            Återställ lösenord
+                          </Button>
+                          {inactive ? (
+                            <Button variant="outline" size="sm" onClick={() => handleReactivate(user.id)}>
+                              Aktivera
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive"
+                              onClick={() => handleDelete(user.id)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Avaktivera
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -577,7 +596,7 @@ const AdminUsers = () => {
                 <SelectValue placeholder="Välj roll" />
               </SelectTrigger>
               <SelectContent>
-                {roleOptions.map((r) => (
+                {availableRoles.map((r) => (
                   <SelectItem key={r.value} value={r.value}>
                     {r.label}
                   </SelectItem>

@@ -16,31 +16,14 @@ import { Download, AlertTriangle, CheckCircle, Settings, FileText, Users, Calend
 import { format, startOfMonth, endOfMonth, subMonths, getMonth, getYear } from "date-fns";
 import { sv } from "date-fns/locale";
 import { generatePAXml, downloadPAXml, type PAXmlEmployee, type PAXmlEntry } from "@/lib/paxml";
-import { calculateOBDistribution } from "@/lib/obDistribution";
+import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
+import { listTimeEntries, type TimeEntry } from "@/api/timeEntries";
 interface Profile {
   id: string;
   full_name: string;
   employee_type: string | null;
   email: string | null;
   employee_number: string | null;
-}
-interface TimeEntry {
-  id: string;
-  user_id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  break_minutes: number;
-  total_hours: number;
-  overtime_weekday_hours: number;
-  overtime_weekend_hours: number;
-  travel_time_hours: number;
-  per_diem_type: string;
-  save_travel_compensation: boolean;
-  attested_at: string | null;
-  project: {
-    name: string;
-  };
 }
 interface SalaryCode {
   code: string;
@@ -145,7 +128,11 @@ export default function AdminSalaries() {
         const profilesData = await apiFetch(`/profiles?company_id=${companyId}`);
 
         // Fetch time entries for period (only attested)
-        const entriesData = await apiFetch(`/time-entries?company_id=${companyId}&gte=${format(periodDates.start, 'yyyy-MM-dd')}&lte=${format(periodDates.end, 'yyyy-MM-dd')}&attested=true`);
+        const entriesData = await listTimeEntries({
+          from: format(periodDates.start, 'yyyy-MM-dd'),
+          to: format(periodDates.end, 'yyyy-MM-dd'),
+          status: 'Attesterad',
+        });
 
         // Fetch salary codes
         const codesData = await apiFetch(`/fortnox_salary_codes`);
@@ -156,7 +143,7 @@ export default function AdminSalaries() {
         // Fetch shift config for OB calculations
         const shiftData = await apiFetch(`/shift_types_config?company_id=${companyId}`);
         setProfiles(profilesData || []);
-        setEntries(entriesData as TimeEntry[] || []);
+        setEntries(entriesData || []);
         setSalaryCodes(codesData || []);
         setCompanyMappings(mappingsData || []);
         setShiftConfig(shiftData || []);
@@ -188,16 +175,33 @@ export default function AdminSalaries() {
       const perDiemByDate = new Map<string, 'full' | 'half'>();
       
       for (const entry of userEntries) {
-        // Calculate OB distribution for this entry
-        const obDist = calculateOBDistribution(entry.date, entry.start_time, entry.end_time, entry.break_minutes || 0);
+        const overtimeWeekdayHours = Number(entry.overtime_weekday_hours || 0);
+        const overtimeWeekendHours = Number(entry.overtime_weekend_hours || 0);
 
-        // Base work hours (excluding overtime)
-        const baseHours = entry.total_hours - (entry.overtime_weekday_hours || 0) - (entry.overtime_weekend_hours || 0);
+        // Calculate OB distribution only when start/end times are valid
+        const hasTimeRange =
+          entry.start_time &&
+          entry.end_time &&
+          entry.start_time !== "null" &&
+          entry.end_time !== "null";
+        const obDist = hasTimeRange
+          ? calculateOBDistributionWithOvertime(
+              entry.date,
+              entry.start_time,
+              entry.end_time,
+              entry.break_minutes || 0,
+              overtimeWeekdayHours,
+              overtimeWeekendHours
+            )
+          : { day: 0, evening: 0, night: 0, weekend: 0 };
+
+        // Base work hours (reported hours)
+        const baseHours = Number(entry.total_hours || 0);
         workHours += baseHours;
 
         // Overtime
-        overtimeWeekday += entry.overtime_weekday_hours || 0;
-        overtimeWeekend += entry.overtime_weekend_hours || 0;
+        overtimeWeekday += overtimeWeekdayHours;
+        overtimeWeekend += overtimeWeekendHours;
 
         // OB hours from distribution
         obKvall += obDist.evening;
