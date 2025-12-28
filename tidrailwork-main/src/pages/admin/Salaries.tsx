@@ -161,7 +161,8 @@ export default function AdminSalaries() {
   const employeeSummaries = useMemo(() => {
     const summaries: EmployeeSummary[] = [];
     for (const profile of profiles) {
-      const userEntries = entries.filter(e => e.user_id === profile.id);
+      const profileId = String(profile.id);
+      const userEntries = entries.filter(e => String(e.user_id) === profileId);
       if (userEntries.length === 0) continue;
       let workHours = 0;
       let overtimeWeekday = 0;
@@ -170,13 +171,28 @@ export default function AdminSalaries() {
       let obNatt = 0;
       let obHelg = 0;
       let travelHours = 0;
+      let totalReportedHours = 0;
+      let compTimeSavedHours = 0;
       
       // Track per diem per unique date to avoid counting multiple entries on same day
       const perDiemByDate = new Map<string, 'full' | 'half'>();
       
       for (const entry of userEntries) {
-        const overtimeWeekdayHours = Number(entry.overtime_weekday_hours || 0);
-        const overtimeWeekendHours = Number(entry.overtime_weekend_hours || 0);
+        let overtimeWeekdayHours = Number(entry.overtime_weekday_hours || 0);
+        let overtimeWeekendHours = Number(entry.overtime_weekend_hours || 0);
+        const totalOvertime = overtimeWeekdayHours + overtimeWeekendHours;
+        const savedHoursRaw = Number(entry.comp_time_saved_hours || 0);
+        const savedHours = savedHoursRaw > 0 ? savedHoursRaw : entry.save_comp_time ? totalOvertime : 0;
+
+        if (savedHours > 0 && totalOvertime > 0) {
+          const savedOvertime = Math.min(savedHours, totalOvertime);
+          const weekdayShare = totalOvertime > 0 ? overtimeWeekdayHours / totalOvertime : 0;
+          const savedWeekday = savedOvertime * weekdayShare;
+          const savedWeekend = savedOvertime - savedWeekday;
+          overtimeWeekdayHours = Math.max(0, overtimeWeekdayHours - savedWeekday);
+          overtimeWeekendHours = Math.max(0, overtimeWeekendHours - savedWeekend);
+        }
+        compTimeSavedHours += savedHours;
 
         // Calculate OB distribution only when start/end times are valid
         const hasTimeRange =
@@ -197,7 +213,7 @@ export default function AdminSalaries() {
 
         // Base work hours (reported hours)
         const baseHours = Number(entry.total_hours || 0);
-        workHours += baseHours;
+        totalReportedHours += baseHours;
 
         // Overtime
         overtimeWeekday += overtimeWeekdayHours;
@@ -221,6 +237,8 @@ export default function AdminSalaries() {
         }
       }
 
+      workHours = Math.max(0, totalReportedHours - compTimeSavedHours);
+
       // Count unique per diem days
       let perDiemFull = 0;
       let perDiemHalf = 0;
@@ -232,7 +250,7 @@ export default function AdminSalaries() {
       // Use the employee_number field from the profile
       const employeeNumber = profile.employee_number || null;
       summaries.push({
-        userId: profile.id,
+        userId: profileId,
         fullName: profile.full_name,
         employeeNumber,
         workHours,

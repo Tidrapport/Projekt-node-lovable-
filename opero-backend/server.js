@@ -440,6 +440,34 @@ app.get("/companies", requireAuth, (req, res) => {
   }
 });
 
+// Hämta ett företag (company-scoped)
+app.get("/companies/:id", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const id = req.params.id;
+
+  if (!allowAll && String(id) !== String(companyId)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  db.get(
+    `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
+            bankgiro, bic_number, iban_number, logo_url, org_number, vat_number, f_skatt, invoice_payment_terms,
+            invoice_our_reference, invoice_late_interest, created_at
+     FROM companies
+     WHERE id = ?`,
+    [id],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid GET /companies/:id:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    }
+  );
+});
+
 // Skapa företag (superadmin) + valfri admin-användare
 app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
   const {
@@ -2888,8 +2916,280 @@ app.get("/profiles/:id", requireAuth, (req, res) => {
 });
 
 // ======================
+//   FORTNOX LÖNEKODER & MAPPNINGAR
+// ======================
+app.get("/fortnox_salary_codes", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const requestedCompanyId = req.query.company_id;
+  const targetCompanyId = allowAll && requestedCompanyId ? requestedCompanyId : companyId;
+
+  if (!targetCompanyId && !allowAll) {
+    return res.status(400).json({ error: "Company not found" });
+  }
+
+  const where = [];
+  const params = [];
+  if (!allowAll) {
+    where.push("(company_id IS NULL OR company_id = ?)");
+    params.push(targetCompanyId);
+  } else if (requestedCompanyId) {
+    where.push("(company_id IS NULL OR company_id = ?)");
+    params.push(requestedCompanyId);
+  }
+
+  const sql = `
+    SELECT code, name, description, category, default_fortnox_code, company_id
+    FROM fortnox_salary_codes
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY name
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /fortnox_salary_codes:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json(rows || []);
+  });
+});
+
+app.post("/fortnox_salary_codes", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const {
+    code,
+    name,
+    description = null,
+    category = "custom",
+    default_fortnox_code = null,
+    company_id
+  } = req.body || {};
+
+  const targetCompanyId = allowAll && company_id ? company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+  if (!code || !name) return res.status(400).json({ error: "code and name required" });
+
+  db.run(
+    `INSERT INTO fortnox_salary_codes
+     (code, name, description, category, default_fortnox_code, company_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [code, name, description, category, default_fortnox_code, targetCompanyId],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid POST /fortnox_salary_codes:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.status(201).json({
+        code,
+        name,
+        description,
+        category,
+        default_fortnox_code,
+        company_id: targetCompanyId
+      });
+    }
+  );
+});
+
+app.delete("/fortnox_salary_codes", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const { code, company_id } = req.body || {};
+  const targetCompanyId = allowAll && company_id ? company_id : companyId;
+
+  if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+  if (!code) return res.status(400).json({ error: "code required" });
+
+  db.run(
+    "DELETE FROM fortnox_salary_codes WHERE code = ? AND company_id = ?",
+    [code, targetCompanyId],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid DELETE /fortnox_salary_codes:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (this.changes === 0) return res.status(404).json({ error: "Not found" });
+      res.json({ success: true });
+    }
+  );
+});
+
+app.get("/fortnox_company_mappings", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const requestedCompanyId = req.query.company_id;
+  const targetCompanyId = allowAll && requestedCompanyId ? requestedCompanyId : companyId;
+
+  if (!targetCompanyId && !allowAll) {
+    return res.status(400).json({ error: "Company not found" });
+  }
+
+  const where = [];
+  const params = [];
+  if (!allowAll || requestedCompanyId) {
+    where.push("company_id = ?");
+    params.push(targetCompanyId);
+  }
+
+  const sql = `
+    SELECT company_id, internal_code, fortnox_code, fortnox_description
+    FROM fortnox_company_mappings
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY internal_code
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /fortnox_company_mappings:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json(rows || []);
+  });
+});
+
+app.post("/fortnox_company_mappings", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const payload = req.body || {};
+  const mappings = Array.isArray(payload) ? payload : [payload];
+
+  if (!mappings.length) return res.status(400).json({ error: "No mappings provided" });
+
+  const normalized = [];
+  for (const mapping of mappings) {
+    const targetCompanyId = allowAll && mapping.company_id ? mapping.company_id : companyId;
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+    if (!mapping.internal_code || !mapping.fortnox_code) {
+      return res.status(400).json({ error: "internal_code and fortnox_code required" });
+    }
+    normalized.push({
+      company_id: targetCompanyId,
+      internal_code: mapping.internal_code,
+      fortnox_code: String(mapping.fortnox_code).trim(),
+      fortnox_description: mapping.fortnox_description || null
+    });
+  }
+
+  const sql = `
+    INSERT INTO fortnox_company_mappings
+      (company_id, internal_code, fortnox_code, fortnox_description, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(company_id, internal_code) DO UPDATE SET
+      fortnox_code = excluded.fortnox_code,
+      fortnox_description = excluded.fortnox_description,
+      updated_at = CURRENT_TIMESTAMP
+  `;
+
+  let pending = normalized.length;
+  let responded = false;
+  for (const mapping of normalized) {
+    db.run(
+      sql,
+      [
+        mapping.company_id,
+        mapping.internal_code,
+        mapping.fortnox_code,
+        mapping.fortnox_description
+      ],
+      (err) => {
+        if (responded) return;
+        if (err) {
+          responded = true;
+          console.error("DB-fel vid POST /fortnox_company_mappings:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        pending -= 1;
+        if (pending === 0 && !responded) {
+          res.json(normalized);
+        }
+      }
+    );
+  }
+});
+
+app.post("/fortnox_export_logs", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const {
+    company_id,
+    period_start,
+    period_end,
+    employee_count,
+    entry_count,
+    exported_by,
+    filename
+  } = req.body || {};
+
+  const targetCompanyId = allowAll && company_id ? company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+  db.run(
+    `INSERT INTO fortnox_export_logs
+     (company_id, period_start, period_end, employee_count, entry_count, exported_by, filename)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      targetCompanyId,
+      period_start || null,
+      period_end || null,
+      employee_count || 0,
+      entry_count || 0,
+      exported_by || getAuthUserId(req),
+      filename || null
+    ],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid POST /fortnox_export_logs:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.status(201).json({ id: this.lastID });
+    }
+  );
+});
+
+// ======================
 //   OB / ÖVERTID / RESTID INSTÄLLNINGAR
 // ======================
+// GET /shift_types_config (alias för frontend)
+app.get("/shift_types_config", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  if (allowAll) {
+    return res.json(DEFAULT_SHIFT_CONFIGS);
+  }
+
+  ensureShiftConfigs(companyId, (seedErr) => {
+    if (seedErr) {
+      console.error("DB-fel vid seed shift_types_config:", seedErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    db.all(
+      `SELECT * FROM shift_types_config
+       WHERE company_id = ?
+       ORDER BY CASE shift_type
+         WHEN 'day' THEN 1
+         WHEN 'evening' THEN 2
+         WHEN 'night' THEN 3
+         WHEN 'weekend' THEN 4
+         WHEN 'overtime_day' THEN 5
+         WHEN 'overtime_weekend' THEN 6
+         ELSE 99
+       END`,
+      [companyId],
+      (err, rows) => {
+        if (err) {
+          console.error("DB-fel vid GET /shift_types_config:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json(rows || []);
+      }
+    );
+  });
+});
+
 // GET /admin/ob-settings (read for all authenticated users)
 app.get("/admin/ob-settings", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);

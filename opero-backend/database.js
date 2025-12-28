@@ -1351,6 +1351,143 @@ db.serialize(() => {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // --- Fortnox salary codes & mappings ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fortnox_salary_codes (
+      code TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      category TEXT,
+      default_fortnox_code TEXT,
+      company_id INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fortnox_company_mappings (
+      company_id INTEGER NOT NULL,
+      internal_code TEXT NOT NULL,
+      fortnox_code TEXT NOT NULL,
+      fortnox_description TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (company_id, internal_code),
+      FOREIGN KEY (internal_code) REFERENCES fortnox_salary_codes(code) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fortnox_export_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      period_start TEXT,
+      period_end TEXT,
+      employee_count INTEGER,
+      entry_count INTEGER,
+      exported_by INTEGER,
+      filename TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const defaultFortnoxCodes = [
+    {
+      code: "ARBETE",
+      name: "Arbetade timmar",
+      description: "Arbetade timmar",
+      category: "base",
+      default_fortnox_code: "11"
+    },
+    {
+      code: "OVERTID_VARDAG",
+      name: "Övertid vardag",
+      description: "Övertid vardag",
+      category: "base",
+      default_fortnox_code: "310"
+    },
+    {
+      code: "OVERTID_HELG",
+      name: "Övertid helg",
+      description: "Övertid helg",
+      category: "base",
+      default_fortnox_code: "320"
+    },
+    {
+      code: "OB_KVALL",
+      name: "OB kväll",
+      description: "OB kväll",
+      category: "base",
+      default_fortnox_code: "530"
+    },
+    {
+      code: "OB_NATT",
+      name: "OB natt",
+      description: "OB natt",
+      category: "base",
+      default_fortnox_code: "540"
+    },
+    {
+      code: "OB_HELG",
+      name: "OB helg",
+      description: "OB helg",
+      category: "base",
+      default_fortnox_code: "550"
+    },
+    {
+      code: "RESTID",
+      name: "Restid",
+      description: "Restid",
+      category: "base",
+      default_fortnox_code: "600"
+    },
+    {
+      code: "TRAKTAMENTE_HEL",
+      name: "Heldagstraktamente",
+      description: "Heldagstraktamente",
+      category: "base",
+      default_fortnox_code: "710"
+    },
+    {
+      code: "TRAKTAMENTE_HALV",
+      name: "Halvdagstraktamente",
+      description: "Halvdagstraktamente",
+      category: "base",
+      default_fortnox_code: "720"
+    }
+  ];
+
+  defaultFortnoxCodes.forEach((code) => {
+    db.get(
+      "SELECT code FROM fortnox_salary_codes WHERE code = ?",
+      [code.code],
+      (err, row) => {
+        if (err) {
+          console.error("Kunde inte läsa fortnox_salary_codes:", err);
+          return;
+        }
+        if (row) return;
+        db.run(
+          `INSERT INTO fortnox_salary_codes
+           (code, name, description, category, default_fortnox_code)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            code.code,
+            code.name,
+            code.description,
+            code.category,
+            code.default_fortnox_code
+          ],
+          (insertErr) => {
+            if (insertErr) {
+              console.error("Kunde inte lägga till Fortnox-kod:", insertErr);
+            }
+          }
+        );
+      }
+    );
+  });
 });
 
 module.exports = db;

@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
     proxy: {
-      "^/(auth|time-entries|companies|public|customers|projects|profiles|subprojects|job-roles|material-types|price-list|admin|superadmin|help|plans|scheduled-assignments|deviation-reports|comp-time-balance|welding-reports|welding_reports|uploads|work-orders)": {
+      "^/(auth|time-entries|companies|public|customers|projects|profiles|subprojects|job-roles|material-types|price-list|admin|superadmin|help|plans|scheduled-assignments|deviation-reports|comp-time-balance|welding-reports|welding_reports|uploads|work-orders|fortnox_salary_codes|fortnox_company_mappings|fortnox_export_logs|shift_types_config)": {
         target: "http://localhost:3000",
         changeOrigin: true,
         bypass(req) {
