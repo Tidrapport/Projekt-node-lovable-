@@ -3,7 +3,7 @@
   <header>
     <format>paxml</format>
     <version>2.0</version>
-    <datum>2025-12-30T17:25:33Z</datum>
+    <datum>2025-12-30T20:45:15Z</datum>
     <foretagorgnr>5592963937</foretagorgnr>
     <foretagnamn>Rail Work Entreprenad i Sverige AB</foretagnamn>
     <programnamn>Tidrapportering</programnamn>
@@ -42,6 +42,31 @@
     </lonetrans>
     <lonetrans postid="7" anstid="12">
       <lonart>8113</lonart>
+      <datum>2025-12-01</datum>
+      <antal>1.00</antal>
+    </lonetrans>
+    <lonetrans postid="8" anstid="21">
+      <lonart>11</lonart>
+      <datum>2025-12-01</datum>
+      <antal>10.00</antal>
+    </lonetrans>
+    <lonetrans postid="9" anstid="21">
+      <lonart>1472</lonart>
+      <datum>2025-12-01</datum>
+      <antal>3.00</antal>
+    </lonetrans>
+    <lonetrans postid="10" anstid="21">
+      <lonart>1473</lonart>
+      <datum>2025-12-01</datum>
+      <antal>1.00</antal>
+    </lonetrans>
+    <lonetrans postid="11" anstid="21">
+      <lonart>1474</lonart>
+      <datum>2025-12-01</datum>
+      <antal>4.00</antal>
+    </lonetrans>
+    <lonetrans postid="12" anstid="21">
+      <lonart>811</lonart>
       <datum>2025-12-01</datum>
       <antal>1.00</antal>
     </lonetrans>

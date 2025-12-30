@@ -591,7 +591,7 @@ export default function AdminSalaries() {
       Hours: string;
     }[] = [];
 
-    const periodDateStr = format(periodDates.start, 'yyyy-MM-dd');
+    const periodDateStr = `${selectedPeriod}-01`;
     const toHours = (value: number) => Number(value).toFixed(2);
 
     for (const summary of selectedSummaries) {
@@ -691,7 +691,7 @@ export default function AdminSalaries() {
       const employees: PAXmlEmployee[] = [];
       
       // Use the period start date for all entries (Fortnox expects a date)
-      const periodDateStr = format(periodDates.start, 'yyyy-MM-dd');
+      const periodDateStr = `${selectedPeriod}-01`;
       
       for (const summary of selectedSummaries) {
         const entries: PAXmlEntry[] = [];

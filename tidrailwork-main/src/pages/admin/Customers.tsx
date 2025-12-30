@@ -6,6 +6,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/api/client";
 import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
@@ -72,6 +78,8 @@ interface TimeEntry {
   profiles: { full_name: string };
 }
 
+type CustomerSyncProvider = "fortnox" | "visma" | "speedledger" | "bjornlunden";
+
 const toDigits = (value: string) => value.replace(/\D/g, "");
 
 const formatVatNumber = (value: string) => {
@@ -92,6 +100,13 @@ const AdminCustomers = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [subprojects, setSubprojects] = useState<Subproject[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncingProvider, setSyncingProvider] = useState<CustomerSyncProvider | null>(null);
+  const providerLabels: Record<CustomerSyncProvider, string> = {
+    fortnox: "Fortnox",
+    visma: "Visma",
+    speedledger: "SpeedLedger",
+    bjornlunden: "Björn Lunden",
+  };
 
   // Filter state
   const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
@@ -207,6 +222,31 @@ const AdminCustomers = () => {
     const q = queryParams.length ? `?${queryParams.join("&")}` : "";
     const data = await apiFetch(`/time-entries${q}`);
     if (data) setAttestedEntries(data);
+  };
+
+  const syncCustomersFromProvider = async (provider: CustomerSyncProvider) => {
+    if (provider !== "fortnox") {
+      toast(`Stöd för ${providerLabels[provider] || provider} kommer snart.`);
+      return;
+    }
+
+    setSyncingProvider(provider);
+    try {
+      const data = await apiFetch<{ customers?: Customer[]; imported?: number; updated?: number; message?: string }>(
+        "/admin/fortnox/customers"
+      );
+      const importedCount = Number(data?.imported ?? data?.customers?.length ?? 0);
+      if (!importedCount) {
+        toast.error("Inga Fortnox-kunder hittades.");
+        return;
+      }
+      toast.success(data?.message || `Hämtade ${importedCount} kunder från Fortnox.`);
+      await fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte hämta Fortnox-kunder");
+    } finally {
+      setSyncingProvider(null);
+    }
   };
 
   const openCustomerDialog = (customer?: Customer) => {
@@ -481,10 +521,36 @@ const AdminCustomers = () => {
           <h2 className="text-3xl font-bold font-heading">Kunder</h2>
           <p className="text-muted-foreground">Hantera kunder och exportera tidrapporter</p>
         </div>
-        <Button onClick={() => openCustomerDialog()} className="bg-gradient-primary">
-          <Plus className="mr-2 h-4 w-4" />
-          Ny kund
-        </Button>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={!!syncingProvider}
+              >
+                {syncingProvider ? "Hämtar kunder..." : "Hämta kunder"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => syncCustomersFromProvider("fortnox")}>
+                Fortnox
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => syncCustomersFromProvider("visma")}>
+                Visma
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => syncCustomersFromProvider("speedledger")}>
+                SpeedLedger
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => syncCustomersFromProvider("bjornlunden")}>
+                Björn Lunden
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button onClick={() => openCustomerDialog()} className="bg-gradient-primary">
+            <Plus className="mr-2 h-4 w-4" />
+            Ny kund
+          </Button>
+        </div>
       </div>
 
       {/* Customer list */}

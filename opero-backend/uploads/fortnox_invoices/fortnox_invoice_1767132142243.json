@@ -1,0 +1,17 @@
+{
+  "Invoice": {
+    "CustomerNumber": "20331",
+    "InvoiceDate": "2025-12-30",
+    "DueDate": "2026-01-29",
+    "OurReference": "Lukas Nilsson",
+    "YourReference": "test testansson",
+    "InvoiceRows": [
+      {
+        "Description": "Bantekniker Dag",
+        "DeliveredQuantity": 11,
+        "Unit": "tim",
+        "Price": 22
+      }
+    ]
+  }
+}

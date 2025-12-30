@@ -73,6 +73,9 @@ const FORTNOX_API_BASE = process.env.FORTNOX_API_BASE || "https://api.fortnox.se
 const FORTNOX_REDIRECT_URI = process.env.FORTNOX_REDIRECT_URI;
 const FORTNOX_SCOPE = process.env.FORTNOX_SCOPE || "";
 const FORTNOX_SUCCESS_REDIRECT = process.env.FORTNOX_SUCCESS_REDIRECT;
+const FORTNOX_PAYROLL_PATH = process.env.FORTNOX_PAYROLL_PATH || "/archive";
+const FORTNOX_REQUIRED_SCOPES = ["customer"];
+const FORTNOX_CUSTOMER_SCOPE_ALIASES = ["customer", "customers"];
 
 console.log("Fortnox config:", {
   authUrl: FORTNOX_AUTH_URL,
@@ -153,10 +156,14 @@ function getFortnoxCredentials() {
 }
 
 function getAllowedFortnoxScopes() {
-  return String(FORTNOX_SCOPE || "")
+  const scopes = String(FORTNOX_SCOPE || "")
     .split(/\s+/)
     .map((scope) => scope.trim())
     .filter(Boolean);
+  FORTNOX_REQUIRED_SCOPES.forEach((required) => {
+    if (!scopes.includes(required)) scopes.push(required);
+  });
+  return scopes;
 }
 
 function buildFortnoxAuthUrl({ clientId, redirectUri, state, scope }) {
@@ -268,6 +275,19 @@ async function getFortnoxAccessToken(companyId) {
   });
 }
 
+function getFortnoxConnection(companyId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      "SELECT * FROM fortnox_connections WHERE company_id = ?",
+      [companyId],
+      (err, row) => {
+        if (err) return reject(err);
+        resolve(row || null);
+      }
+    );
+  });
+}
+
 async function fetchFortnoxArticles(accessToken) {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
@@ -319,6 +339,76 @@ async function fetchFortnoxArticles(accessToken) {
     .filter((article) => article.article_number || article.description);
 }
 
+async function fetchFortnoxCustomers(accessToken) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
+  };
+  const parseMetaNumber = (value) => {
+    const numeric = Number(String(value || "").replace(/[^0-9]/g, ""));
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+  let page = 1;
+  let totalPages = 1;
+  const collected = [];
+
+  while (page <= totalPages) {
+    const url = new URL(`${FORTNOX_API_BASE}/customers`);
+    url.searchParams.set("page", String(page));
+    const response = await fetch(url.toString(), { headers });
+    const text = await response.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+    if (!response.ok) {
+      const message =
+        data?.ErrorInformation?.Message ||
+        data?.ErrorInformation?.message ||
+        data?.error ||
+        text ||
+        "Fortnox error";
+      throw new Error(message);
+    }
+    const batch = Array.isArray(data?.Customers) ? data.Customers : [];
+    collected.push(...batch);
+    const meta = data?.MetaInformation || {};
+    const parsedTotal = parseMetaNumber(meta["@TotalPages"] ?? meta.TotalPages ?? meta.totalPages);
+    if (parsedTotal) totalPages = parsedTotal;
+    if (!parsedTotal && batch.length === 0) break;
+    page += 1;
+  }
+
+  const toText = (value) => {
+    const textValue = String(value ?? "").trim();
+    return textValue ? textValue : null;
+  };
+
+  return collected
+    .map((customer) => ({
+      customer_number: toText(customer?.CustomerNumber),
+      name: toText(customer?.Name),
+      customer_type: toText(customer?.CustomerType) || "company",
+      orgnr: toText(customer?.OrganisationNumber),
+      vat_number: toText(customer?.VATNumber),
+      invoice_address1: toText(customer?.Address1),
+      invoice_address2: toText(customer?.Address2),
+      postal_code: toText(customer?.ZipCode),
+      city: toText(customer?.City),
+      country: toText(customer?.Country),
+      contact_name: toText(customer?.ContactPerson),
+      contact_email: toText(customer?.Email),
+      invoice_email: toText(customer?.EmailInvoice || customer?.EmailInvoiceAddress),
+      contact_phone: toText(customer?.Phone1),
+      phone_secondary: toText(customer?.Phone2),
+      their_reference: toText(customer?.YourReference),
+      payment_terms: toText(customer?.TermsOfPayment),
+    }))
+    .filter((customer) => customer.customer_number || customer.name);
+}
+
 function hasFortnoxConnection(companyId) {
   return new Promise((resolve) => {
     db.get(
@@ -342,6 +432,18 @@ function buildFortnoxRedirectUrl(success) {
   } catch {
     return null;
   }
+}
+
+function normalizeFortnoxScopeList(scopeValue) {
+  return String(scopeValue || "")
+    .split(/\s+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
+function hasFortnoxCustomerScope(scopeValue) {
+  const scopes = normalizeFortnoxScopeList(scopeValue);
+  return FORTNOX_CUSTOMER_SCOPE_ALIASES.some((alias) => scopes.includes(alias));
 }
 
 /**
@@ -3706,27 +3808,62 @@ app.post("/admin/fortnox/push_payroll", requireAuth, requireAdmin, async (req, r
     }
 
     // Forward to Fortnox - upload as archive file (PAXml import is manual in Fortnox Lön)
-    const fortnoxUrl = `${FORTNOX_API_BASE}/archive`;
+    const fortnoxUrl = `${FORTNOX_API_BASE}${FORTNOX_PAYROLL_PATH}`;
+    console.log('Using Fortnox payroll URL:', fortnoxUrl);
     try {
+      // Inspect saved connection (scopes) for better error messages
+      const conn = await getFortnoxConnection(targetCompanyId).catch(() => null);
+      const savedScope = conn ? String(conn.scope || "").trim() : "";
+      console.log("Fortnox connection scope for company", targetCompanyId, "=", savedScope);
+      if (savedScope && !savedScope.includes("archive")) {
+        // Warn the caller that the token likely lacks archive permission
+        return res.status(403).json({
+          success: false,
+          forwarded: false,
+          error: "Missing required Fortnox scope: archive",
+          message: "Your Fortnox token does not include the 'archive' scope. Please reconnect the Fortnox app with the required permissions."
+        });
+      }
+
       const form = new FormData();
+      // Node's global Blob/FormData may vary between runtimes; FormData usage mirrors existing code.
       form.append("file", new Blob([xml], { type: "application/xml" }), safeFilename);
+
       const response = await fetch(fortnoxUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json"
         },
         body: form,
       });
-      const text = await response.text();
+
+      const text = await response.text().catch(() => "");
+      // Collect some response headers for debugging
+      let responseHeaders = {};
+      try {
+        for (const [k, v] of response.headers.entries()) responseHeaders[k] = v;
+      } catch (e) {
+        responseHeaders = {};
+      }
+
       if (!response.ok) {
-        console.error("Fortnox push failed:", response.status, text);
-        return res.status(502).json({ success: false, forwarded: false, status: response.status, error: text, body: text });
+        console.error("Fortnox push failed:", response.status, text, responseHeaders);
+        return res.status(502).json({
+          success: false,
+          forwarded: false,
+          status: response.status,
+          error: text || "Fortnox returned an error",
+          headers: responseHeaders,
+          body: text
+        });
       }
       return res.json({
         success: true,
         stored: true,
         forwarded: true,
         message: "Löneunderlag uppladdat i Fortnox Arkiv",
+        headers: responseHeaders,
         body: text
       });
     } catch (err) {
@@ -3823,6 +3960,176 @@ app.get("/admin/fortnox/articles", requireAuth, requireAdmin, async (req, res) =
     return res.json({ articles, total: articles.length });
   } catch (err) {
     console.error("Error fetching Fortnox articles:", err);
+    return res.status(500).json({ error: err?.message || "Fortnox fetch failed" });
+  }
+});
+
+app.get("/admin/fortnox/customers", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const connection = await getFortnoxConnection(targetCompanyId);
+    if (!connection?.access_token) {
+      return res.status(409).json({ error: "Fortnox not connected" });
+    }
+    if (!hasFortnoxCustomerScope(connection.scope)) {
+      return res.status(409).json({
+        error: "Fortnox saknar behörighet för kunder. Koppla om Fortnox med scope: customer.",
+        missing_scopes: FORTNOX_REQUIRED_SCOPES,
+      });
+    }
+
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.status(409).json({ error: "Fortnox not connected" });
+    }
+
+    const customers = await fetchFortnoxCustomers(accessToken);
+    if (!customers.length) {
+      return res.json({ customers: [], imported: 0, updated: 0, total: 0 });
+    }
+
+    const existingRows = await new Promise((resolve, reject) => {
+      db.all(
+        "SELECT id, customer_number FROM customers WHERE company_id = ?",
+        [targetCompanyId],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
+        }
+      );
+    });
+    const existingMap = new Map();
+    existingRows.forEach((row) => {
+      const key = String(row?.customer_number || "").trim();
+      if (key) existingMap.set(key, row.id);
+    });
+
+    const runAsync = (sql, params = []) =>
+      new Promise((resolve, reject) => {
+        db.run(sql, params, function (err) {
+          if (err) reject(err);
+          else resolve(this);
+        });
+      });
+
+    let imported = 0;
+    let updated = 0;
+
+    await runAsync("BEGIN");
+    try {
+      for (const customer of customers) {
+        const customerNumber = String(customer.customer_number || "").trim();
+        if (!customerNumber && !customer.name) continue;
+
+        const existingId = customerNumber ? existingMap.get(customerNumber) : null;
+        if (existingId) {
+          await runAsync(
+            `UPDATE customers
+             SET name = COALESCE(?, name),
+                 customer_number = COALESCE(?, customer_number),
+                 customer_type = COALESCE(?, customer_type),
+                 orgnr = COALESCE(?, orgnr),
+                 vat_number = COALESCE(?, vat_number),
+                 invoice_address1 = COALESCE(?, invoice_address1),
+                 invoice_address2 = COALESCE(?, invoice_address2),
+                 postal_code = COALESCE(?, postal_code),
+                 city = COALESCE(?, city),
+                 country = COALESCE(?, country),
+                 contact_name = COALESCE(?, contact_name),
+                 contact_email = COALESCE(?, contact_email),
+                 invoice_email = COALESCE(?, invoice_email),
+                 contact_phone = COALESCE(?, contact_phone),
+                 phone_secondary = COALESCE(?, phone_secondary),
+                 their_reference = COALESCE(?, their_reference),
+                 payment_terms = COALESCE(?, payment_terms)
+             WHERE id = ? AND company_id = ?`,
+            [
+              customer.name ?? null,
+              customer.customer_number ?? null,
+              customer.customer_type ?? null,
+              customer.orgnr ?? null,
+              customer.vat_number ?? null,
+              customer.invoice_address1 ?? null,
+              customer.invoice_address2 ?? null,
+              customer.postal_code ?? null,
+              customer.city ?? null,
+              customer.country ?? null,
+              customer.contact_name ?? null,
+              customer.contact_email ?? null,
+              customer.invoice_email ?? null,
+              customer.contact_phone ?? null,
+              customer.phone_secondary ?? null,
+              customer.their_reference ?? null,
+              customer.payment_terms ?? null,
+              existingId,
+              targetCompanyId,
+            ]
+          );
+          updated += 1;
+          continue;
+        }
+
+        await runAsync(
+          `INSERT INTO customers (
+            company_id,
+            customer_number,
+            customer_type,
+            name,
+            orgnr,
+            vat_number,
+            invoice_address1,
+            invoice_address2,
+            postal_code,
+            city,
+            country,
+            contact_name,
+            contact_email,
+            invoice_email,
+            contact_phone,
+            phone_secondary,
+            their_reference,
+            payment_terms
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            targetCompanyId,
+            customer.customer_number ?? null,
+            customer.customer_type ?? null,
+            customer.name || customer.customer_number,
+            customer.orgnr ?? null,
+            customer.vat_number ?? null,
+            customer.invoice_address1 ?? null,
+            customer.invoice_address2 ?? null,
+            customer.postal_code ?? null,
+            customer.city ?? null,
+            customer.country ?? null,
+            customer.contact_name ?? null,
+            customer.contact_email ?? null,
+            customer.invoice_email ?? null,
+            customer.contact_phone ?? null,
+            customer.phone_secondary ?? null,
+            customer.their_reference ?? null,
+            customer.payment_terms ?? null,
+          ]
+        );
+        imported += 1;
+      }
+      await runAsync("COMMIT");
+    } catch (err) {
+      await runAsync("ROLLBACK");
+      throw err;
+    }
+
+    return res.json({
+      customers,
+      imported,
+      updated,
+      total: customers.length,
+    });
+  } catch (err) {
+    console.error("Error fetching Fortnox customers:", err);
     return res.status(500).json({ error: err?.message || "Fortnox fetch failed" });
   }
 });
@@ -4690,8 +4997,24 @@ app.post("/admin/fortnox/attendance", requireAuth, requireAdmin, async (req, res
       });
       const text = await response.text();
       if (!response.ok) {
-        console.error("Fortnox attendance push failed:", response.status, text);
-        return res.status(502).json({ success: false, status: response.status, error: text });
+        // Try to parse JSON error from Fortnox for clearer logs
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch (e) {
+          parsed = null;
+        }
+        const errMessage =
+          (parsed && (parsed.ErrorInformation?.message || parsed.ErrorInformation?.Message || parsed.error || parsed.message)) ||
+          text ||
+          `HTTP ${response.status}`;
+        console.error("Fortnox attendance push failed:", response.status, errMessage, parsed || text);
+        return res.status(502).json({
+          success: false,
+          status: response.status,
+          error: errMessage,
+          raw: parsed || text,
+        });
       }
     }
 
