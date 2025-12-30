@@ -1,0 +1,41 @@
+{
+  "Invoice": {
+    "CustomerNumber": "20244",
+    "InvoiceDate": "2025-12-30",
+    "DueDate": "2026-01-29",
+    "OurReference": "Lukas Nilsson",
+    "YourReference": "",
+    "InvoiceRows": [
+      {
+        "Description": "Maskinförare Dag",
+        "DeliveredQuantity": 1,
+        "Unit": "tim",
+        "Price": 400
+      },
+      {
+        "Description": "Maskinförare Kväll",
+        "DeliveredQuantity": 3,
+        "Unit": "tim",
+        "Price": 0
+      },
+      {
+        "Description": "Maskinförare Natt",
+        "DeliveredQuantity": 2,
+        "Unit": "tim",
+        "Price": 550
+      },
+      {
+        "Description": "Maskinförare Restid",
+        "DeliveredQuantity": 4,
+        "Unit": "tim",
+        "Price": 0
+      },
+      {
+        "Description": "Maskinförare Traktamente",
+        "DeliveredQuantity": 1,
+        "Unit": "dag",
+        "Price": 0
+      }
+    ]
+  }
+}

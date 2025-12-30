@@ -1,0 +1,53 @@
+{
+  "Invoice": {
+    "CustomerNumber": "20331",
+    "InvoiceDate": "2025-12-30",
+    "DueDate": "2026-01-29",
+    "OurReference": "Lukas Nilsson",
+    "YourReference": "test testansson",
+    "InvoiceRows": [
+      {
+        "Description": "Bantekniker Dag",
+        "DeliveredQuantity": 12.5,
+        "Unit": "tim",
+        "Price": 22
+      },
+      {
+        "Description": "Bantekniker Traktamente",
+        "DeliveredQuantity": 3.5,
+        "Unit": "dag",
+        "Price": 22
+      },
+      {
+        "Description": "Mil inom arbete",
+        "DeliveredQuantity": 111,
+        "Unit": "mil",
+        "Price": 22
+      },
+      {
+        "Description": "Bantekniker Helg",
+        "DeliveredQuantity": 22,
+        "Unit": "tim",
+        "Price": 22
+      },
+      {
+        "Description": "Bantekniker Övertid helg",
+        "DeliveredQuantity": 2,
+        "Unit": "tim",
+        "Price": 22
+      },
+      {
+        "Description": "Bantekniker Kväll",
+        "DeliveredQuantity": 3,
+        "Unit": "tim",
+        "Price": 22
+      },
+      {
+        "Description": "Bantekniker Natt",
+        "DeliveredQuantity": 1,
+        "Unit": "tim",
+        "Price": 22
+      }
+    ]
+  }
+}

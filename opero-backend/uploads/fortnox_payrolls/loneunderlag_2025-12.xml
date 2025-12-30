@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<paxml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://www.paxml.se/2.0/paxml.xsd">
+  <header>
+    <format>paxml</format>
+    <version>2.0</version>
+    <datum>2025-12-30T17:25:33Z</datum>
+    <foretagorgnr>5592963937</foretagorgnr>
+    <foretagnamn>Rail Work Entreprenad i Sverige AB</foretagnamn>
+    <programnamn>Tidrapportering</programnamn>
+    <info>Period: 2025-12-01 - 2025-12-31</info>
+  </header>
+  <lonetransaktioner>
+    <lonetrans postid="1" anstid="12">
+      <lonart>11</lonart>
+      <datum>2025-12-01</datum>
+      <antal>17.50</antal>
+    </lonetrans>
+    <lonetrans postid="2" anstid="12">
+      <lonart>1472</lonart>
+      <datum>2025-12-01</datum>
+      <antal>6.00</antal>
+    </lonetrans>
+    <lonetrans postid="3" anstid="12">
+      <lonart>1473</lonart>
+      <datum>2025-12-01</datum>
+      <antal>3.50</antal>
+    </lonetrans>
+    <lonetrans postid="4" anstid="12">
+      <lonart>1474</lonart>
+      <datum>2025-12-01</datum>
+      <antal>1.00</antal>
+    </lonetrans>
+    <lonetrans postid="5" anstid="12">
+      <lonart>15</lonart>
+      <datum>2025-12-01</datum>
+      <antal>4.00</antal>
+    </lonetrans>
+    <lonetrans postid="6" anstid="12">
+      <lonart>811</lonart>
+      <datum>2025-12-01</datum>
+      <antal>3.00</antal>
+    </lonetrans>
+    <lonetrans postid="7" anstid="12">
+      <lonart>8113</lonart>
+      <datum>2025-12-01</datum>
+      <antal>1.00</antal>
+    </lonetrans>
+  </lonetransaktioner>
+</paxml>

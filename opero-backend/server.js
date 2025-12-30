@@ -152,6 +152,13 @@ function getFortnoxCredentials() {
   };
 }
 
+function getAllowedFortnoxScopes() {
+  return String(FORTNOX_SCOPE || "")
+    .split(/\s+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
 function buildFortnoxAuthUrl({ clientId, redirectUri, state, scope }) {
   const url = new URL(FORTNOX_AUTH_URL);
   url.searchParams.set("client_id", clientId);
@@ -3607,15 +3614,31 @@ app.post("/admin/fortnox/connect", requireAuth, requireAdmin, (req, res) => {
     JWT_SECRET,
     { expiresIn: "10m" }
   );
+  const allowedScopes = getAllowedFortnoxScopes();
+  const requestedScopes = Array.isArray(req.body?.scopes)
+    ? req.body.scopes
+    : typeof req.body?.scope === "string"
+      ? req.body.scope.split(/\s+/)
+      : [];
+  const normalizedScopes = requestedScopes
+    .map((scope) => String(scope || "").trim())
+    .filter(Boolean);
+  const effectiveScopes = normalizedScopes.length
+    ? normalizedScopes.filter((scope) => allowedScopes.includes(scope))
+    : allowedScopes;
   const authUrl = buildFortnoxAuthUrl({
     clientId,
     redirectUri: FORTNOX_REDIRECT_URI,
     state,
-    scope: FORTNOX_SCOPE,
+    scope: effectiveScopes.join(" "),
   });
 
-  console.log('Built Fortnox auth_url, scope=', FORTNOX_SCOPE, 'auth_url=', authUrl);
+  console.log('Built Fortnox auth_url, scope=', effectiveScopes.join(" "), 'auth_url=', authUrl);
   res.json({ auth_url: authUrl });
+});
+
+app.get("/admin/fortnox/scopes", requireAuth, requireAdmin, (req, res) => {
+  res.json({ allowed: getAllowedFortnoxScopes() });
 });
 
 app.post("/admin/fortnox/disconnect", requireAuth, requireAdmin, (req, res) => {

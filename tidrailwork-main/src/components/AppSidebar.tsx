@@ -79,7 +79,7 @@ const adminHubSubItems = [
   { title: "Yrkesroller", url: "/admin/job-roles", icon: Briefcase },
   { title: "Tillägg", url: "/admin/material-types", icon: Package },
   { title: "OB-inställningar", url: "/admin/ob-settings", icon: Percent },
-  { title: "Faktura-inställningar", url: "/admin/invoice-settings", icon: FileText },
+  { title: "Integrationer", url: "/admin/invoice-settings", icon: FileText },
   { title: "Prislista", url: "/admin/price-list", icon: FileText },
   { title: "Dokument", url: "/admin/documents", icon: FileText },
   { title: "Aktivitetslogg", url: "/admin/activity-log", icon: ClipboardList },

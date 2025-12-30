@@ -674,7 +674,14 @@ export default function AdminSalaries() {
           toast.success('Kalenderposter skapade i Fortnox');
         } catch (err) {
           console.warn('Could not push attendance transactions:', err);
-          toast.error(err instanceof Error ? err.message : 'Kunde inte skapa kalenderposter');
+          const rawMessage = err instanceof Error ? err.message : '';
+          if (rawMessage.toLowerCase().includes('behörighet saknas')) {
+            toast.error(
+              'Fortnox säger att behörighet saknas för kalender-API. Kontrollera att du godkände rätt bolag, att användaren har Lön-behörighet och att Fortnox har aktiverat kalender-API för kontot.'
+            );
+          } else {
+            toast.error(rawMessage || 'Kunde inte skapa kalenderposter');
+          }
         } finally {
           setShowPreviewDialog(false);
         }
@@ -1328,7 +1335,9 @@ export default function AdminSalaries() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Filformat</p>
-                <p className="font-medium">PAXml 2.0</p>
+                <p className="font-medium">
+                  {exportAction === 'calendar' ? 'Fortnox API (kalenderposter)' : 'PAXml 2.0'}
+                </p>
               </div>
             </div>
             
