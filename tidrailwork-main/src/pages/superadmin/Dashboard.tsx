@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 import { toast } from "sonner";
 import { Building2, Copy, Eye, FileText, Plus, Trash2, Users } from "lucide-react";
@@ -191,11 +192,10 @@ const SuperAdminDashboard = () => {
         apiFetch<Company[]>(`/companies`),
         apiFetch<BillingUser[]>(`/admin/users?include_inactive=1&all=1`),
       ]);
-      const users = (usersData || []).filter(
-        (u) => String(u.role || "").toLowerCase() !== "super_admin"
-      );
+      const companiesArray: Company[] = ensureArray(companiesData);
+      const users = ensureArray(usersData).filter((u) => String(u.role || "").toLowerCase() !== "super_admin");
       setBillingUsers(users);
-      const withCounts = (companiesData || []).map((company) => ({
+      const withCounts = companiesArray.map((company) => ({
         ...company,
         user_count: users.filter((u) => String(u.company_id) === String(company.id)).length,
       }));

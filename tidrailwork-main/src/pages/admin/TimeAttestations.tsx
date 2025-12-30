@@ -12,6 +12,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { useAuth } from "@/contexts/AuthContext";
 import { format, addWeeks, startOfWeek, getISOWeek, getISOWeekYear, isWithinInterval, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
@@ -189,19 +190,25 @@ export default function TimeAttestations() {
         apiFetch<Customer[]>(`/customers`),
       ]);
       setUsers(
-        (usersData || []).map((u: any) => ({
+        ensureArray(usersData).map((u: any) => ({
           ...u,
           id: String(u.id),
           full_name: u.full_name || `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || u.id,
         }))
       );
-      setProjects((projectsData || []).map((p: any) => ({ ...p, id: String(p.id) })));
-      setSubprojects((subprojectsData || []).map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
-      setJobRoles((jobRolesData || []).map((j: any) => ({ ...j, id: String(j.id) })));
-      setCustomers((customersData || []).map((c: any) => ({ ...c, id: String(c.id) })));
+      const projectsArray = ensureArray(projectsData);
+      const subprojectsArray = ensureArray(subprojectsData);
+      const jobRolesArray = ensureArray(jobRolesData);
+      const customersArray = ensureArray(customersData);
+
+      setProjects(projectsArray.map((p: any) => ({ ...p, id: String(p.id) })));
+      setSubprojects(subprojectsArray.map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
+      setJobRoles(jobRolesArray.map((j: any) => ({ ...j, id: String(j.id) })));
+      setCustomers(customersArray.map((c: any) => ({ ...c, id: String(c.id) })));
 
       const materialTypesData = await apiFetch<MaterialType[]>(`/material-types?active=true`);
-      setMaterialTypes((materialTypesData || []).map((m) => ({ ...m, id: String(m.id) })));
+      const materialTypesArray: MaterialType[] = ensureArray(materialTypesData);
+      setMaterialTypes(materialTypesArray.map((m) => ({ ...m, id: String(m.id) })));
     } catch (e: any) {
       toast.error(e.message || "Kunde inte hämta listor");
     }
@@ -212,7 +219,7 @@ export default function TimeAttestations() {
       setLoading(true);
       const qs = companyId ? `?include_materials=true&company_id=${companyId}` : "?include_materials=true";
       const data = await apiFetch<any[]>(`/time-entries${qs}`);
-      const normalized = (data || []).map((e) => ({
+      const normalized = ensureArray(data).map((e) => ({
         id: String(e.id),
         user_id: String(e.user_id),
         date: e.datum || e.date || "",

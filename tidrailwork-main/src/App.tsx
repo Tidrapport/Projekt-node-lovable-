@@ -28,6 +28,8 @@ import AdminDeviations from "./pages/admin/Deviations";
 import AdminOBSettings from "./pages/admin/OBSettings";
 import AdminInvoiceSettings from "./pages/admin/InvoiceSettings";
 import AdminPriceList from "./pages/admin/PriceList";
+import AdminActivityLog from "./pages/admin/ActivityLog";
+import AdminDocuments from "./pages/admin/Documents";
 import AdminStatistics from "./pages/admin/Statistics";
 import AdminWorkOrders from "./pages/admin/WorkOrders";
 import AdminHub from "./pages/admin/AdminHub";
@@ -295,6 +297,26 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <AdminPriceList />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/documents"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminDocuments />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/activity-log"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminActivityLog />
                     </Layout>
                   </ProtectedRoute>
                 }

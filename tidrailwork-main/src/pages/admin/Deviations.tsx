@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, getToken } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -69,14 +70,14 @@ export default function AdminDeviations() {
     try {
       setLoading(true);
       const data = await apiFetch<any[]>("/deviation-reports?include_images=true");
-      const mapped = (data || []).map((d) => ({
+      const mapped = ensureArray(data).map((d) => ({
         ...d,
         id: String(d.id),
         images: d.images || [],
       }));
       const imgMap: Record<string, string[]> = {};
       mapped.forEach((d) => {
-        imgMap[d.id] = (d.images || []).map((img: any) => img.storage_path);
+        imgMap[d.id] = ensureArray(d.images).map((img: any) => img.storage_path);
       });
       setImages(imgMap);
       setDeviations(mapped);

@@ -116,21 +116,36 @@ const TimeReports = () => {
 
     try {
       const projectsData = await apiFetch(`/projects?active=true`);
-      if (projectsData) setProjects(projectsData.map((p: any) => ({ ...p, id: String(p.id) })));
+      const projectsArray = Array.isArray(projectsData)
+        ? projectsData
+        : projectsData && Array.isArray((projectsData as any).projects)
+        ? (projectsData as any).projects
+        : [];
+      if (projectsArray.length) setProjects(projectsArray.map((p: any) => ({ ...p, id: String(p.id) })));
     } catch (error) {
       console.error("Error fetching projects", error);
     }
 
     try {
       const jobRolesData = await apiFetch(`/job-roles?active=true`);
-      if (jobRolesData) setJobRoles(jobRolesData.map((j: any) => ({ ...j, id: String(j.id) })));
+      const jobRolesArray = Array.isArray(jobRolesData)
+        ? jobRolesData
+        : jobRolesData && Array.isArray((jobRolesData as any).job_roles)
+        ? (jobRolesData as any).job_roles
+        : [];
+      if (jobRolesArray.length) setJobRoles(jobRolesArray.map((j: any) => ({ ...j, id: String(j.id) })));
     } catch (error) {
       console.error("Error fetching job roles", error);
     }
 
     try {
       const materialTypesData = await apiFetch(`/material-types?active=true`);
-      if (materialTypesData) setMaterialTypes(materialTypesData);
+      const materialTypesArray = Array.isArray(materialTypesData)
+        ? materialTypesData
+        : materialTypesData && Array.isArray((materialTypesData as any).material_types)
+        ? (materialTypesData as any).material_types
+        : [];
+      if (materialTypesArray.length) setMaterialTypes(materialTypesArray.map((m: any) => ({ ...m, id: String(m.id) })));
     } catch (error) {
       console.error("Error fetching material types", error);
     }

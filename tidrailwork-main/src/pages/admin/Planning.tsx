@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/api/client";
 import { toast } from "sonner";
+import { ensureArray } from "@/lib/ensureArray";
 import { format, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
 import { Plus, Trash2, HelpCircle } from "lucide-react";
@@ -134,7 +135,7 @@ export default function AdminPlanning() {
       const projectsRes = await apiFetch(projectsUrl).catch(() => []);
       const subprojectsRes = await apiFetch(subprojectsUrl).catch(() => []);
 
-      const normalizedAssignments = (assignmentsRes || []).map((a: any) => ({
+      const normalizedAssignments = ensureArray(assignmentsRes).map((a: any) => ({
         ...a,
         user_id: String(a.user_id),
         project_id: a.project_id ? String(a.project_id) : String(a.project || ""),
@@ -146,13 +147,17 @@ export default function AdminPlanning() {
 
       setAssignments(normalizedAssignments);
       setUsers(
-        (usersRes || []).map((u: any) => ({
+        ensureArray(usersRes).map((u: any) => ({
           id: String(u.id),
           full_name: u.full_name || `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || "Okänd",
         }))
       );
-      setProjects((projectsRes || []).map((p: any) => ({ ...p, id: String(p.id) })));
-      setSubprojects((subprojectsRes || []).map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
+
+      const projectsArray: any[] = ensureArray(projectsRes);
+      const subprojectsArray: any[] = ensureArray(subprojectsRes);
+
+      setProjects(projectsArray.map((p: any) => ({ ...p, id: String(p.id) })));
+      setSubprojects(subprojectsArray.map((sp: any) => ({ ...sp, id: String(sp.id), project_id: String(sp.project_id) })));
     } catch (error: any) {
       console.error("Error fetching data:", error);
       toast.error("Kunde inte hämta data");

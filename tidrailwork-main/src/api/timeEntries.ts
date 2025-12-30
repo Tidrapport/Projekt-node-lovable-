@@ -1,4 +1,5 @@
 import { api } from "./client";
+import { ensureArray } from "@/lib/ensureArray";
 
 type RawMaterial = {
   id: number | string;
@@ -178,7 +179,7 @@ export async function listTimeEntries(params: ListParams = {}) {
   if (params.includeMaterials) qs.set("include_materials", "true");
 
   const data = await api.get<RawTimeEntry[]>(`/time-entries${qs.toString() ? `?${qs.toString()}` : ""}`);
-  return (data || []).map(toTimeEntry);
+  return ensureArray(data).map(toTimeEntry);
 }
 
 export async function createTimeEntry(payload: CreatePayload) {

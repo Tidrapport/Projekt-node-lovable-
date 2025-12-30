@@ -1,29 +1,49 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
-import { componentTagger } from "lovable-tagger";
 
-// https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   server: {
-    host: "::",
-    port: 8080,
+    port: 5174,
+    strictPort: true,
+    host: true,
+
     proxy: {
-      "^/(auth|time-entries|companies|public|customers|projects|profiles|subprojects|job-roles|material-types|price-list|admin|superadmin|help|plans|scheduled-assignments|deviation-reports|comp-time-balance|welding-reports|welding_reports|uploads|work-orders|fortnox_salary_codes|fortnox_company_mappings|fortnox_export_logs|shift_types_config)": {
-        target: "http://localhost:3000",
-        changeOrigin: true,
-        bypass(req) {
-          const accept = req.headers?.accept || "";
-          if (accept.includes("text/html")) return "/index.html";
-          return undefined;
-        },
-      },
+      "/api": { target: "http://localhost:3000", changeOrigin: true },
+      "/admin": { target: "http://localhost:3000", changeOrigin: true },
+      "/auth": { target: "http://localhost:3000", changeOrigin: true },
+      "/fortnox": { target: "http://localhost:3000", changeOrigin: true },
+
+      // Common backend endpoints used by the frontend (both hyphen and underscore variants)
+      "/welding-reports": { target: "http://localhost:3000", changeOrigin: true },
+      "/welding_reports": { target: "http://localhost:3000", changeOrigin: true },
+      "/projects": { target: "http://localhost:3000", changeOrigin: true },
+      "/subprojects": { target: "http://localhost:3000", changeOrigin: true },
+      "/plans": { target: "http://localhost:3000", changeOrigin: true },
+      "/time-entries": { target: "http://localhost:3000", changeOrigin: true },
+      "/time_entries": { target: "http://localhost:3000", changeOrigin: true },
+      "/job-roles": { target: "http://localhost:3000", changeOrigin: true },
+      "/job_roles": { target: "http://localhost:3000", changeOrigin: true },
+      "/companies": { target: "http://localhost:3000", changeOrigin: true },
+      "/customers": { target: "http://localhost:3000", changeOrigin: true },
+      "/price-list": { target: "http://localhost:3000", changeOrigin: true },
+      "/work-orders": { target: "http://localhost:3000", changeOrigin: true },
+      "/work_orders": { target: "http://localhost:3000", changeOrigin: true },
+      "/material-types": { target: "http://localhost:3000", changeOrigin: true },
+      "/material_types": { target: "http://localhost:3000", changeOrigin: true },
+      "/fortnox_salary_codes": { target: "http://localhost:3000", changeOrigin: true },
+      "/fortnox_company_mappings": { target: "http://localhost:3000", changeOrigin: true },
+      "/fortnox_export_logs": { target: "http://localhost:3000", changeOrigin: true },
+      "/profiles": { target: "http://localhost:3000", changeOrigin: true },
+      "/shift_types_config": { target: "http://localhost:3000", changeOrigin: true },
     },
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+
+  plugins: [react()],
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
   },
-}));
+});

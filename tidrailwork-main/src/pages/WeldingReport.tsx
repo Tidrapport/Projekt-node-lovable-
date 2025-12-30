@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
 import { getMe } from "@/api/auth";
+import { ensureArray } from "@/lib/ensureArray";
+import { generateWeldingReportPDF } from "@/lib/weldingReportPdf";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, Trash2, Save, FileText } from "lucide-react";
 import { WeldingEntry, WeldingReport, WORK_TYPES, WELDING_METHODS, RAIL_TYPES, MATERIAL_TYPES } from "@/types/weldingReport";
@@ -110,8 +112,9 @@ const WeldingReport = () => {
     const fetchReports = async () => {
       setReportsLoading(true);
       try {
-        const data = await apiFetch<WeldingReport[]>("/welding_reports");
-        setReports(data || []);
+        const data = await apiFetch<WeldingReport[]>('/welding_reports');
+        const reportsArray = ensureArray(data);
+        setReports(reportsArray as WeldingReport[]);
       } catch (err: any) {
         toast.error(err.message || "Kunde inte hämta svetsrapporter");
       } finally {
@@ -198,8 +201,8 @@ const WeldingReport = () => {
       setShowAddDialog(false);
       setAppendEntries([]);
       setSelectedReport(null);
-      const data = await apiFetch<WeldingReport[]>("/welding_reports");
-      setReports(data || []);
+      const data = await apiFetch<WeldingReport[]>('/welding_reports');
+      setReports(ensureArray(data) as WeldingReport[]);
     } catch (error: any) {
       toast.error("Kunde inte uppdatera: " + error.message);
     } finally {
@@ -532,13 +535,27 @@ const WeldingReport = () => {
                       AO: {report.own_ao_number || "-"} | Kund AO: {report.customer_ao_number || "-"}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Svetsrader: {report.welding_entries?.length || 0}
+                      Svetsrader: {ensureArray(report.welding_entries).length}
                     </div>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => openAddEntriesDialog(report)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Lägg till svetsrader
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => openAddEntriesDialog(report)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Lägg till svetsrader
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={async () => {
+                      try {
+                        const company = await apiFetch('/companies');
+                        const companyObj = ensureArray(company)[0];
+                        await generateWeldingReportPDF(report as any, companyObj?.name || 'Företag');
+                      } catch (err: any) {
+                        toast.error('Kunde inte skapa PDF: ' + (err?.message || err));
+                      }
+                    }}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      PDF
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>

@@ -12,9 +12,28 @@ const db = require("./database");
 
 const app = express();
 
+const FRONTEND_ORIGINS = (process.env.FRONTEND_ORIGIN || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (FRONTEND_ORIGINS.length === 0) return true;
+  if (FRONTEND_ORIGINS.includes("*")) return true;
+  if (FRONTEND_ORIGINS.includes(origin)) return true;
+  if (origin.startsWith("http://localhost") || origin.startsWith("https://localhost")) return true;
+  if (origin.startsWith("http://127.0.0.1") || origin.startsWith("https://127.0.0.1")) return true;
+  if (origin.endsWith(".ngrok-free.dev")) return true;
+  return false;
+}
+
 // --- middleware ---
 app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN || true,
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true
 }));
 app.use(express.json({ limit: "10mb" }));
@@ -39,6 +58,7 @@ if (HAS_FRONTEND_DIST) {
     const secFetchDest = req.headers["sec-fetch-dest"] || "";
     if (!accept.includes("text/html") && secFetchDest !== "document") return next();
     if (req.path.startsWith("/uploads")) return next();
+    if (req.path.startsWith("/fortnox")) return next();
     if (path.extname(req.path)) return next();
     return res.sendFile(path.join(FRONTEND_DIST, "index.html"));
   });
@@ -46,6 +66,19 @@ if (HAS_FRONTEND_DIST) {
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("Missing JWT_SECRET in .env");
+
+const FORTNOX_AUTH_URL = process.env.FORTNOX_AUTH_URL || "https://apps.fortnox.se/oauth-v1/auth";
+const FORTNOX_TOKEN_URL = process.env.FORTNOX_TOKEN_URL || "https://apps.fortnox.se/oauth-v1/token";
+const FORTNOX_API_BASE = process.env.FORTNOX_API_BASE || "https://api.fortnox.se/3";
+const FORTNOX_REDIRECT_URI = process.env.FORTNOX_REDIRECT_URI;
+const FORTNOX_SCOPE = process.env.FORTNOX_SCOPE || "";
+const FORTNOX_SUCCESS_REDIRECT = process.env.FORTNOX_SUCCESS_REDIRECT;
+
+console.log("Fortnox config:", {
+  authUrl: FORTNOX_AUTH_URL,
+  redirectUri: FORTNOX_REDIRECT_URI,
+  scope: FORTNOX_SCOPE,
+});
 
 const SUPERADMIN_COMPANY_NAMES = [
   process.env.SUPERADMIN_COMPANY_NAME || "Opero Systems AB",
@@ -62,11 +95,11 @@ function resolveSuperAdminCompanyId(callback) {
   });
 }
 
-const KNOWLEDGE_DIR = path.join(__dirname, "tdok");
+const KNOWLEDGE_ROOT = path.join(__dirname, "tdok");
 const KNOWLEDGE_EXTS = new Set([".txt", ".md", ".markdown"]);
 const MAX_CHUNK_CHARS = 1200;
 const MAX_CONTEXT_CHUNKS = 4;
-let knowledgeCache = { signature: "", chunks: [] };
+const knowledgeCacheByDir = new Map();
 
 function generateCompanyCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
@@ -112,6 +145,147 @@ function requireSuperAdmin(req, res, next) {
   return res.status(403).json({ error: "Super admin required" });
 }
 
+function getFortnoxCredentials() {
+  return {
+    clientId: process.env.FORTNOX_CLIENT_ID || "",
+    clientSecret: process.env.FORTNOX_CLIENT_SECRET || "",
+  };
+}
+
+function buildFortnoxAuthUrl({ clientId, redirectUri, state, scope }) {
+  const url = new URL(FORTNOX_AUTH_URL);
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("state", state);
+  if (scope) url.searchParams.set("scope", scope);
+  return url.toString();
+}
+
+async function requestFortnoxToken({ grantType, code, refreshToken, redirectUri }) {
+  const { clientId, clientSecret } = getFortnoxCredentials();
+  if (!clientId || !clientSecret) {
+    throw new Error("Missing Fortnox client credentials");
+  }
+  const body = new URLSearchParams();
+  body.set("grant_type", grantType);
+  if (grantType === "authorization_code") {
+    body.set("code", code);
+    body.set("redirect_uri", redirectUri);
+  } else if (grantType === "refresh_token") {
+    body.set("refresh_token", refreshToken);
+  }
+  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const headers = {
+    Authorization: `Basic ${auth}`,
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  const response = await fetch(FORTNOX_TOKEN_URL, { method: "POST", headers, body });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.error_description || data.error || "Fortnox token error";
+    throw new Error(message);
+  }
+  return data;
+}
+
+function saveFortnoxTokens(companyId, tokenData, existingRefreshToken = null) {
+  const accessToken = tokenData.access_token || null;
+  const refreshToken = tokenData.refresh_token || existingRefreshToken || null;
+  const tokenType = tokenData.token_type || null;
+  const scope = tokenData.scope || null;
+  const expiresAt = tokenData.expires_in
+    ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+    : null;
+  if (!accessToken) {
+    return Promise.reject(new Error("Missing access_token from Fortnox"));
+  }
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO fortnox_connections
+        (company_id, access_token, refresh_token, token_type, scope, expires_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(company_id) DO UPDATE SET
+        access_token = excluded.access_token,
+        refresh_token = excluded.refresh_token,
+        token_type = excluded.token_type,
+        scope = excluded.scope,
+        expires_at = excluded.expires_at,
+        updated_at = datetime('now')`,
+      [companyId, accessToken, refreshToken, tokenType, scope, expiresAt],
+      (err) => {
+        if (err) return reject(err);
+        resolve({ accessToken, refreshToken, tokenType, scope, expiresAt });
+      }
+    );
+  });
+}
+
+async function getFortnoxAccessToken(companyId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      "SELECT * FROM fortnox_connections WHERE company_id = ?",
+      [companyId],
+      async (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+
+        const expiresAtMs = row.expires_at ? new Date(row.expires_at).getTime() : null;
+        const shouldRefresh = expiresAtMs ? Date.now() > expiresAtMs - 2 * 60 * 1000 : false;
+        if (!shouldRefresh) return resolve(row.access_token);
+        if (!row.refresh_token) return resolve(row.access_token);
+
+        try {
+          const tokenData = await requestFortnoxToken({
+            grantType: "refresh_token",
+            refreshToken: row.refresh_token,
+          });
+          const saved = await saveFortnoxTokens(companyId, tokenData, row.refresh_token);
+          logAudit({
+            req: null,
+            companyId,
+            actorUserId: null,
+            action: "FORTNOX_TOKEN_REFRESH",
+            entityType: "fortnox",
+            entityId: companyId,
+            metadata: { scope: saved.scope },
+            success: true,
+          });
+          return resolve(saved.accessToken);
+        } catch (refreshErr) {
+          console.error("Kunde inte uppdatera Fortnox-token:", refreshErr);
+          return resolve(row.access_token);
+        }
+      }
+    );
+  });
+}
+
+function hasFortnoxConnection(companyId) {
+  return new Promise((resolve) => {
+    db.get(
+      "SELECT access_token FROM fortnox_connections WHERE company_id = ?",
+      [companyId],
+      (err, row) => {
+        if (err) return resolve(false);
+        resolve(!!row?.access_token);
+      }
+    );
+  });
+}
+
+function buildFortnoxRedirectUrl(success) {
+  const base = FORTNOX_SUCCESS_REDIRECT || (process.env.FRONTEND_ORIGIN ? `${process.env.FRONTEND_ORIGIN}/admin/invoice-settings` : "");
+  if (!base) return null;
+  try {
+    const url = new URL(base);
+    url.searchParams.set("fortnox", success ? "connected" : "error");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Company scope:
  * - super_admin kan välja company via query (?company_id=) eller via impersonation-token
@@ -136,6 +310,44 @@ function isAdminRole(req) {
 
 function getAuthUserId(req) {
   return req.user?.user_id ?? req.user?.id ?? null;
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded) {
+    const [first] = String(forwarded).split(",");
+    return first.trim();
+  }
+  return req.socket?.remoteAddress || null;
+}
+
+function logAudit({ req, companyId, actorUserId, action, entityType, entityId, metadata, success }) {
+  if (!action) return;
+  const safeMetadata =
+    metadata == null ? null : typeof metadata === "string" ? metadata : JSON.stringify(metadata);
+  const ip = req ? getClientIp(req) : null;
+  const userAgent = req ? req.headers["user-agent"] || null : null;
+  db.run(
+    `INSERT INTO audit_logs
+      (company_id, actor_user_id, action, entity_type, entity_id, metadata, success, ip, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      companyId ?? null,
+      actorUserId ?? null,
+      action,
+      entityType || null,
+      entityId != null ? String(entityId) : null,
+      safeMetadata,
+      success ? 1 : 0,
+      ip,
+      userAgent
+    ],
+    (err) => {
+      if (err) {
+        console.error("DB-fel vid logAudit:", err);
+      }
+    }
+  );
 }
 
 function postJson(url, headers, body) {
@@ -216,10 +428,36 @@ function chunkText(text) {
   return chunks;
 }
 
-function loadKnowledgeChunks() {
+function getKnowledgeDir(companyId) {
+  if (!companyId) return KNOWLEDGE_ROOT;
+  return path.join(KNOWLEDGE_ROOT, String(companyId));
+}
+
+function ensureDirExists(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    console.warn("Kunde inte skapa katalog:", dirPath, err);
+  }
+}
+
+function sanitizeDocName(name) {
+  const base = path.basename(String(name || ""));
+  const ext = path.extname(base).toLowerCase();
+  if (!base || !KNOWLEDGE_EXTS.has(ext)) return null;
+  return base;
+}
+
+function sanitizeUploadName(name) {
+  const base = path.basename(String(name || ""));
+  if (!base) return null;
+  return base.replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
+function loadKnowledgeChunks(knowledgeDir) {
   let entries = [];
   try {
-    entries = fs.readdirSync(KNOWLEDGE_DIR, { withFileTypes: true });
+    entries = fs.readdirSync(knowledgeDir, { withFileTypes: true });
   } catch (err) {
     return { chunks: [], sources: [] };
   }
@@ -232,7 +470,7 @@ function loadKnowledgeChunks() {
   const signatureParts = [];
   files.forEach((name) => {
     try {
-      const fullPath = path.join(KNOWLEDGE_DIR, name);
+      const fullPath = path.join(knowledgeDir, name);
       const stat = fs.statSync(fullPath);
       signatureParts.push(`${name}:${stat.mtimeMs}:${stat.size}`);
     } catch {
@@ -240,13 +478,14 @@ function loadKnowledgeChunks() {
     }
   });
   const signature = signatureParts.join("|");
-  if (signature && knowledgeCache.signature === signature && knowledgeCache.chunks.length) {
-    return { chunks: knowledgeCache.chunks, sources: files };
+  const cached = knowledgeCacheByDir.get(knowledgeDir);
+  if (signature && cached && cached.signature === signature && cached.chunks.length) {
+    return { chunks: cached.chunks, sources: files };
   }
 
   const chunks = [];
   files.forEach((name) => {
-    const fullPath = path.join(KNOWLEDGE_DIR, name);
+    const fullPath = path.join(knowledgeDir, name);
     try {
       const content = fs.readFileSync(fullPath, "utf8");
       const parts = chunkText(content);
@@ -262,7 +501,7 @@ function loadKnowledgeChunks() {
     }
   });
 
-  knowledgeCache = { signature, chunks };
+  knowledgeCacheByDir.set(knowledgeDir, { signature, chunks });
   return { chunks, sources: files };
 }
 
@@ -363,19 +602,10 @@ function ensureShiftConfigs(companyId, callback) {
 }
 
 function ensureCompensationSettings(companyId, callback) {
-  db.get(
-    "SELECT id FROM compensation_settings WHERE company_id = ?",
-    [companyId],
-    (err, row) => {
-      if (err) return callback(err);
-      if (row) return callback(null);
-
-      db.run(
-        "INSERT INTO compensation_settings (company_id, travel_rate) VALUES (?, ?)",
-        [companyId, DEFAULT_TRAVEL_RATE],
-        callback
-      );
-    }
+  db.run(
+    "INSERT OR IGNORE INTO compensation_settings (company_id, travel_rate) VALUES (?, ?)",
+    [companyId, DEFAULT_TRAVEL_RATE],
+    callback
   );
 }
 
@@ -2045,68 +2275,189 @@ app.post("/login", (req, res) => {
     return res.status(400).json({ error: "E‑post och lösenord krävs." });
   }
 
-  let sql = `SELECT * FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)`;
-  const params = [email];
+  const cleanEmail = String(email || "").trim().toLowerCase();
 
-  if (company_id) {
-    sql += ` AND company_id = ?`;
-    params.push(company_id);
-  }
-
-  db.get(sql, params, async (err, user) => {
-    if (err) {
-      console.error("DB-fel vid login:", err);
-      return res.status(500).json({ error: "Tekniskt fel." });
-    }
-
-    if (!user) {
-      return res.status(400).json({ error: "Fel e‑post eller lösenord." });
-    }
-
-    const ok = await bcrypt.compare(password, user.password);
-    if (!ok) {
-      return res.status(400).json({ error: "Fel e‑post eller lösenord." });
-    }
-
-    const token = jwt.sign(
-      { user_id: user.id, role: user.role, company_id: user.company_id },
-      JWT_SECRET,
-      { expiresIn: "12h" }
-    );
-
-    res.json({
-      message: "Inloggad",
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-        company_id: user.company_id,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        hourly_wage: user.hourly_wage
+  db.all(
+    `SELECT * FROM users WHERE lower(email) = ? AND (is_active IS NULL OR is_active = 1)`,
+    [cleanEmail],
+    async (err, rows) => {
+      const users = rows || [];
+      if (err) {
+        console.error("DB-fel vid login:", err);
+        return res.status(500).json({ error: "Tekniskt fel." });
       }
-    });
-  });
+
+      if (users.length === 0) {
+        logAudit({
+          req,
+          companyId: company_id || null,
+          actorUserId: null,
+          action: "LOGIN_FAILED",
+          entityType: "auth",
+          metadata: { email: cleanEmail, reason: "invalid_credentials" },
+          success: false
+        });
+        return res.status(400).json({ error: "Fel e‑post eller lösenord." });
+      }
+
+      let user = users[0];
+      if (users.length > 1) {
+        if (!company_id) {
+          logAudit({
+            req,
+            companyId: null,
+            actorUserId: null,
+            action: "LOGIN_FAILED",
+            entityType: "auth",
+            metadata: { email: cleanEmail, reason: "multiple_companies" },
+            success: false
+          });
+          return res.status(409).json({ error: "Multiple companies", code: "MULTIPLE_COMPANIES" });
+        }
+        const match = users.find((u) => String(u.company_id) === String(company_id));
+        if (!match) {
+          logAudit({
+            req,
+            companyId: company_id,
+            actorUserId: null,
+            action: "LOGIN_FAILED",
+            entityType: "auth",
+            metadata: { email: cleanEmail, reason: "wrong_company" },
+            success: false
+          });
+          return res.status(403).json({ error: "Wrong company" });
+        }
+        user = match;
+      }
+
+      const ok = await bcrypt.compare(password, user.password);
+      if (!ok) {
+        logAudit({
+          req,
+          companyId: user.company_id,
+          actorUserId: user.id,
+          action: "LOGIN_FAILED",
+          entityType: "auth",
+          metadata: { email: cleanEmail, reason: "invalid_credentials" },
+          success: false
+        });
+        return res.status(400).json({ error: "Fel e‑post eller lösenord." });
+      }
+
+      const token = jwt.sign(
+        { user_id: user.id, role: user.role, company_id: user.company_id },
+        JWT_SECRET,
+        { expiresIn: "12h" }
+      );
+
+      logAudit({
+        req,
+        companyId: user.company_id,
+        actorUserId: user.id,
+        action: "LOGIN_SUCCESS",
+        entityType: "auth",
+        metadata: { email: cleanEmail },
+        success: true
+      });
+      res.json({
+        message: "Inloggad",
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          role: user.role,
+          company_id: user.company_id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          hourly_wage: user.hourly_wage
+        }
+      });
+    }
+  );
 });
 
 // Lovable-compatible auth login endpoint (keeps existing /login)
 app.post("/auth/login", (req, res) => {
   const { email, password, company_id } = req.body || {};
+  const cleanEmail = String(email || "").trim().toLowerCase();
 
-  db.get(
-    `SELECT id, email, password AS password_hash, role, company_id, (first_name || ' ' || last_name) AS full_name FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)`,
-    [email],
-    async (err, user) => {
-      if (err || !user) return res.status(401).json({ error: "Invalid credentials" });
+  db.all(
+    `SELECT id, email, password AS password_hash, role, company_id, (first_name || ' ' || last_name) AS full_name
+     FROM users
+     WHERE lower(email) = ? AND (is_active IS NULL OR is_active = 1)`,
+    [cleanEmail],
+    async (err, rows) => {
+      const users = rows || [];
+      if (err || users.length === 0) {
+        logAudit({
+          req,
+          companyId: company_id || null,
+          actorUserId: null,
+          action: "LOGIN_FAILED",
+          entityType: "auth",
+          metadata: { email: cleanEmail, reason: "invalid_credentials" },
+          success: false
+        });
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      let user = users[0];
+      if (users.length > 1) {
+        if (!company_id) {
+          logAudit({
+            req,
+            companyId: null,
+            actorUserId: null,
+            action: "LOGIN_FAILED",
+            entityType: "auth",
+            metadata: { email: cleanEmail, reason: "multiple_companies" },
+            success: false
+          });
+          return res.status(409).json({ error: "Multiple companies", code: "MULTIPLE_COMPANIES" });
+        }
+        const match = users.find((u) => String(u.company_id) === String(company_id));
+        if (!match) {
+          logAudit({
+            req,
+            companyId: company_id,
+            actorUserId: null,
+            action: "LOGIN_FAILED",
+            entityType: "auth",
+            metadata: { email: cleanEmail, reason: "wrong_company" },
+            success: false
+          });
+          return res.status(403).json({ error: "Wrong company" });
+        }
+        user = match;
+      }
 
       const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+      if (!ok) {
+        logAudit({
+          req,
+          companyId: user.company_id,
+          actorUserId: user.id,
+          action: "LOGIN_FAILED",
+          entityType: "auth",
+          metadata: { email: cleanEmail, reason: "invalid_credentials" },
+          success: false
+        });
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
 
       const role = (user.role || "").toLowerCase();
       const isSuperAdmin = role === "super_admin";
       if (company_id && String(company_id) !== String(user.company_id) && !isSuperAdmin) {
+        logAudit({
+          req,
+          companyId: user.company_id,
+          actorUserId: user.id,
+          action: "LOGIN_FAILED",
+          entityType: "auth",
+          metadata: { email: cleanEmail, reason: "wrong_company" },
+          success: false
+        });
         return res.status(403).json({ error: "Wrong company" });
       }
 
@@ -2117,6 +2468,15 @@ app.post("/auth/login", (req, res) => {
           { expiresIn: "12h" }
         );
 
+        logAudit({
+          req,
+          companyId,
+          actorUserId: user.id,
+          action: "LOGIN_SUCCESS",
+          entityType: "auth",
+          metadata: { email: cleanEmail },
+          success: true
+        });
         res.json({
           access_token: token,
           user: {
@@ -2144,6 +2504,28 @@ app.post("/auth/login", (req, res) => {
   );
 });
 
+// Lookup company options for a given email (used by login UI)
+app.post("/auth/company-options", (req, res) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  if (!email) return res.json({ companies: [] });
+
+  db.all(
+    `SELECT DISTINCT c.id, c.name, c.code, c.logo_url
+     FROM users u
+     JOIN companies c ON c.id = u.company_id
+     WHERE lower(u.email) = ? AND (u.is_active IS NULL OR u.is_active = 1)
+     ORDER BY c.name`,
+    [email],
+    (err, rows) => {
+      if (err) {
+        console.error("DB-fel vid POST /auth/company-options:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.json({ companies: rows || [] });
+    }
+  );
+});
+
 // Superadmin impersonation endpoints for Lovable
 app.post("/superadmin/impersonate", requireAuth, requireSuperAdmin, (req, res) => {
   const { company_id, user_id } = req.body || {};
@@ -2167,6 +2549,16 @@ app.post("/superadmin/impersonate", requireAuth, requireSuperAdmin, (req, res) =
           { expiresIn: "2h" }
         );
 
+        logAudit({
+          req,
+          companyId: company_id,
+          actorUserId: getAuthUserId(req),
+          action: "IMPERSONATE_START",
+          entityType: "user",
+          entityId: u.id,
+          metadata: { target_user_id: u.id, target_company_id: company_id },
+          success: true
+        });
         return res.json({ access_token: token });
       }
     );
@@ -2177,6 +2569,16 @@ app.post("/superadmin/impersonate", requireAuth, requireSuperAdmin, (req, res) =
       JWT_SECRET,
       { expiresIn: "2h" }
     );
+    logAudit({
+      req,
+      companyId: company_id,
+      actorUserId: getAuthUserId(req),
+      action: "IMPERSONATE_START",
+      entityType: "company",
+      entityId: company_id,
+      metadata: { target_company_id: company_id },
+      success: true
+    });
     return res.json({ access_token: token });
   }
 });
@@ -2231,6 +2633,16 @@ app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, r
         JWT_SECRET,
         { expiresIn: "12h" }
       );
+      logAudit({
+        req,
+        companyId: homeCompanyId,
+        actorUserId: superAdminId,
+        action: "IMPERSONATE_STOP",
+        entityType: "company",
+        entityId: homeCompanyId,
+        metadata: { company_id: homeCompanyId },
+        success: true
+      });
       return res.json({ access_token: token });
     }
 
@@ -2244,6 +2656,16 @@ app.post("/superadmin/stop-impersonate", requireAuth, requireSuperAdmin, (req, r
         JWT_SECRET,
         { expiresIn: "12h" }
       );
+      logAudit({
+        req,
+        companyId: row.company_id,
+        actorUserId: superAdminId,
+        action: "IMPERSONATE_STOP",
+        entityType: "company",
+        entityId: row.company_id,
+        metadata: { company_id: row.company_id },
+        success: true
+      });
       return res.json({ access_token: token });
     });
   });
@@ -2365,6 +2787,17 @@ app.post("/admin/users", requireAuth, requireAdmin, (req, res) => {
         return res.status(500).json({ error: "Kunde inte skapa användare." });
       }
 
+      logAudit({
+        req,
+        companyId: targetCompanyId || null,
+        actorUserId: getAuthUserId(req),
+        action: "USER_CREATED",
+        entityType: "user",
+        entityId: this.lastID,
+        metadata: { email: cleanEmail, role: cleanRole },
+        success: true
+      });
+
       res.status(201).json({
         id: this.lastID,
         username,
@@ -2410,54 +2843,66 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
 
   const fields = [];
   const params = [];
+  const changedFields = [];
 
   if (first_name !== undefined) {
     fields.push("first_name = ?");
     params.push(first_name.trim());
+    changedFields.push("first_name");
   }
   if (last_name !== undefined) {
     fields.push("last_name = ?");
     params.push(last_name.trim());
+    changedFields.push("last_name");
   }
   if (phone !== undefined) {
     fields.push("phone = ?");
     params.push(String(phone || "").trim());
+    changedFields.push("phone");
   }
   if (role !== undefined) {
     fields.push("role = ?");
     params.push(String(role).toLowerCase());
+    changedFields.push("role");
   }
   if (hourly_wage !== undefined) {
     fields.push("hourly_wage = ?");
     params.push(
       hourly_wage !== null && hourly_wage !== "" ? Number(hourly_wage) : null
     );
+    changedFields.push("hourly_wage");
   }
   if (monthly_salary !== undefined) {
     fields.push("monthly_salary = ?");
     params.push(
       monthly_salary !== null && monthly_salary !== "" ? Number(monthly_salary) : null
     );
+    changedFields.push("monthly_salary");
   }
   if (emergency_contact !== undefined) {
     fields.push("emergency_contact = ?");
     params.push(emergency_contact ? String(emergency_contact).trim() : null);
+    changedFields.push("emergency_contact");
   }
   if (employee_type !== undefined) {
     fields.push("employee_type = ?");
     params.push(employee_type ? String(employee_type).trim() : null);
+    changedFields.push("employee_type");
   }
   if (employee_number !== undefined) {
     fields.push("employee_number = ?");
     params.push(employee_number ? String(employee_number).trim() : null);
+    changedFields.push("employee_number");
   }
   if (tax_table !== undefined) {
     fields.push("tax_table = ?");
     params.push(tax_table !== null && tax_table !== "" ? Number(tax_table) : null);
+    changedFields.push("tax_table");
   }
   if (password !== undefined) {
     fields.push("password = ?");
     params.push(password ? bcrypt.hashSync(password, 10) : null);
+    changedFields.push("password");
   }
 
   if (!fields.length) {
@@ -2475,6 +2920,8 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
 
     const actorRole = (req.user.role || "").toLowerCase();
     const scopedCompany = getScopedCompanyId(req);
+    const prevRole = String(row.role || "").toLowerCase();
+    const nextRole = role !== undefined ? String(role || "").toLowerCase() : prevRole;
     if (actorRole !== "super_admin" && String(row.company_id) !== String(scopedCompany)) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -2482,7 +2929,6 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
       return res.status(403).json({ error: "Endast superadmin kan ändra superadmin." });
     }
     if (actorRole !== "super_admin" && role !== undefined) {
-      const nextRole = String(role || "").toLowerCase();
       if (nextRole === "super_admin") {
         return res.status(403).json({ error: "Endast superadmin kan ändra roll till superadmin." });
       }
@@ -2497,6 +2943,25 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
       if (this.changes === 0) {
         return res.status(404).json({ error: "Användaren hittades inte." });
       }
+      const action =
+        prevRole !== nextRole ? "ROLE_CHANGED" : "USER_UPDATED";
+      const metadata = {
+        changed_fields: changedFields,
+        from_role: prevRole !== nextRole ? prevRole : undefined,
+        to_role: prevRole !== nextRole ? nextRole : undefined
+      };
+
+      logAudit({
+        req,
+        companyId: row.company_id,
+        actorUserId: getAuthUserId(req),
+        action,
+        entityType: "user",
+        entityId: id,
+        metadata,
+        success: true
+      });
+
       res.json({ success: true });
     });
   });
@@ -2539,6 +3004,16 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
           return res.status(404).json({ error: "Användaren hittades inte." });
         }
 
+        logAudit({
+          req,
+          companyId: row.company_id,
+          actorUserId: getAuthUserId(req),
+          action: "USER_DEACTIVATED",
+          entityType: "user",
+          entityId: id,
+          metadata: { role: row.role },
+          success: true
+        });
         res.json({ success: true });
       }
     );
@@ -2579,6 +3054,16 @@ app.post("/admin/users/:id/reactivate", requireAuth, requireAdmin, (req, res) =>
       if (this.changes === 0) {
         return res.status(404).json({ error: "Användaren hittades inte." });
       }
+      logAudit({
+        req,
+        companyId: row.company_id,
+        actorUserId: getAuthUserId(req),
+        action: "USER_REACTIVATED",
+        entityType: "user",
+        entityId: id,
+        metadata: { role: row.role },
+        success: true
+      });
       res.json({ success: true });
     });
   });
@@ -2612,9 +3097,706 @@ app.post("/admin/users/:id/reset-password", requireAuth, requireAdmin, (req, res
         console.error("DB-fel vid reset password:", uErr);
         return res.status(500).json({ error: "DB error" });
       }
+      logAudit({
+        req,
+        companyId: row.company_id,
+        actorUserId: getAuthUserId(req),
+        action: "USER_PASSWORD_RESET",
+        entityType: "user",
+        entityId: id,
+        metadata: { role: row.role },
+        success: true
+      });
       res.json({ success: true });
     });
   });
+});
+
+// ======================
+//   ADMIN: AUDIT LOGS
+// ======================
+app.get("/admin/audit-logs", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+
+  if (!targetCompanyId && !allowAll) {
+    return res.status(400).json({ error: "Company not found" });
+  }
+
+  const { from, to, user_id, action, entity_type, success, limit, offset } = req.query || {};
+  const where = [];
+  const params = [];
+
+  if (!allowAll) {
+    where.push("al.company_id = ?");
+    params.push(targetCompanyId);
+  } else if (req.query.company_id) {
+    where.push("al.company_id = ?");
+    params.push(targetCompanyId);
+  }
+
+  if (from) {
+    where.push("datetime(al.created_at) >= datetime(?)");
+    params.push(from);
+  }
+  if (to) {
+    where.push("datetime(al.created_at) <= datetime(?)");
+    params.push(to);
+  }
+  if (user_id) {
+    where.push("al.actor_user_id = ?");
+    params.push(user_id);
+  }
+  if (action) {
+    where.push("al.action = ?");
+    params.push(action);
+  }
+  if (entity_type) {
+    where.push("al.entity_type = ?");
+    params.push(entity_type);
+  }
+  if (success !== undefined && success !== null && success !== "") {
+    const successValue = String(success).toLowerCase();
+    const boolValue = successValue === "1" || successValue === "true" || successValue === "yes";
+    where.push("al.success = ?");
+    params.push(boolValue ? 1 : 0);
+  }
+
+  const limitValue = Math.min(1000, Math.max(1, Number(limit) || 200));
+  const offsetValue = Math.max(0, Number(offset) || 0);
+
+  const sql = `
+    SELECT
+      al.*,
+      u.email AS actor_email,
+      (u.first_name || ' ' || u.last_name) AS actor_name
+    FROM audit_logs al
+    LEFT JOIN users u ON u.id = al.actor_user_id
+    WHERE ${where.length ? where.join(" AND ") : "1=1"}
+    ORDER BY datetime(al.created_at) DESC
+    LIMIT ? OFFSET ?
+  `;
+  params.push(limitValue, offsetValue);
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /admin/audit-logs:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json(rows || []);
+  });
+});
+
+// ======================
+//   ADMIN: CERTIFICATES
+// ======================
+app.get("/admin/certificates", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const { user_id } = req.query || {};
+  const where = [];
+  const params = [];
+
+  if (!allowAll) {
+    where.push("ec.company_id = ?");
+    params.push(companyId);
+  } else if (req.query.company_id) {
+    where.push("ec.company_id = ?");
+    params.push(req.query.company_id);
+  }
+
+  if (user_id) {
+    where.push("ec.user_id = ?");
+    params.push(user_id);
+  }
+
+  const sql = `
+    SELECT
+      ec.*,
+      u.email AS user_email,
+      u.employee_number AS employee_number,
+      (u.first_name || ' ' || u.last_name) AS user_name
+    FROM employee_certificates ec
+    JOIN users u ON u.id = ec.user_id
+    WHERE ${where.length ? where.join(" AND ") : "1=1"}
+    ORDER BY datetime(ec.valid_to) ASC, datetime(ec.created_at) DESC
+  `;
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /admin/certificates:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json(rows || []);
+  });
+});
+
+app.post("/admin/certificates", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const {
+    user_id,
+    title,
+    issuer = null,
+    certificate_number = null,
+    valid_from = null,
+    valid_to = null,
+    notes = null,
+    filename,
+    content_base64,
+    company_id
+  } = req.body || {};
+
+  const targetCompanyId = allowAll && company_id ? company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "Company not found" });
+  if (!user_id || !title) return res.status(400).json({ error: "user_id and title required" });
+
+  db.get("SELECT company_id FROM users WHERE id = ?", [user_id], (uErr, uRow) => {
+    if (uErr || !uRow) return res.status(400).json({ error: "Invalid user_id" });
+    if (String(uRow.company_id) !== String(targetCompanyId)) {
+      return res.status(403).json({ error: "User not in company" });
+    }
+
+    let fileUrl = null;
+    if (filename && content_base64) {
+      const safeName = sanitizeUploadName(filename);
+      if (!safeName) return res.status(400).json({ error: "Invalid filename" });
+      const dir = path.join(__dirname, "uploads", "certificates", String(targetCompanyId));
+      ensureDirExists(dir);
+      const stampedName = `${Date.now()}-${safeName}`;
+      const filePath = path.join(dir, stampedName);
+      const data = String(content_base64).split(",").pop();
+      fs.writeFileSync(filePath, data, { encoding: "base64" });
+      fileUrl = `/uploads/certificates/${targetCompanyId}/${stampedName}`;
+    }
+
+    db.run(
+      `INSERT INTO employee_certificates
+        (company_id, user_id, title, issuer, certificate_number, valid_from, valid_to, notes, file_url, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [
+        targetCompanyId,
+        user_id,
+        String(title).trim(),
+        issuer ? String(issuer).trim() : null,
+        certificate_number ? String(certificate_number).trim() : null,
+        valid_from || null,
+        valid_to || null,
+        notes ? String(notes).trim() : null,
+        fileUrl
+      ],
+      function (err) {
+        if (err) {
+          console.error("DB-fel vid POST /admin/certificates:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        logAudit({
+          req,
+          companyId: targetCompanyId,
+          actorUserId: getAuthUserId(req),
+          action: "CERT_CREATED",
+          entityType: "certificate",
+          entityId: this.lastID,
+          metadata: { user_id, title: String(title).trim() },
+          success: true
+        });
+        res.status(201).json({ id: this.lastID, file_url: fileUrl });
+      }
+    );
+  });
+});
+
+app.put("/admin/certificates/:id", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const { id } = req.params;
+  const {
+    title,
+    issuer,
+    certificate_number,
+    valid_from,
+    valid_to,
+    notes,
+    filename,
+    content_base64,
+    company_id
+  } = req.body || {};
+  const targetCompanyId = allowAll && company_id ? company_id : companyId;
+
+  db.get(
+    "SELECT * FROM employee_certificates WHERE id = ?",
+    [id],
+    (err, row) => {
+      if (err || !row) return res.status(404).json({ error: "Not found" });
+      if (!allowAll && String(row.company_id) !== String(targetCompanyId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      let fileUrl = row.file_url || null;
+      if (filename && content_base64) {
+        const safeName = sanitizeUploadName(filename);
+        if (!safeName) return res.status(400).json({ error: "Invalid filename" });
+        const dir = path.join(__dirname, "uploads", "certificates", String(targetCompanyId));
+        ensureDirExists(dir);
+        const stampedName = `${Date.now()}-${safeName}`;
+        const filePath = path.join(dir, stampedName);
+        const data = String(content_base64).split(",").pop();
+        fs.writeFileSync(filePath, data, { encoding: "base64" });
+        fileUrl = `/uploads/certificates/${targetCompanyId}/${stampedName}`;
+      }
+
+      db.run(
+        `UPDATE employee_certificates SET
+          title = COALESCE(?, title),
+          issuer = COALESCE(?, issuer),
+          certificate_number = COALESCE(?, certificate_number),
+          valid_from = COALESCE(?, valid_from),
+          valid_to = COALESCE(?, valid_to),
+          notes = COALESCE(?, notes),
+          file_url = COALESCE(?, file_url),
+          updated_at = datetime('now')
+         WHERE id = ?`,
+        [
+          title !== undefined ? String(title).trim() : null,
+          issuer !== undefined ? (issuer ? String(issuer).trim() : null) : null,
+          certificate_number !== undefined ? (certificate_number ? String(certificate_number).trim() : null) : null,
+          valid_from !== undefined ? valid_from || null : null,
+          valid_to !== undefined ? valid_to || null : null,
+          notes !== undefined ? (notes ? String(notes).trim() : null) : null,
+          fileUrl,
+          id
+        ],
+        function (uErr) {
+          if (uErr) {
+            console.error("DB-fel vid PUT /admin/certificates:", uErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          logAudit({
+            req,
+            companyId: row.company_id,
+            actorUserId: getAuthUserId(req),
+            action: "CERT_UPDATED",
+            entityType: "certificate",
+            entityId: id,
+            metadata: { title: title || row.title },
+            success: true
+          });
+          res.json({ success: true, file_url: fileUrl });
+        }
+      );
+    }
+  );
+});
+
+app.delete("/admin/certificates/:id", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const { id } = req.params;
+  db.get("SELECT * FROM employee_certificates WHERE id = ?", [id], (err, row) => {
+    if (err || !row) return res.status(404).json({ error: "Not found" });
+    if (!allowAll && String(row.company_id) !== String(companyId)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    db.run("DELETE FROM employee_certificates WHERE id = ?", [id], function (dErr) {
+      if (dErr) {
+        console.error("DB-fel vid DELETE /admin/certificates:", dErr);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (row.file_url) {
+        const normalized = String(row.file_url).replace(/^\/+/, "");
+        const filePath = path.join(__dirname, normalized);
+        try {
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } catch (e) {
+          console.warn("Kunde inte ta bort fil:", filePath, e);
+        }
+      }
+      logAudit({
+        req,
+        companyId: row.company_id,
+        actorUserId: getAuthUserId(req),
+        action: "CERT_DELETED",
+        entityType: "certificate",
+        entityId: id,
+        metadata: { title: row.title },
+        success: true
+      });
+      res.json({ success: true });
+    });
+  });
+});
+
+app.get("/admin/certificates/export", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : companyId;
+
+  const sql = `
+    SELECT
+      ec.*,
+      u.email AS user_email,
+      u.employee_number AS employee_number,
+      (u.first_name || ' ' || u.last_name) AS user_name
+    FROM employee_certificates ec
+    JOIN users u ON u.id = ec.user_id
+    WHERE ec.company_id = ?
+    ORDER BY u.last_name, u.first_name, datetime(ec.valid_to)
+  `;
+
+  db.all(sql, [targetCompanyId], (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /admin/certificates/export:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    const escapeCsv = (value) => {
+      const str = value == null ? "" : String(value);
+      if (str.includes(",") || str.includes("\"") || str.includes("\n")) {
+        return `"${str.replace(/\"/g, "\"\"")}"`;
+      }
+      return str;
+    };
+
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = [
+      [
+        "Anställd",
+        "E-post",
+        "Anst.nr",
+        "Intyg",
+        "Utfärdare",
+        "Intygsnummer",
+        "Giltig från",
+        "Giltig till",
+        "Status",
+        "Notering"
+      ].map(escapeCsv).join(",")
+    ];
+
+    (rows || []).forEach((row) => {
+      const validTo = row.valid_to || "";
+      const status = validTo && validTo < today ? "Utgånget" : "Giltigt";
+      lines.push(
+        [
+          row.user_name || "",
+          row.user_email || "",
+          row.employee_number || "",
+          row.title || "",
+          row.issuer || "",
+          row.certificate_number || "",
+          row.valid_from || "",
+          row.valid_to || "",
+          status,
+          row.notes || ""
+        ].map(escapeCsv).join(",")
+      );
+    });
+
+    const csv = lines.join("\n");
+    const filename = `kompetensmatris-${targetCompanyId || "company"}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  });
+});
+
+// --- Fortnox OAuth integration ---
+app.get("/admin/fortnox/status", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "Company not found" });
+
+  db.get(
+    "SELECT scope, expires_at, updated_at FROM fortnox_connections WHERE company_id = ?",
+    [targetCompanyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid GET /admin/fortnox/status:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.json({ connected: false });
+      res.json({
+        connected: true,
+        scope: row.scope || null,
+        expires_at: row.expires_at || null,
+        updated_at: row.updated_at || null,
+      });
+    }
+  );
+});
+
+app.post("/admin/fortnox/connect", requireAuth, requireAdmin, (req, res) => {
+  const { clientId } = getFortnoxCredentials();
+  if (!clientId || !FORTNOX_REDIRECT_URI) {
+    return res.status(500).json({ error: "Fortnox OAuth not configured" });
+  }
+
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "Company not found" });
+
+  const state = jwt.sign(
+    { company_id: String(targetCompanyId), actor_user_id: getAuthUserId(req) },
+    JWT_SECRET,
+    { expiresIn: "10m" }
+  );
+  const authUrl = buildFortnoxAuthUrl({
+    clientId,
+    redirectUri: FORTNOX_REDIRECT_URI,
+    state,
+    scope: FORTNOX_SCOPE,
+  });
+
+  console.log('Built Fortnox auth_url, scope=', FORTNOX_SCOPE, 'auth_url=', authUrl);
+  res.json({ auth_url: authUrl });
+});
+
+app.post("/admin/fortnox/disconnect", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  if (!companyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "Company not found" });
+
+  db.run(
+    "DELETE FROM fortnox_connections WHERE company_id = ?",
+    [targetCompanyId],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid POST /admin/fortnox/disconnect:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      logAudit({
+        req,
+        companyId: targetCompanyId,
+        actorUserId: getAuthUserId(req),
+        action: "FORTNOX_DISCONNECTED",
+        entityType: "fortnox",
+        entityId: targetCompanyId,
+        success: true,
+      });
+      res.json({ success: true });
+    }
+  );
+});
+
+// Push payroll XML to Fortnox (store and optionally forward using saved connection)
+app.post("/admin/fortnox/push_payroll", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { xml, filename, company_id } = req.body || {};
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    if (!xml || typeof xml !== "string") return res.status(400).json({ error: "xml required" });
+
+    // Ensure uploads dir
+    const uploadsDir = path.join(__dirname, "uploads", "fortnox_payrolls");
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const safeFilename = (filename || `payroll_${Date.now()}.xml`).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = path.join(uploadsDir, safeFilename);
+    fs.writeFileSync(filePath, xml, "utf8");
+
+    // Log export in DB
+    db.run(
+      `INSERT INTO fortnox_export_logs
+        (company_id, period_start, period_end, employee_count, entry_count, exported_by, filename)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [targetCompanyId, null, null, null, null, getAuthUserId(req), safeFilename],
+      function (err) {
+        if (err) console.error("DB-fel vid POST /fortnox_export_logs (push_payroll):", err);
+      }
+    );
+
+    // Try to forward to Fortnox if we have an access token
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.json({ success: true, stored: true, forwarded: false, message: "Saved locally; no Fortnox token available." });
+    }
+
+    // Forward to Fortnox - POST XML to Fortnox API (endpoint may vary)
+    const fortnoxUrl = `${FORTNOX_API_BASE}/paxml`;
+    try {
+      const response = await fetch(fortnoxUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/xml",
+        },
+        body: xml,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        console.error("Fortnox push failed:", response.status, text);
+        return res.status(502).json({ success: false, forwarded: false, status: response.status, body: text });
+      }
+      return res.json({ success: true, stored: true, forwarded: true, body: text });
+    } catch (err) {
+      console.error("Error forwarding to Fortnox:", err);
+      return res.status(500).json({ success: false, forwarded: false, error: err?.message || String(err) });
+    }
+  } catch (err) {
+    console.error("Error in /admin/fortnox/push_payroll:", err);
+    return res.status(500).json({ error: err?.message || "Server error" });
+  }
+});
+
+// Push invoice file to Fortnox (store and optionally forward using saved connection)
+app.post("/admin/fortnox/push_invoice", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { csv, filename, company_id } = req.body || {};
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    if (!csv || typeof csv !== "string") return res.status(400).json({ error: "csv required" });
+
+    // Ensure uploads dir
+    const uploadsDir = path.join(__dirname, "uploads", "fortnox_invoices");
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const safeFilename = (filename || `invoice_${Date.now()}.csv`).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = path.join(uploadsDir, safeFilename);
+    fs.writeFileSync(filePath, csv, "utf8");
+
+    // Log export in DB
+    db.run(
+      `INSERT INTO fortnox_export_logs
+        (company_id, period_start, period_end, employee_count, entry_count, exported_by, filename)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [targetCompanyId, null, null, null, null, getAuthUserId(req), safeFilename],
+      function (err) {
+        if (err) console.error("DB-fel vid POST /fortnox_export_logs (push_invoice):", err);
+      }
+    );
+
+    // Try to forward to Fortnox if we have an access token
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.json({ success: true, stored: true, forwarded: false, message: "Saved locally; no Fortnox token available." });
+    }
+
+    // Forward to Fortnox - many integrations accept CSV import endpoints; we attempt to POST to /invoices
+    const fortnoxUrl = `${FORTNOX_API_BASE}/invoices`;
+    try {
+      const response = await fetch(fortnoxUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "text/csv",
+        },
+        body: csv,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        console.error("Fortnox invoice push failed:", response.status, text);
+        return res.status(502).json({ success: false, forwarded: false, status: response.status, body: text });
+      }
+      return res.json({ success: true, stored: true, forwarded: true, body: text });
+    } catch (err) {
+      console.error("Error forwarding invoice to Fortnox:", err);
+      return res.status(500).json({ success: false, forwarded: false, error: err?.message || String(err) });
+    }
+  } catch (err) {
+    console.error("Error in /admin/fortnox/push_invoice:", err);
+    return res.status(500).json({ error: err?.message || "Server error" });
+  }
+});
+
+app.get("/fortnox/callback", async (req, res) => {
+  const { code, state, error } = req.query || {};
+  console.log('Incoming Fortnox callback, query=', req.query);
+  if (error) {
+    const redirectUrl = buildFortnoxRedirectUrl(false);
+    if (redirectUrl) return res.redirect(redirectUrl);
+    return res.status(400).send("Fortnox authorization failed.");
+  }
+  if (!code || !state) {
+    return res.status(400).send("Missing Fortnox authorization data.");
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(String(state), JWT_SECRET);
+  } catch {
+    return res.status(400).send("Invalid Fortnox state.");
+  }
+
+  const companyId = decoded?.company_id;
+  const actorUserId = decoded?.actor_user_id || null;
+  if (!companyId) return res.status(400).send("Missing company for Fortnox callback.");
+  if (!FORTNOX_REDIRECT_URI) return res.status(500).send("Fortnox redirect URI not configured.");
+
+  try {
+    const tokenData = await requestFortnoxToken({
+      grantType: "authorization_code",
+      code: String(code),
+      redirectUri: FORTNOX_REDIRECT_URI,
+    });
+    await saveFortnoxTokens(companyId, tokenData);
+    logAudit({
+      req,
+      companyId,
+      actorUserId,
+      action: "FORTNOX_CONNECTED",
+      entityType: "fortnox",
+      entityId: companyId,
+      metadata: { scope: tokenData.scope || null },
+      success: true,
+    });
+
+    const redirectUrl = buildFortnoxRedirectUrl(true);
+    if (redirectUrl) return res.redirect(redirectUrl);
+    return res.send("Fortnox connected.");
+  } catch (err) {
+    const errorMessage = err?.message || "Fortnox connection failed";
+    console.error("Fortnox callback error:", err);
+    const alreadyConnected = await hasFortnoxConnection(companyId);
+    if (alreadyConnected) {
+      logAudit({
+        req,
+        companyId,
+        actorUserId,
+        action: "FORTNOX_CONNECTED",
+        entityType: "fortnox",
+        entityId: companyId,
+        metadata: { warning: errorMessage, already_connected: true },
+        success: true,
+      });
+      const redirectUrl = buildFortnoxRedirectUrl(true);
+      if (redirectUrl) return res.redirect(redirectUrl);
+      return res.status(200).send("Redan kopplad.");
+    }
+    logAudit({
+      req,
+      companyId,
+      actorUserId,
+      action: "FORTNOX_CONNECTED",
+      entityType: "fortnox",
+      entityId: companyId,
+      metadata: { error: errorMessage },
+      success: false,
+    });
+    const redirectUrl = buildFortnoxRedirectUrl(false);
+    if (redirectUrl) return res.redirect(redirectUrl);
+    return res.status(500).send("Fortnox connection failed.");
+  }
 });
 
 // Kontaktlista: alla användare i företag (ingen admin-krav, bara auth och tenant-scope)
@@ -2770,7 +3952,9 @@ app.post("/help/ai", requireAuth, async (req, res) => {
   const question = String(req.body?.question || "").trim();
   if (!question) return res.status(400).json({ error: "question required" });
 
-  const { chunks, sources } = loadKnowledgeChunks();
+  const companyId = getScopedCompanyId(req);
+  const knowledgeDir = getKnowledgeDir(companyId);
+  const { chunks, sources } = loadKnowledgeChunks(knowledgeDir);
   const selected = selectRelevantChunks(question, chunks);
   if (!selected.length) {
     return res.json({
@@ -2807,6 +3991,190 @@ app.post("/help/ai", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("AI request failed:", err);
     res.status(500).json({ error: "AI request failed" });
+  }
+});
+
+// ======================
+//   ADMIN: TDOK DOCUMENTS
+// ======================
+app.get("/admin/tdok-docs", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+  if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const knowledgeDir = getKnowledgeDir(targetCompanyId);
+  ensureDirExists(knowledgeDir);
+
+  let entries = [];
+  try {
+    entries = fs.readdirSync(knowledgeDir, { withFileTypes: true });
+  } catch (err) {
+    return res.json([]);
+  }
+
+  const docs = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => KNOWLEDGE_EXTS.has(path.extname(name).toLowerCase()))
+    .map((name) => {
+      const fullPath = path.join(knowledgeDir, name);
+      let stat = null;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        stat = null;
+      }
+      return {
+        name,
+        size: stat ? stat.size : 0,
+        updated_at: stat ? new Date(stat.mtimeMs).toISOString() : null
+      };
+    })
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  res.json(docs);
+});
+
+app.get("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+  if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const fileName = sanitizeDocName(req.params.name);
+  if (!fileName) return res.status(400).json({ error: "Invalid filename" });
+
+  const knowledgeDir = getKnowledgeDir(targetCompanyId);
+  const fullPath = path.join(knowledgeDir, fileName);
+  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "Not found" });
+
+  try {
+    const content = fs.readFileSync(fullPath, "utf8");
+    res.json({ name: fileName, content });
+  } catch (err) {
+    console.error("Kunde inte läsa TDOK-dokument:", err);
+    res.status(500).json({ error: "Could not read document" });
+  }
+});
+
+app.post("/admin/tdok-docs", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+  if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const { name, content, overwrite } = req.body || {};
+  const fileName = sanitizeDocName(name);
+  if (!fileName) return res.status(400).json({ error: "Invalid filename" });
+
+  const knowledgeDir = getKnowledgeDir(targetCompanyId);
+  ensureDirExists(knowledgeDir);
+  const fullPath = path.join(knowledgeDir, fileName);
+
+  if (!overwrite && fs.existsSync(fullPath)) {
+    return res.status(409).json({ error: "File already exists" });
+  }
+
+  try {
+    fs.writeFileSync(fullPath, String(content || ""), "utf8");
+    logAudit({
+      req,
+      companyId: targetCompanyId,
+      actorUserId: getAuthUserId(req),
+      action: "TDOK_DOC_CREATED",
+      entityType: "tdok_doc",
+      entityId: fileName,
+      metadata: { name: fileName },
+      success: true
+    });
+    res.status(201).json({ name: fileName });
+  } catch (err) {
+    console.error("Kunde inte spara TDOK-dokument:", err);
+    res.status(500).json({ error: "Could not save document" });
+  }
+});
+
+app.put("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+  if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const currentName = sanitizeDocName(req.params.name);
+  if (!currentName) return res.status(400).json({ error: "Invalid filename" });
+  const { content, new_name } = req.body || {};
+  const nextName = new_name ? sanitizeDocName(new_name) : currentName;
+  if (!nextName) return res.status(400).json({ error: "Invalid filename" });
+
+  const knowledgeDir = getKnowledgeDir(targetCompanyId);
+  ensureDirExists(knowledgeDir);
+  const currentPath = path.join(knowledgeDir, currentName);
+  if (!fs.existsSync(currentPath)) return res.status(404).json({ error: "Not found" });
+
+  const nextPath = path.join(knowledgeDir, nextName);
+  if (nextName !== currentName && fs.existsSync(nextPath)) {
+    return res.status(409).json({ error: "File already exists" });
+  }
+
+  try {
+    if (nextName !== currentName) {
+      fs.renameSync(currentPath, nextPath);
+    }
+    if (content !== undefined) {
+      fs.writeFileSync(nextPath, String(content || ""), "utf8");
+    }
+    logAudit({
+      req,
+      companyId: targetCompanyId,
+      actorUserId: getAuthUserId(req),
+      action: "TDOK_DOC_UPDATED",
+      entityType: "tdok_doc",
+      entityId: nextName,
+      metadata: { name: nextName, renamed: nextName !== currentName },
+      success: true
+    });
+    res.json({ name: nextName });
+  } catch (err) {
+    console.error("Kunde inte uppdatera TDOK-dokument:", err);
+    res.status(500).json({ error: "Could not update document" });
+  }
+});
+
+app.delete("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+  if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const fileName = sanitizeDocName(req.params.name);
+  if (!fileName) return res.status(400).json({ error: "Invalid filename" });
+
+  const knowledgeDir = getKnowledgeDir(targetCompanyId);
+  const fullPath = path.join(knowledgeDir, fileName);
+  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "Not found" });
+
+  try {
+    fs.unlinkSync(fullPath);
+    logAudit({
+      req,
+      companyId: targetCompanyId,
+      actorUserId: getAuthUserId(req),
+      action: "TDOK_DOC_DELETED",
+      entityType: "tdok_doc",
+      entityId: fileName,
+      metadata: { name: fileName },
+      success: true
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Kunde inte radera TDOK-dokument:", err);
+    res.status(500).json({ error: "Could not delete document" });
   }
 });
 
@@ -3262,6 +4630,16 @@ app.patch("/admin/ob-settings/:id", requireAuth, requireAdmin, (req, res) => {
         [id, companyId],
         (e2, row) => {
           if (e2 || !row) return res.status(404).json({ error: "Not found" });
+          logAudit({
+            req,
+            companyId,
+            actorUserId: getAuthUserId(req),
+            action: "SETTINGS_UPDATED",
+            entityType: "ob_settings",
+            entityId: id,
+            metadata: { multiplier, start_hour, end_hour },
+            success: true
+          });
           res.json(row);
         }
       );
@@ -3326,6 +4704,16 @@ app.patch("/admin/compensation-settings", requireAuth, requireAdmin, (req, res) 
           [companyId],
           (e2, row) => {
             if (e2 || !row) return res.status(500).json({ error: "DB error" });
+            logAudit({
+              req,
+              companyId,
+              actorUserId: getAuthUserId(req),
+              action: "SETTINGS_UPDATED",
+              entityType: "compensation_settings",
+              entityId: companyId,
+              metadata: { travel_rate: Number(travel_rate) },
+              success: true
+            });
             res.json(row);
           }
         );
@@ -4674,11 +6062,22 @@ app.post("/time-entries", requireAuth, (req, res) => {
             console.error("DB-fel vid INSERT time_report:", iErr);
             return res.status(500).json({ error: "DB error", details: String(iErr) });
           }
-          db.get(`SELECT * FROM time_reports WHERE id = ?`, [this.lastID], (gErr, row) => {
+          const newId = this.lastID;
+          db.get(`SELECT * FROM time_reports WHERE id = ?`, [newId], (gErr, row) => {
             if (gErr) {
               console.error("DB-fel vid SELECT ny time_report:", gErr);
               return res.status(500).json({ error: "DB error", details: String(gErr) });
             }
+            logAudit({
+              req,
+              companyId: effectiveCompanyId,
+              actorUserId: getAuthUserId(req),
+              action: "TIME_ENTRY_CREATED",
+              entityType: "time_entry",
+              entityId: newId,
+              metadata: { user_id: userId, date, hours: Number(hoursValue) || 0 },
+              success: true
+            });
             res.json(row);
           });
         }
@@ -4795,6 +6194,7 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
         comp_time_saved_hours,
         comp_time_taken_hours
       } = req.body || {};
+      const changedFields = Object.keys(req.body || {});
 
       // If hours missing but start/end provided, calculate hours
       let normalizedHours = hours;
@@ -4892,6 +6292,16 @@ app.put("/time-entries/:id", requireAuth, (req, res) => {
                 console.error("DB-fel vid SELECT uppdaterad time_report:", e3);
                 return res.status(500).json({ error: "DB error" });
               }
+              logAudit({
+                req,
+                companyId: effectiveCompanyId,
+                actorUserId: getAuthUserId(req),
+                action: "TIME_ENTRY_UPDATED",
+                entityType: "time_entry",
+                entityId: id,
+                metadata: { fields: changedFields },
+                success: true
+              });
               res.json(row);
             });
           }
@@ -4966,6 +6376,16 @@ app.delete("/time-entries/:id", requireAuth, (req, res) => {
               console.error("DB-fel vid DELETE time_report:", e4);
               return res.status(500).json({ error: "DB error" });
             }
+            logAudit({
+              req,
+              companyId: effectiveCompanyId,
+              actorUserId: getAuthUserId(req),
+              action: "TIME_ENTRY_DELETED",
+              entityType: "time_entry",
+              entityId: id,
+              metadata: { user_id: existing.user_id },
+              success: true
+            });
             res.status(204).end();
           });
         });
@@ -5301,6 +6721,16 @@ app.post("/time-entries/:id/attest", requireAuth, requireAdmin, (req, res) => {
           }
           db.get(`SELECT * FROM time_reports WHERE id = ?`, [id], (e3, row) => {
             if (e3) return res.status(500).json({ error: "DB error" });
+            logAudit({
+              req,
+              companyId,
+              actorUserId: getAuthUserId(req),
+              action: approved ? "TIME_ENTRY_ATTESTED" : "TIME_ENTRY_REJECTED",
+              entityType: "time_entry",
+              entityId: id,
+              metadata: { approved, user_id: existing.user_id },
+              success: true
+            });
             res.json(row);
           });
         }

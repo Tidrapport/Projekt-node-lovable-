@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -162,9 +163,17 @@ const AdminCustomers = () => {
       apiFetch(`/subprojects?order=name`),
     ]);
 
-    if (customersRes) setCustomers(customersRes);
-    if (projectsRes) setProjects(projectsRes);
-    if (subprojectsRes) setSubprojects(subprojectsRes);
+    setCustomers(ensureArray(customersRes));
+    setProjects(ensureArray(projectsRes).map((p: any) => ({
+      ...p,
+      id: String(p.id),
+      customer_id: p.customer_id != null ? String(p.customer_id) : null,
+    })));
+    setSubprojects(ensureArray(subprojectsRes).map((s: any) => ({
+      ...s,
+      id: String(s.id),
+      project_id: String(s.project_id),
+    })));
   };
 
   const fetchAttestedEntries = async () => {

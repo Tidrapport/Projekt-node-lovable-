@@ -72,8 +72,20 @@ const WorkOrders = () => {
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch<WorkOrder[]>("/work-orders/assigned");
-      setOrders(data || []);
+      const res: any = await apiFetch("/work-orders/assigned");
+      console.log("work-orders response:", res);
+
+      const list: WorkOrder[] = Array.isArray(res)
+        ? res
+        : res && Array.isArray(res.data)
+        ? res.data
+        : res && Array.isArray(res.rows)
+        ? res.rows
+        : res && Array.isArray(res.workOrders)
+        ? res.workOrders
+        : [];
+
+      setOrders(list);
     } catch (error: any) {
       toast.error(error.message || "Kunde inte hämta arbetsordrar");
     } finally {

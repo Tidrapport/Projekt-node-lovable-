@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { useAuth } from "@/contexts/AuthContext";
 import { Users, Phone, Mail, Search, Crown } from "lucide-react";
 
@@ -37,7 +38,7 @@ const Contacts = () => {
     setLoading(true);
     try {
       const profiles = await apiFetch(`/contacts${companyId ? `?company_id=${companyId}` : ""}`);
-      const contactsWithRoles = (profiles || []).map((profile: any) => {
+      const contactsWithRoles = ensureArray(profiles).map((profile: any) => {
         const role = (profile.role || "").toLowerCase();
         const isAdmin = role === "admin" || role === "super_admin";
         return { ...profile, isAdmin };

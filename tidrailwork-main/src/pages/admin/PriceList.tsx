@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
@@ -153,7 +154,7 @@ const PriceList = () => {
         params.set("project_id", selectedProjectId);
       }
       const data = await apiFetch<any>(`/price-list?${params.toString()}`);
-      const jobRolesData = (data?.job_roles || []).map((role: any) => ({
+      const jobRolesData = ensureArray(data?.job_roles).map((role: any) => ({
         id: String(role.id),
         name: role.name || "-",
         article_number: String(role.article_number || ""),
@@ -175,7 +176,7 @@ const PriceList = () => {
         travel_time_rate: toRateString(role.travel_time_rate),
       }));
 
-      const materialData = (data?.material_types || []).map((item: any) => ({
+      const materialData = ensureArray(data?.material_types).map((item: any) => ({
         id: String(item.id),
         name: item.name || "-",
         article_number: String(item.article_number || ""),
@@ -197,7 +198,7 @@ const PriceList = () => {
   const loadProjects = async () => {
     try {
       const data = await apiFetch<Project[]>("/projects?active=true");
-      setProjects((data || []).map((p) => ({ id: String(p.id), name: p.name })));
+      setProjects(ensureArray(data).map((p) => ({ id: String(p.id), name: p.name })));
     } catch (error: any) {
       toast.error(error.message || "Kunde inte hämta projekt");
     }

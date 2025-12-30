@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 
@@ -178,6 +179,7 @@ const Billing = () => {
   const [subprojects, setSubprojects] = useState<Subproject[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [exportingInvoicePdf, setExportingInvoicePdf] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
 
   const [customerId, setCustomerId] = useState<string>("all");
   const [projectId, setProjectId] = useState<string>("all");
@@ -203,7 +205,7 @@ const Billing = () => {
         apiFetch<UserProfile[]>("/admin/users"),
       ]);
 
-      const normalized = (entryData || []).map((e) => ({
+      const normalized = ensureArray(entryData).map((e) => ({
         id: String(e.id),
         date: e.datum || e.date || "",
         start_time: e.starttid && e.starttid !== "null" ? e.starttid : e.start_time || "",
@@ -215,7 +217,7 @@ const Billing = () => {
         overtime_weekend_hours: e.overtime_weekend_hours ?? null,
         per_diem_type: e.per_diem_type || e.traktamente_type || null,
         job_role_id: e.job_role_id != null ? String(e.job_role_id) : null,
-        materials: (e.materials || []).map((m: any) => ({
+        materials: ensureArray(e.materials).map((m: any) => ({
           material_type_id: String(m.material_type_id),
           quantity: Number(m.quantity) || 0,
         })),
@@ -238,10 +240,15 @@ const Billing = () => {
       })) as TimeEntry[];
 
       setEntries(normalized);
-      setCustomers(customerData || []);
-      setProjects(projectData || []);
-      setSubprojects(subprojectData || []);
-      setUsers(userData || []);
+      const customersArray = ensureArray(customerData);
+      const projectsArray = ensureArray(projectData);
+      const subprojectsArray = ensureArray(subprojectData);
+      const usersArray = ensureArray(userData);
+
+      setCustomers(customersArray);
+      setProjects(projectsArray);
+      setSubprojects(subprojectsArray);
+      setUsers(usersArray);
     } catch (error: any) {
       console.error(error);
       toast.error("Kunde inte ladda faktureringsunderlag.");
@@ -538,6 +545,45 @@ const Billing = () => {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Fortnox-fil genererad.");
+  };
+
+  const sendSelectedToFortnox = async () => {
+    const ids = Array.from(selectedEntries);
+    if (ids.length === 0) {
+      toast.error("Välj minst en rad att skicka.");
+      return;
+    }
+
+    const chosen = filteredEntries.filter((e) => selectedEntries.has(e.id));
+    if (!chosen.length) {
+      toast.error("Inga valda rader hittades i filtren.");
+      return;
+    }
+
+    // Build CSV identical to exportCSV but only for chosen
+    const header = ["Datum", "Användare", "Kund", "Projekt", "Underprojekt", "Timmar", "Restid", "Status"];
+    const rows = chosen.map((e) => [
+      e.date,
+      getUserName(e),
+      getCustomerName(e),
+      getProjectName(e),
+      getSubprojectName(e),
+      e.total_hours?.toFixed(2) ?? "0",
+      (e.travel_time_hours ?? 0).toFixed(2),
+      e.attested_by ? "Attesterad" : "Ej attesterad",
+    ]);
+    const csv = [header, ...rows]
+      .map((r) => r.map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(";"))
+      .join("\n");
+
+    const filename = `faktura_fortnox_${Date.now()}.csv`;
+    try {
+      await apiFetch('/admin/fortnox/push_invoice', { method: 'POST', json: { company_id: companyId, filename, csv } });
+      toast.success('Faktura skickad till server (för vidarebefordran till Fortnox när anslutning finns)');
+    } catch (err: any) {
+      console.error('Error pushing invoice to server:', err);
+      toast.error(err?.message || 'Kunde inte skicka faktura till server');
+    }
   };
 
   const exportPDF = () => {
@@ -887,6 +933,16 @@ const Billing = () => {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>
+                    <input
+                      type="checkbox"
+                      checked={filteredEntries.length > 0 && selectedEntries.size === filteredEntries.length}
+                      onChange={(ev) => {
+                        if (ev.currentTarget.checked) setSelectedEntries(new Set(filteredEntries.map((e) => e.id)));
+                        else setSelectedEntries(new Set());
+                      }}
+                    />
+                  </TableHead>
                   <TableHead>Datum</TableHead>
                   <TableHead>Användare</TableHead>
                   <TableHead>Kund</TableHead>
@@ -900,6 +956,20 @@ const Billing = () => {
               <TableBody>
                 {filteredEntries.map((entry) => (
                   <TableRow key={entry.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={selectedEntries.has(entry.id)}
+                        onChange={(ev) => {
+                          setSelectedEntries((prev) => {
+                            const next = new Set(prev);
+                            if (ev.currentTarget.checked) next.add(entry.id);
+                            else next.delete(entry.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    </TableCell>
                     <TableCell>{format(new Date(entry.date), "yyyy-MM-dd", { locale: sv })}</TableCell>
                     <TableCell>{getUserName(entry)}</TableCell>
                     <TableCell>{getCustomerName(entry)}</TableCell>

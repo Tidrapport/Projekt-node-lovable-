@@ -104,9 +104,25 @@ const WorkOrders = () => {
         apiFetch<UserOption[]>(`/admin/users${companyId ? `?company_id=${companyId}` : ""}`),
         apiFetch<WorkOrder[]>(`/work-orders${companyId && !isSuperAdmin ? "" : companyId ? `?company_id=${companyId}` : ""}`),
       ]);
-      setProjects(projectsData || []);
-      setUsers(usersData || []);
-      setWorkOrders(ordersData || []);
+      const projectsArray = Array.isArray(projectsData)
+        ? projectsData
+        : projectsData && Array.isArray((projectsData as any).projects)
+        ? (projectsData as any).projects
+        : [];
+      const usersArray = Array.isArray(usersData)
+        ? usersData
+        : usersData && Array.isArray((usersData as any).users)
+        ? (usersData as any).users
+        : [];
+      const ordersArray = Array.isArray(ordersData)
+        ? ordersData
+        : ordersData && Array.isArray((ordersData as any).work_orders)
+        ? (ordersData as any).work_orders
+        : [];
+
+      setProjects(projectsArray);
+      setUsers(usersArray);
+      setWorkOrders(ordersArray);
     } catch (error: any) {
       toast.error(error.message || "Kunde inte hämta arbetsorder");
     } finally {

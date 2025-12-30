@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -142,11 +143,11 @@ export default function AdminSalaries() {
 
         // Fetch shift config for OB calculations
         const shiftData = await apiFetch(`/shift_types_config?company_id=${companyId}`);
-        setProfiles(profilesData || []);
-        setEntries(entriesData || []);
-        setSalaryCodes(codesData || []);
-        setCompanyMappings(mappingsData || []);
-        setShiftConfig(shiftData || []);
+        setProfiles(ensureArray(profilesData));
+        setEntries(ensureArray(entriesData));
+        setSalaryCodes(ensureArray(codesData));
+        setCompanyMappings(ensureArray(mappingsData));
+        setShiftConfig(ensureArray(shiftData));
       } catch (error) {
         console.error('Error fetching data:', error);
         toast.error('Kunde inte hämta data');
@@ -163,7 +164,7 @@ export default function AdminSalaries() {
     for (const profile of profiles) {
       const profileId = String(profile.id);
       const userEntries = entries.filter(e => String(e.user_id) === profileId);
-      if (userEntries.length === 0) continue;
+      // Include profiles even if they have no time entries so admins see all employees
       let workHours = 0;
       let overtimeWeekday = 0;
       let overtimeWeekend = 0;
@@ -509,11 +510,11 @@ export default function AdminSalaries() {
 
       // Refresh salary codes
       const newCodes = await apiFetch(`/fortnox_salary_codes?company_id=${companyId}`) || [];
-      setSalaryCodes(newCodes);
+      setSalaryCodes(ensureArray(newCodes));
 
       // Refresh mappings
       const newMappings = await apiFetch(`/fortnox_company_mappings?company_id=${companyId}`) || [];
-      setCompanyMappings(newMappings);
+      setCompanyMappings(ensureArray(newMappings));
 
       toast.success(`Lönekod "${newCodeName}" tillagd`);
       setShowAddCodeDialog(false);
@@ -697,6 +698,21 @@ export default function AdminSalaries() {
       downloadPAXml(xml, filename);
       toast.success(`Löneunderlag exporterat (${employees.length} anställda, ${totalEntries} poster)`);
       setShowPreviewDialog(false);
+      try {
+        // Attempt to send to backend which will forward to Fortnox if connected
+        await apiFetch('/admin/fortnox/push_payroll', {
+          method: 'POST',
+          json: {
+            company_id: companyId,
+            filename,
+            xml,
+          }
+        });
+        toast.success('Löneunderlag skickat till server (för vidarebefordran till Fortnox)');
+      } catch (err) {
+        console.warn('Could not push payroll to server:', err);
+        toast.error('Kunde inte skicka underlag till server för Fortnox');
+      }
     } catch (error) {
       console.error('Error generating export:', error);
       toast.error('Kunde inte skapa export');

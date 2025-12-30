@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { toast } from "sonner";
 import { FolderKanban, Plus, Edit, Trash2, RotateCcw, User, Briefcase, Tag } from "lucide-react";
 
@@ -64,27 +65,28 @@ const AdminProjects = () => {
   const fetchData = async () => {
     try {
       const [projectsRes, subprojectsRes, customersRes] = await Promise.all([
-        apiFetch<Project[]>("/projects"),
-        apiFetch<Subproject[]>("/subprojects"),
-        apiFetch<Customer[]>("/customers"),
+        apiFetch<Project[]>('/projects'),
+        apiFetch<Subproject[]>('/subprojects'),
+        apiFetch<Customer[]>('/customers'),
       ]);
-      if (projectsRes) {
-        setProjects(
-          projectsRes.map((p) => ({
-            ...p,
-            is_active: p.is_active === true || p.is_active === 1 || p.is_active === "1",
-          }))
-        );
-      }
-      if (subprojectsRes) {
-        setSubprojects(
-          subprojectsRes.map((s) => ({
-            ...s,
-            is_active: s.is_active === true || s.is_active === 1 || s.is_active === "1",
-          }))
-        );
-      }
-      if (customersRes) setCustomers(customersRes);
+
+      const projectsArray = ensureArray(projectsRes).map((p: any) => ({
+        ...p,
+        id: String(p.id),
+        is_active: p.is_active === true || p.is_active === 1 || p.is_active === '1',
+        customer_id: p.customer_id != null ? String(p.customer_id) : null,
+      }));
+      setProjects(projectsArray as Project[]);
+
+      const subprojectsArray = ensureArray(subprojectsRes).map((s: any) => ({
+        ...s,
+        id: String(s.id),
+        project_id: String(s.project_id),
+        is_active: s.is_active === true || s.is_active === 1 || s.is_active === '1',
+      }));
+      setSubprojects(subprojectsArray as Subproject[]);
+
+      setCustomers(ensureArray(customersRes).map((c: any) => ({ id: Number(c.id), name: c.name })));
     } catch (err: any) {
       toast.error(err.message || "Kunde inte hämta projektdata");
     }

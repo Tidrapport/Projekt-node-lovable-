@@ -20,7 +20,14 @@ export const SuperAdminCompanySwitcher = () => {
     if (!isSuperAdmin) return;
     setLoading(true);
     apiFetch<CompanyOption[]>("/companies")
-      .then((data) => setCompanies(data || []))
+      .then((data) => {
+        const list = Array.isArray(data)
+          ? data
+          : data && Array.isArray((data as any).companies)
+          ? (data as any).companies
+          : [];
+        setCompanies(list);
+      })
       .catch((err: any) => {
         toast.error(err.message || "Kunde inte hämta företag");
       })

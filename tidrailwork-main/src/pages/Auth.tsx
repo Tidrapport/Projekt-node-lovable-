@@ -9,38 +9,18 @@ import { apiFetch } from "@/api/client";
 import { getMe } from "@/api/auth";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { Shield, Building2 } from "lucide-react";
+import { Shield } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-// Super admin emails that can bypass company verification
-const SUPER_ADMIN_EMAILS = ["ai@railwork.se"];
-
-// LocalStorage key and expiry (1 year in milliseconds)
-const COMPANY_CODE_STORAGE_KEY = "saved_company_code";
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
-
-interface SavedCompanyCode {
-  code: string;
-  savedAt: number;
-}
 
 interface CompanyOption {
   id: string;
   name: string;
-  company_code: string;
   code?: string | null;
   logo_url: string | null;
-  abbreviation: string;
 }
 
-// Generate abbreviation from company name (e.g., "Rail Work AB" -> "RWAB")
-const generateAbbreviation = (name: string): string => {
-  const words = name.split(/\s+/).filter(word => word.length > 0);
-  return words.map(word => word.charAt(0).toUpperCase()).join('');
-};
-
 const Auth = () => {
-  const { user, login, logout } = useAuth();
+  const { user, login } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -48,52 +28,18 @@ const Auth = () => {
   // Super admin mode
   const [isSuperAdminMode, setIsSuperAdminMode] = useState(false);
   
-  // Company list and selection
-  const [companies, setCompanies] = useState<CompanyOption[]>([]);
-  const [selectedCompanyCode, setSelectedCompanyCode] = useState("");
-  const [verifiedCompany, setVerifiedCompany] = useState<{ id: string; name: string; logo_url: string | null } | null>(null);
+  // Company lookup by email
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [checkingCompanies, setCheckingCompanies] = useState(false);
   
   // Login state
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [forgotDialogOpen, setForgotDialogOpen] = useState(false);
 
-  // Load companies and saved company code on mount
   useEffect(() => {
-    const loadCompaniesAndSavedCode = async () => {
-      try {
-        // Fetch public companies endpoint
-        const companiesData = await apiFetch<any[]>("/public/companies");
-
-        const companiesWithAbbr = (companiesData || []).map(company => ({
-          ...company,
-          company_code: company.company_code || company.code || "",
-          abbreviation: generateAbbreviation(company.name)
-        }));
-        setCompanies(companiesWithAbbr);
-
-        // Check for saved company code
-        const saved = localStorage.getItem(COMPANY_CODE_STORAGE_KEY);
-        if (saved) {
-          const parsedData: SavedCompanyCode = JSON.parse(saved);
-          const now = Date.now();
-          
-          if (now - parsedData.savedAt < ONE_YEAR_MS) {
-            setSelectedCompanyCode(parsedData.code);
-            // Auto-verify the saved company code
-            await autoVerifyCompanyCode(parsedData.code);
-          } else {
-            localStorage.removeItem(COMPANY_CODE_STORAGE_KEY);
-          }
-        }
-      } catch (error) {
-        console.error("Error loading companies:", error);
-      } finally {
-        setInitialLoading(false);
-      }
-    };
-
-    loadCompaniesAndSavedCode();
+    setInitialLoading(false);
   }, []);
 
   // Redirect if already logged in
@@ -103,37 +49,36 @@ const Auth = () => {
     }
   }, [user, navigate]);
 
-  const getCompanyCode = (company: CompanyOption) => (company.company_code || company.code || "").toUpperCase();
-
-  const autoVerifyCompanyCode = async (code: string) => {
-    try {
-      const codeUp = code.toUpperCase();
-      const found = (companies || []).find((c) => getCompanyCode(c) === codeUp);
-      if (found) {
-        setVerifiedCompany({ id: found.id, name: found.name, logo_url: found.logo_url });
-      } else {
-        localStorage.removeItem(COMPANY_CODE_STORAGE_KEY);
-      }
-    } catch (error) {
-      console.error("Error auto-verifying company:", error);
-      localStorage.removeItem(COMPANY_CODE_STORAGE_KEY);
+  const fetchCompanyOptions = async (lookupEmail: string) => {
+    const cleanEmail = lookupEmail.trim().toLowerCase();
+    if (!cleanEmail) {
+      setCompanyOptions([]);
+      setSelectedCompanyId("");
+      return [];
     }
-  };
-
-  const saveCompanyCode = (code: string) => {
-    const dataToSave: SavedCompanyCode = {
-      code: code.toUpperCase(),
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(COMPANY_CODE_STORAGE_KEY, JSON.stringify(dataToSave));
-  };
-
-  const handleCompanySelect = (code: string) => {
-    setSelectedCompanyCode(code);
-    const company = companies.find(c => getCompanyCode(c) === code.toUpperCase());
-    if (company) {
-      setVerifiedCompany({ id: company.id, name: company.name, logo_url: company.logo_url });
-      saveCompanyCode(code);
+    setCheckingCompanies(true);
+    try {
+      const res = await apiFetch<{ companies: CompanyOption[] }>("/auth/company-options", {
+        method: "POST",
+        json: { email: cleanEmail },
+      });
+      const options = res?.companies || [];
+      setCompanyOptions(options);
+      if (options.length === 1) {
+        setSelectedCompanyId(String(options[0].id));
+      } else if (options.length === 0) {
+        setSelectedCompanyId("");
+      } else if (!options.some((opt) => String(opt.id) === String(selectedCompanyId))) {
+        setSelectedCompanyId("");
+      }
+      return options;
+    } catch (error) {
+      console.error("Error fetching company options:", error);
+      setCompanyOptions([]);
+      setSelectedCompanyId("");
+      return [];
+    } finally {
+      setCheckingCompanies(false);
     }
   };
 
@@ -145,17 +90,23 @@ const Auth = () => {
       return;
     }
 
-    // Super admin can bypass company verification
-    const requireCompanyCheck = !isSuperAdminMode && companies.length > 0;
-
-    if (requireCompanyCheck && !verifiedCompany) {
-      toast.error("Verifiera företags-ID först");
-      return;
+    let options = companyOptions;
+    if (!isSuperAdminMode) {
+      if (companyOptions.length === 0) {
+        options = await fetchCompanyOptions(email.trim());
+      }
+      if (options.length > 1 && !selectedCompanyId) {
+        toast.error("Välj företag för denna e-post");
+        return;
+      }
     }
 
     setLoading(true);
     try {
-      const companyId = verifiedCompany?.id ? Number(verifiedCompany.id) : undefined;
+      const companyId =
+        !isSuperAdminMode && options.length > 0
+          ? Number((options.length > 1 ? selectedCompanyId : options[0].id))
+          : undefined;
 
       // Use Auth context to login (stores token)
       await login(email.trim(), password, companyId);
@@ -175,16 +126,14 @@ const Auth = () => {
   };
 
   const resetCompanyVerification = () => {
-    setVerifiedCompany(null);
-    setEmail("");
-    setPassword("");
-    setSelectedCompanyCode("");
+    setCompanyOptions([]);
+    setSelectedCompanyId("");
   };
 
   const toggleSuperAdminMode = () => {
     setIsSuperAdminMode(!isSuperAdminMode);
-    setVerifiedCompany(null);
-    setSelectedCompanyCode("");
+    setCompanyOptions([]);
+    setSelectedCompanyId("");
     setEmail("");
     setPassword("");
   };
@@ -295,60 +244,65 @@ const Auth = () => {
             </div>
             <CardTitle className="text-center">Välkommen</CardTitle>
             <CardDescription className="text-center">
-              {!verifiedCompany 
-                ? "Välj ditt företag för att fortsätta" 
-                : `Logga in till ${verifiedCompany.name}`
-              }
+              Logga in med din e-postadress
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="company-select">Välj företag</Label>
-                <Select value={selectedCompanyCode} onValueChange={handleCompanySelect}>
-                  <SelectTrigger id="company-select" disabled={loading}>
-                    <SelectValue placeholder="Välj ditt företag" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60">
-                    {companies.map((company) => (
-                      <SelectItem key={getCompanyCode(company)} value={getCompanyCode(company)}>
-                        <span className="flex items-center gap-2">
-                          <span>{company.name}</span>
-                          <span className="text-muted-foreground font-mono text-xs">({company.abbreviation})</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Kontakta din administratör om ditt företag inte visas</span>
-                  {verifiedCompany && (
-                    <Button type="button" variant="ghost" size="sm" onClick={resetCompanyVerification}>
-                      Rensa val
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {verifiedCompany && (
-                <div className="bg-muted/50 p-3 rounded-lg">
-                  <p className="text-sm text-muted-foreground">Inloggning till</p>
-                  <p className="font-medium">{verifiedCompany.name}</p>
-                </div>
-              )}
-
               <div className="space-y-2">
                 <Label htmlFor="email">E-post</Label>
                 <Input
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (companyOptions.length > 0) {
+                      setCompanyOptions([]);
+                      setSelectedCompanyId("");
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!isSuperAdminMode) {
+                      fetchCompanyOptions(email);
+                    }
+                  }}
                   placeholder="din@epost.se"
                   required
                   disabled={loading}
                 />
               </div>
+
+              {!isSuperAdminMode && companyOptions.length === 1 && (
+                <div className="bg-muted/50 p-3 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Inloggning till</p>
+                  <p className="font-medium">{companyOptions[0].name}</p>
+                </div>
+              )}
+
+              {!isSuperAdminMode && companyOptions.length > 1 && (
+                <div className="space-y-2">
+                  <Label>Välj företag</Label>
+                  <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}>
+                    <SelectTrigger disabled={loading || checkingCompanies}>
+                      <SelectValue placeholder="Välj företag" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {companyOptions.map((company) => (
+                        <SelectItem key={company.id} value={String(company.id)}>
+                          <span>{company.name}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Fler än ett företag hittades för denna e-post</span>
+                    <Button type="button" variant="ghost" size="sm" onClick={resetCompanyVerification}>
+                      Rensa val
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
@@ -376,7 +330,7 @@ const Auth = () => {
               <Button
                 type="submit"
                 className="w-full bg-gradient-primary"
-                disabled={loading || (companies.length > 0 && !verifiedCompany)}
+                disabled={loading || (companyOptions.length > 1 && !selectedCompanyId)}
               >
                 {loading ? "Loggar in..." : "Logga in"}
               </Button>

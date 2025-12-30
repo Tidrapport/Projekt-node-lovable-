@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { useAuth } from "@/contexts/AuthContext";
@@ -51,8 +52,8 @@ export default function Planning() {
       // Hämta endast aktuell användares planering
       const companyParam = companyId ? `&company_id=${companyId}` : "";
       const data = await apiFetch(`/plans?user_id=${effectiveUserId}${companyParam}`);
-      const filtered = (data || []).filter((p: any) => String(p.user_id) === String(effectiveUserId));
-      const mapped = filtered.map((p: any) => ({
+      const filtered = ensureArray(data).filter((p: any) => String(p.user_id) === String(effectiveUserId));
+      const mapped = ensureArray(filtered).map((p: any) => ({
         id: String(p.id),
         project_id: p.project || "",
         subproject_id: p.subproject || null,

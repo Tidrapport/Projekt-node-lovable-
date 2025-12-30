@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Download, FileText, Eye, Trash2 } from "lucide-react";
@@ -55,7 +56,7 @@ const AdminWeldingReports = () => {
 
   const fetchUsers = async () => {
     const data = await apiFetch('/profiles?select=id,full_name&order=full_name');
-    if (data) setUsers(data);
+    if (data) setUsers(ensureArray(data));
   };
 
   const fetchReports = async () => {
@@ -70,7 +71,7 @@ const AdminWeldingReports = () => {
       // Request reports with related profile data
       const data = await apiFetch(`/welding_reports?${qs}&include=profiles`);
 
-      const typedData = (data || []).map((report: any) => ({
+      const typedData = ensureArray(data).map((report: any) => ({
         ...report,
         welding_entries: report.welding_entries as unknown as WeldingEntry[]
       })) as WeldingReportWithProfile[];
@@ -101,7 +102,7 @@ const AdminWeldingReports = () => {
     try {
       // Fetch company info
       const company = await apiFetch('/companies');
-      const companyObj = Array.isArray(company) ? company[0] : company;
+      const companyObj = ensureArray(company)[0];
 
       await generateWeldingReportPDF(report, companyObj?.name || "Företag", companyObj?.logo_url);
       toast.success("PDF nedladdad");

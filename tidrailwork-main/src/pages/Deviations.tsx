@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
@@ -69,7 +70,7 @@ const Deviations = () => {
     try {
       const deviationsData = await apiFetch(`/deviation-reports?user_id=${effectiveUserId}`);
       if (deviationsData) {
-        const mapped = (deviationsData || []).map((d: any) => ({
+        const mapped = ensureArray(deviationsData).map((d: any) => ({
           id: String(d.id),
           title: d.title,
           description: d.description || "",
@@ -93,7 +94,7 @@ const Deviations = () => {
     try {
       const entriesData = await apiFetch(`/time-entries?limit=30`);
       if (entriesData) {
-        const mapped = (entriesData || [])
+        const mapped = ensureArray(entriesData)
           .filter((e: any) => e.datum || e.date)
           .map((e: any) => ({
             id: String(e.id),

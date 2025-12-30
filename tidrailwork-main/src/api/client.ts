@@ -4,7 +4,15 @@ const TOKEN_KEY = "opero_token";
 const LEGACY_TOKEN_KEY = "access_token";
 
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY);
+  try {
+    const local = localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY);
+    // Allow a developer override via Vite env var `VITE_DEV_TOKEN` for local development
+    const devToken = (import.meta as any).env?.VITE_DEV_TOKEN || (window as any).__DEV_API_TOKEN__;
+    return local || devToken || null;
+  } catch {
+    // If localStorage isn't available (e.g. SSR), fall back to env var
+    return (import.meta as any).env?.VITE_DEV_TOKEN || null;
+  }
 }
 export function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token);
@@ -30,49 +38,55 @@ function buildUrl(path: string) {
   return `${base}${path}`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// Lightweight helpers that use relative paths so Vite proxy works in dev
+export const api = {
+  get: async <T>(path: string) => await apiFetch<T>(path),
+  post: async <T>(path: string, body?: unknown) =>
+    await apiFetch<T>(path, { method: "POST", json: body }),
+  put: async <T>(path: string, body?: unknown) =>
+    await apiFetch<T>(path, { method: "PUT", json: body }),
+  del: async <T>(path: string) => await apiFetch<T>(path, { method: "DELETE" }),
+};
+
+// Robust apiFetch implementation: always use relative URLs (so Vite proxy applies),
+// attach token if available, and safely parse JSON/text responses.
+export async function apiFetch<T = any>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  if (!path) throw new Error("apiFetch: path is empty");
+
+  // Ensure relative path so Vite dev server proxy can handle it
+  const url = path.startsWith("/") ? path : `/${path}`;
+
+  const headers = new Headers(options.headers || {});
   const token = getToken();
-  const headers = new Headers(init.headers || {});
-  headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
 
-  const res = await fetch(buildUrl(path), { ...init, headers });
+  const body = options.body !== undefined ? options.body : options.json !== undefined ? JSON.stringify(options.json) : undefined;
+  if (body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
+  const res = await fetch(url, { ...options, headers, body } as RequestInit);
+
+  const text = await res.text();
   if (!res.ok) {
-    let body: ApiError | undefined;
+    // Try to parse error body
+    let parsed: any = undefined;
     try {
-      body = await res.json();
+      parsed = JSON.parse(text);
     } catch {
-      // ignore
+      parsed = text;
     }
-    const msg = body?.error || body?.message || `${res.status} ${res.statusText}`;
+    const msg = (parsed && (parsed.error || parsed.message)) || `${res.status} ${res.statusText}`;
     throw new Error(msg);
   }
 
-  // 204 no content
-  if (res.status === 204) return undefined as unknown as T;
-  return (await res.json()) as T;
-}
+  if (!text) return undefined as unknown as T;
 
-export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : "{}" }),
-  put: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : "{}" }),
-  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-};
-
-// Backward compatibility helper
-export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
-  const headers = new Headers(options.headers || {});
-  const body =
-    options.body !== undefined
-      ? options.body
-      : options.json !== undefined
-        ? JSON.stringify(options.json)
-        : undefined;
-  const method = options.method || (body !== undefined ? "POST" : "GET");
-
-  return request<T>(path, { method, headers, body });
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
 }

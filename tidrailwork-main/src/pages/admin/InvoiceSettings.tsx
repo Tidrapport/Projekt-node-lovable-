@@ -1,41 +1,95 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { apiFetch } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
 
-const FORTNOX_STORAGE_KEY = "fortnox_api_settings";
+type FortnoxStatus = {
+  connected: boolean;
+  expires_at?: string | null;
+  scope?: string | null;
+  updated_at?: string | null;
+};
 
 const InvoiceSettings = () => {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [accessToken, setAccessToken] = useState("");
+  const { companyId, isSuperAdmin } = useAuth();
+  const location = useLocation();
+  const [status, setStatus] = useState<FortnoxStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(FORTNOX_STORAGE_KEY);
-    if (!saved) return;
-    try {
-      const parsed = JSON.parse(saved);
-      setClientId(parsed.clientId || "");
-      setClientSecret(parsed.clientSecret || "");
-      setAccessToken(parsed.accessToken || "");
-    } catch (err) {
-      console.error("Kunde inte läsa Fortnox-inställningar:", err);
-    }
-  }, []);
+    const params = new URLSearchParams(location.search);
+    const result = params.get("fortnox");
+    if (result === "connected") toast.success("Fortnox-koppling klar.");
+    if (result === "error") toast.error("Fortnox-koppling misslyckades.");
+  }, [location.search]);
 
-  const handleSave = () => {
-    localStorage.setItem(
-      FORTNOX_STORAGE_KEY,
-      JSON.stringify({
-        clientId: clientId.trim(),
-        clientSecret: clientSecret.trim(),
-        accessToken: accessToken.trim(),
-      })
-    );
-    toast.success("Fortnox-uppgifter sparade.");
+  const loadStatus = async () => {
+    if (isSuperAdmin && !companyId) return;
+    setLoading(true);
+    try {
+      const query = isSuperAdmin && companyId ? `?company_id=${companyId}` : "";
+      const data = await apiFetch<FortnoxStatus>(`/admin/fortnox/status${query}`);
+      setStatus(data || { connected: false });
+    } catch (err: any) {
+      console.error("Kunde inte läsa Fortnox-status:", err);
+      toast.error(err.message || "Kunde inte läsa Fortnox-status");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, isSuperAdmin]);
+
+  const handleConnect = async (event?: React.MouseEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (isSuperAdmin && !companyId) {
+      toast.error("Välj företag först.");
+      return;
+    }
+    const query = isSuperAdmin && companyId ? `?company_id=${companyId}` : "";
+    try {
+      const res = await apiFetch<any>(`/admin/fortnox/connect${query}`, { method: "POST" });
+      // Log response for debugging redirect payloads
+      console.log("Redirect payload from backend (fortnox connect):", res);
+
+      // Normalize different possible keys from backend
+      const redirectUrl = res?.auth_url || res?.authUrl || res?.url;
+
+      // Validate before redirecting to avoid runtime errors like new URL(undefined)
+      if (!redirectUrl || typeof redirectUrl !== "string") {
+        console.error("Invalid redirect URL from backend:", res);
+        toast.error("Ogiltigt svar från servern (saknas URL)");
+        return;
+      }
+
+      // Safe redirect
+      window.location.href = redirectUrl;
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte starta Fortnox-koppling");
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (isSuperAdmin && !companyId) return;
+    setDisconnecting(true);
+    try {
+      const query = isSuperAdmin && companyId ? `?company_id=${companyId}` : "";
+      await apiFetch(`/admin/fortnox/disconnect${query}`, { method: "POST" });
+      toast.success("Fortnox-koppling borttagen.");
+      await loadStatus();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte koppla bort");
+    } finally {
+      setDisconnecting(false);
+    }
   };
 
   return (
@@ -48,41 +102,40 @@ const InvoiceSettings = () => {
       <Card>
         <CardHeader>
           <CardTitle>Fortnox API-koppling</CardTitle>
-          <CardDescription>Ange era nycklar för koppling till Fortnox.</CardDescription>
+          <CardDescription>Autentisera mot Fortnox via OAuth.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="fortnox-client-id">Client-ID</Label>
-            <Input
-              id="fortnox-client-id"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              placeholder="Ange Client-ID"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="fortnox-client-secret">Client Secret</Label>
-            <Input
-              id="fortnox-client-secret"
-              type="password"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              placeholder="Ange Client Secret"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="fortnox-access-token">Access Token</Label>
-            <Input
-              id="fortnox-access-token"
-              type="password"
-              value={accessToken}
-              onChange={(e) => setAccessToken(e.target.value)}
-              placeholder="Ange Access Token"
-            />
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={handleSave}>Spara</Button>
-          </div>
+          {isSuperAdmin && !companyId ? (
+            <div className="text-sm text-muted-foreground">Välj företag i AdminHub för att koppla Fortnox.</div>
+          ) : (
+            <>
+              <div className="text-sm text-muted-foreground">
+                Status:{" "}
+                {loading
+                  ? "Laddar..."
+                  : status?.connected
+                    ? `Ansluten${status.expires_at ? ` (giltig till ${status.expires_at?.slice(0, 19).replace("T", " ")})` : ""}`
+                    : "Inte ansluten"}
+              </div>
+              {status?.scope && (
+                <div className="text-xs text-muted-foreground">Scope: {status.scope}</div>
+              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="outline" onClick={loadStatus} disabled={loading}>
+                  Uppdatera
+                </Button>
+                {status?.connected ? (
+                  <Button type="button" variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
+                    Koppla bort
+                  </Button>
+                ) : (
+                  <Button type="button" onClick={handleConnect}>
+                    Anslut Fortnox
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

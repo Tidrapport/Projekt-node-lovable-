@@ -1392,6 +1392,61 @@ db.serialize(() => {
     )
   `);
 
+  // --- Fortnox OAuth connection per company ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fortnox_connections (
+      company_id INTEGER PRIMARY KEY,
+      access_token TEXT,
+      refresh_token TEXT,
+      token_type TEXT,
+      scope TEXT,
+      expires_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id)
+    )
+  `);
+
+  // --- Audit logs ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      company_id INTEGER,
+      actor_user_id INTEGER,
+      action TEXT NOT NULL,
+      entity_type TEXT,
+      entity_id TEXT,
+      metadata TEXT,
+      success INTEGER DEFAULT 1,
+      ip TEXT,
+      user_agent TEXT
+    )
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_company_created_at ON audit_logs(company_id, created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id, created_at)`);
+
+  // --- Employee certificates ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS employee_certificates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      issuer TEXT,
+      certificate_number TEXT,
+      valid_from TEXT,
+      valid_to TEXT,
+      notes TEXT,
+      file_url TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_employee_certificates_company_user ON employee_certificates(company_id, user_id)`);
+
   const defaultFortnoxCodes = [
     {
       code: "ARBETE",
