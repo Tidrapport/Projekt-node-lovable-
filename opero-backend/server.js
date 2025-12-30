@@ -261,6 +261,57 @@ async function getFortnoxAccessToken(companyId) {
   });
 }
 
+async function fetchFortnoxArticles(accessToken) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
+  };
+  const parseMetaNumber = (value) => {
+    const numeric = Number(String(value || "").replace(/[^0-9]/g, ""));
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+  let page = 1;
+  let totalPages = 1;
+  const collected = [];
+
+  while (page <= totalPages) {
+    const url = new URL(`${FORTNOX_API_BASE}/articles`);
+    url.searchParams.set("page", String(page));
+    const response = await fetch(url.toString(), { headers });
+    const text = await response.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+    if (!response.ok) {
+      const message =
+        data?.ErrorInformation?.Message ||
+        data?.ErrorInformation?.message ||
+        data?.error ||
+        text ||
+        "Fortnox error";
+      throw new Error(message);
+    }
+    const batch = Array.isArray(data?.Articles) ? data.Articles : [];
+    collected.push(...batch);
+    const meta = data?.MetaInformation || {};
+    const parsedTotal = parseMetaNumber(meta["@TotalPages"] ?? meta.TotalPages ?? meta.totalPages);
+    if (parsedTotal) totalPages = parsedTotal;
+    if (!parsedTotal && batch.length === 0) break;
+    page += 1;
+  }
+
+  return collected
+    .map((article) => ({
+      article_number: String(article?.ArticleNumber ?? "").trim(),
+      description: String(article?.Description ?? "").trim(),
+      unit: String(article?.Unit ?? "").trim(),
+    }))
+    .filter((article) => article.article_number || article.description);
+}
+
 function hasFortnoxConnection(companyId) {
   return new Promise((resolve) => {
     db.get(
@@ -3631,23 +3682,30 @@ app.post("/admin/fortnox/push_payroll", requireAuth, requireAdmin, async (req, r
       return res.json({ success: true, stored: true, forwarded: false, message: "Saved locally; no Fortnox token available." });
     }
 
-    // Forward to Fortnox - POST XML to Fortnox API (endpoint may vary)
-    const fortnoxUrl = `${FORTNOX_API_BASE}/paxml`;
+    // Forward to Fortnox - upload as archive file (PAXml import is manual in Fortnox Lön)
+    const fortnoxUrl = `${FORTNOX_API_BASE}/archive`;
     try {
+      const form = new FormData();
+      form.append("file", new Blob([xml], { type: "application/xml" }), safeFilename);
       const response = await fetch(fortnoxUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/xml",
         },
-        body: xml,
+        body: form,
       });
       const text = await response.text();
       if (!response.ok) {
         console.error("Fortnox push failed:", response.status, text);
-        return res.status(502).json({ success: false, forwarded: false, status: response.status, body: text });
+        return res.status(502).json({ success: false, forwarded: false, status: response.status, error: text, body: text });
       }
-      return res.json({ success: true, stored: true, forwarded: true, body: text });
+      return res.json({
+        success: true,
+        stored: true,
+        forwarded: true,
+        message: "Löneunderlag uppladdat i Fortnox Arkiv",
+        body: text
+      });
     } catch (err) {
       console.error("Error forwarding to Fortnox:", err);
       return res.status(500).json({ success: false, forwarded: false, error: err?.message || String(err) });
@@ -3661,19 +3719,25 @@ app.post("/admin/fortnox/push_payroll", requireAuth, requireAdmin, async (req, r
 // Push invoice file to Fortnox (store and optionally forward using saved connection)
 app.post("/admin/fortnox/push_invoice", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { csv, filename, company_id } = req.body || {};
+    const { csv, invoice, filename, company_id } = req.body || {};
     const allowAll = req.company_scope_all === true;
     const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
     if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
 
-    if (!csv || typeof csv !== "string") return res.status(400).json({ error: "csv required" });
+    const hasInvoice = invoice && typeof invoice === "object";
+    const hasCsv = csv && typeof csv === "string";
+    if (!hasInvoice && !hasCsv) {
+      return res.status(400).json({ error: "invoice or csv required" });
+    }
 
     // Ensure uploads dir
     const uploadsDir = path.join(__dirname, "uploads", "fortnox_invoices");
     fs.mkdirSync(uploadsDir, { recursive: true });
-    const safeFilename = (filename || `invoice_${Date.now()}.csv`).replace(/[^a-zA-Z0-9._-]/g, "_");
+    const defaultName = hasInvoice ? `invoice_${Date.now()}.json` : `invoice_${Date.now()}.csv`;
+    const safeFilename = (filename || defaultName).replace(/[^a-zA-Z0-9._-]/g, "_");
     const filePath = path.join(uploadsDir, safeFilename);
-    fs.writeFileSync(filePath, csv, "utf8");
+    const storedBody = hasInvoice ? JSON.stringify({ Invoice: invoice }, null, 2) : csv;
+    fs.writeFileSync(filePath, storedBody, "utf8");
 
     // Log export in DB
     db.run(
@@ -3692,21 +3756,23 @@ app.post("/admin/fortnox/push_invoice", requireAuth, requireAdmin, async (req, r
       return res.json({ success: true, stored: true, forwarded: false, message: "Saved locally; no Fortnox token available." });
     }
 
-    // Forward to Fortnox - many integrations accept CSV import endpoints; we attempt to POST to /invoices
+    // Forward to Fortnox
     const fortnoxUrl = `${FORTNOX_API_BASE}/invoices`;
     try {
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": hasInvoice ? "application/json" : "text/csv",
+      };
+      const body = hasInvoice ? JSON.stringify({ Invoice: invoice }) : csv;
       const response = await fetch(fortnoxUrl, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "text/csv",
-        },
-        body: csv,
+        headers,
+        body,
       });
       const text = await response.text();
       if (!response.ok) {
         console.error("Fortnox invoice push failed:", response.status, text);
-        return res.status(502).json({ success: false, forwarded: false, status: response.status, body: text });
+        return res.status(502).json({ success: false, forwarded: false, status: response.status, error: text, body: text });
       }
       return res.json({ success: true, stored: true, forwarded: true, body: text });
     } catch (err) {
@@ -3716,6 +3782,25 @@ app.post("/admin/fortnox/push_invoice", requireAuth, requireAdmin, async (req, r
   } catch (err) {
     console.error("Error in /admin/fortnox/push_invoice:", err);
     return res.status(500).json({ error: err?.message || "Server error" });
+  }
+});
+
+app.get("/admin/fortnox/articles", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.status(409).json({ error: "Fortnox not connected" });
+    }
+
+    const articles = await fetchFortnoxArticles(accessToken);
+    return res.json({ articles, total: articles.length });
+  } catch (err) {
+    console.error("Error fetching Fortnox articles:", err);
+    return res.status(500).json({ error: err?.message || "Fortnox fetch failed" });
   }
 });
 
@@ -4225,7 +4310,8 @@ app.get("/profiles", requireAuth, (req, res) => {
       monthly_salary,
       tax_table,
       employee_type,
-      employee_number
+      employee_number,
+      is_active
     FROM users
     WHERE ${where.length ? where.join(" AND ") : "1=1"}
     ${orderSql}
@@ -4476,6 +4562,33 @@ app.post("/fortnox_company_mappings", requireAuth, requireAdmin, (req, res) => {
   }
 });
 
+app.delete("/fortnox_company_mappings", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  const payload = req.body || {};
+  const targetCompanyId = allowAll && payload.company_id ? payload.company_id : companyId;
+  if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+  const codes = Array.isArray(payload.internal_codes)
+    ? payload.internal_codes.map((code) => String(code)).filter(Boolean)
+    : [];
+
+  let sql = "DELETE FROM fortnox_company_mappings WHERE company_id = ?";
+  const params = [targetCompanyId];
+  if (codes.length) {
+    sql += ` AND internal_code IN (${codes.map(() => "?").join(",")})`;
+    params.push(...codes);
+  }
+
+  db.run(sql, params, function (err) {
+    if (err) {
+      console.error("DB-fel vid DELETE /fortnox_company_mappings:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json({ success: true, deleted: this.changes || 0 });
+  });
+});
+
 app.post("/fortnox_export_logs", requireAuth, requireAdmin, (req, res) => {
   const companyId = getScopedCompanyId(req);
   const allowAll = req.company_scope_all === true;
@@ -4513,6 +4626,57 @@ app.post("/fortnox_export_logs", requireAuth, requireAdmin, (req, res) => {
       res.status(201).json({ id: this.lastID });
     }
   );
+});
+
+app.post("/admin/fortnox/attendance", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { transactions, company_id } = req.body || {};
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      return res.status(400).json({ error: "transactions required" });
+    }
+
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.status(409).json({ error: "Fortnox not connected" });
+    }
+
+    const endpoint = `${FORTNOX_API_BASE}/attendancetransactions`;
+    for (const tx of transactions) {
+      const payload = {
+        AttendanceTransaction: {
+          CauseCode: tx.CauseCode,
+          Date: tx.Date,
+          EmployeeId: tx.EmployeeId,
+          Hours: String(tx.Hours),
+          ...(tx.Project ? { Project: tx.Project } : {}),
+          ...(tx.CostCenter ? { CostCenter: tx.CostCenter } : {}),
+        }
+      };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        console.error("Fortnox attendance push failed:", response.status, text);
+        return res.status(502).json({ success: false, status: response.status, error: text });
+      }
+    }
+
+    return res.json({ success: true, created: transactions.length });
+  } catch (err) {
+    console.error("Error in /admin/fortnox/attendance:", err);
+    return res.status(500).json({ error: err?.message || "Server error" });
+  }
 });
 
 // ======================

@@ -6,6 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/api/client";
 import { ensureArray } from "@/lib/ensureArray";
 import jsPDF from "jspdf";
@@ -48,6 +54,12 @@ type Project = {
   name: string;
 };
 
+type FortnoxArticle = {
+  article_number: string;
+  description: string;
+  unit?: string;
+};
+
 type PriceListSettings = {
   show_day: boolean;
   show_evening: boolean;
@@ -82,6 +94,14 @@ const normalizeUnit = (value: string | null | undefined) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (UNIT_OPTIONS.some((opt) => opt.value === normalized)) return normalized;
   return "styck";
+};
+
+const normalizeArticleKey = (value: string) => {
+  const raw = String(value || "").trim().toLowerCase();
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
 };
 
 const DEFAULT_SETTINGS: PriceListSettings = {
@@ -136,6 +156,13 @@ const PriceList = () => {
   const [materials, setMaterials] = useState<MaterialRate[]>([]);
   const [settings, setSettings] = useState<PriceListSettings>(DEFAULT_SETTINGS);
   const [settingsSource, setSettingsSource] = useState<string>("default");
+  const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
+  const providerLabels: Record<string, string> = {
+    fortnox: "Fortnox",
+    visma: "Visma",
+    speedledger: "SpeedLedger",
+    bjornlunden: "Björn Lunden",
+  };
 
   const yearOptions = useMemo(() => {
     return Array.from({ length: 5 }, (_, idx) => String(currentYear - 2 + idx));
@@ -411,6 +438,181 @@ const PriceList = () => {
     }
   };
 
+  const syncArticlesFromProvider = async (provider: "fortnox" | "visma" | "speedledger" | "bjornlunden") => {
+    if (provider !== "fortnox") {
+      toast(`Stöd för ${providerLabels[provider] || provider} kommer snart.`);
+      return;
+    }
+
+    setSyncingProvider(provider);
+    try {
+      const data = await apiFetch<{ articles: FortnoxArticle[] }>("/admin/fortnox/articles");
+      const articles = ensureArray(data?.articles);
+      if (!articles.length) {
+        toast.error("Inga Fortnox-artiklar hittades.");
+        return;
+      }
+
+      const articleMap = new Map<string, FortnoxArticle>();
+      const normalizedArticles = articles
+        .map((article) => {
+          const key = normalizeArticleKey(article.description || article.article_number);
+          return key ? { key, article } : null;
+        })
+        .filter(Boolean) as Array<{ key: string; article: FortnoxArticle }>;
+
+      normalizedArticles.forEach((item) => {
+        if (!articleMap.has(item.key)) articleMap.set(item.key, item.article);
+      });
+
+      const findArticleMatch = (name: string) => {
+        const key = normalizeArticleKey(name);
+        if (!key) return null;
+        const exact = articleMap.get(key);
+        if (exact) return exact;
+        const candidates = normalizedArticles.filter(
+          (item) => item.key.includes(key) || key.includes(item.key)
+        );
+        if (!candidates.length) return null;
+        return candidates.reduce((best, current) => {
+          if (!best) return current;
+          return current.key.length < best.key.length ? current : best;
+        }, null as null | { key: string; article: FortnoxArticle })?.article || null;
+      };
+
+      const findArticleMatchByKeywords = (roleKey: string, keywords: string[]) => {
+        if (!roleKey) return null;
+        const normalizedKeywords = keywords.map((kw) => normalizeArticleKey(kw)).filter(Boolean);
+        let best: { key: string; article: FortnoxArticle } | null = null;
+        let bestScore = 0;
+        normalizedArticles.forEach((item) => {
+          const hasRole = item.key.includes(roleKey);
+          if (!hasRole) return;
+          let keywordMatches = 0;
+          if (normalizedKeywords.length) {
+            normalizedKeywords.forEach((kw) => {
+              if (kw && item.key.includes(kw)) keywordMatches += 1;
+            });
+            if (!keywordMatches) return;
+          }
+          const score = 2 + keywordMatches;
+          if (score > bestScore) {
+            bestScore = score;
+            best = item;
+          } else if (score === bestScore && best && item.key.length < best.key.length) {
+            best = item;
+          }
+        });
+        return best?.article || null;
+      };
+
+      const findGlobalArticleMatchByKeywords = (keywords: string[]) => {
+        const normalizedKeywords = keywords.map((kw) => normalizeArticleKey(kw)).filter(Boolean);
+        let best: { key: string; article: FortnoxArticle } | null = null;
+        let bestScore = 0;
+        normalizedArticles.forEach((item) => {
+          let keywordMatches = 0;
+          normalizedKeywords.forEach((kw) => {
+            if (kw && item.key.includes(kw)) keywordMatches += 1;
+          });
+          if (!keywordMatches) return;
+          const score = keywordMatches + 1;
+          if (score > bestScore) {
+            bestScore = score;
+            best = item;
+          } else if (score === bestScore && best && item.key.length < best.key.length) {
+            best = item;
+          }
+        });
+        return best?.article || null;
+      };
+
+      const perDiemFallback = findGlobalArticleMatchByKeywords(["traktamente", "perdiem", "per diem"]);
+      const perDiemArticleNumber = perDiemFallback?.article_number?.trim() || "";
+
+      let updatedRoles = 0;
+      let updatedMaterials = 0;
+
+      const nextRoles = jobRoles.map((role) => {
+        const roleKey = normalizeArticleKey(role.name);
+        const baseMatch = findArticleMatch(role.name);
+        const baseArticleNumber = baseMatch?.article_number?.trim() || "";
+
+        let changed = false;
+        const fillField = (value: string, keywords: string[]) => {
+          if (String(value || "").trim()) return value;
+          const match = findArticleMatchByKeywords(roleKey, keywords) || baseMatch;
+          const articleNumber = match?.article_number?.trim() || "";
+          if (!articleNumber) return value;
+          changed = true;
+          return articleNumber;
+        };
+
+        const nextRole = {
+          ...role,
+          article_number: String(role.article_number || "").trim()
+            ? role.article_number
+            : baseArticleNumber,
+          day_article_number: fillField(role.day_article_number, ["dag"]),
+          evening_article_number: fillField(role.evening_article_number, ["kvall", "kväll"]),
+          night_article_number: fillField(role.night_article_number, ["natt"]),
+          weekend_article_number: fillField(role.weekend_article_number, ["helg", "weekend"]),
+          overtime_weekday_article_number: fillField(role.overtime_weekday_article_number, [
+            "overtidvardag",
+            "övertidvardag",
+            "otvardag",
+            "övertid vardag",
+            "ot vardag",
+          ]),
+          overtime_weekend_article_number: fillField(role.overtime_weekend_article_number, [
+            "overtidhelg",
+            "övertidhelg",
+            "othelg",
+            "övertid helg",
+            "ot helg",
+          ]),
+          per_diem_article_number: String(role.per_diem_article_number || "").trim()
+            ? role.per_diem_article_number
+            : perDiemArticleNumber || fillField(role.per_diem_article_number, [
+                "traktamente",
+                "perdiem",
+                "per diem",
+              ]),
+          travel_time_article_number: fillField(role.travel_time_article_number, ["restid", "resa", "resor"]),
+        };
+
+        if (nextRole.article_number !== role.article_number && baseArticleNumber) changed = true;
+        if (changed) updatedRoles += 1;
+        return nextRole;
+      });
+
+      const nextMaterials = materials.map((item) => {
+        if (String(item.article_number || "").trim()) return item;
+        const match = findArticleMatch(item.name);
+        const articleNumber = match?.article_number?.trim() || "";
+        if (!articleNumber) return item;
+        updatedMaterials += 1;
+        return { ...item, article_number: articleNumber };
+      });
+
+      setJobRoles(nextRoles);
+      setMaterials(nextMaterials);
+
+      const totalUpdates = updatedRoles + updatedMaterials;
+      if (totalUpdates === 0) {
+        toast("Inga matchningar hittades.");
+      } else {
+        toast.success(
+          `Matchade ${totalUpdates} rader från Fortnox. Spara prislistan för att behålla ändringarna.`
+        );
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte hämta Fortnox-artiklar");
+    } finally {
+      setSyncingProvider(null);
+    }
+  };
+
   return (
     <div className="space-y-6 p-4 md:p-6 lg:p-8">
       <div>
@@ -630,8 +832,33 @@ const PriceList = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Yrkesroller</CardTitle>
-          <CardDescription>Arvode och OB-priser per yrkesroll.</CardDescription>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Yrkesroller</CardTitle>
+              <CardDescription>Arvode och OB-priser per yrkesroll.</CardDescription>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={loading || !!syncingProvider}>
+                  {syncingProvider ? "Hämtar artiklar..." : "Hämta artiklar"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => syncArticlesFromProvider("fortnox")}>
+                  Fortnox
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => syncArticlesFromProvider("visma")}>
+                  Visma
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => syncArticlesFromProvider("speedledger")}>
+                  SpeedLedger
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => syncArticlesFromProvider("bjornlunden")}>
+                  Björn Lunden
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </CardHeader>
         <CardContent>
           {jobRoles.length === 0 ? (

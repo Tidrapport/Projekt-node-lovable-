@@ -7,6 +7,15 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     host: true,
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const accept = req.headers.accept || "";
+        if (req.method === "GET" && accept.includes("text/html") && req.url?.startsWith("/admin")) {
+          req.url = "/";
+        }
+        next();
+      });
+    },
 
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: true },

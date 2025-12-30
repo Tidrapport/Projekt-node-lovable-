@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { CheckCircle } from "lucide-react";
 
 type FortnoxStatus = {
   connected: boolean;
@@ -19,13 +20,32 @@ const InvoiceSettings = () => {
   const [status, setStatus] = useState<FortnoxStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [showConnectedBanner, setShowConnectedBanner] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const result = params.get("fortnox");
-    if (result === "connected") toast.success("Fortnox-koppling klar.");
+    if (result === "connected") {
+      toast.success("Fortnox-koppling klar.");
+      setShowConnectedBanner(true);
+    }
     if (result === "error") toast.error("Fortnox-koppling misslyckades.");
   }, [location.search]);
+
+  const scopeLabels: Record<string, string> = {
+    customer: "Kund",
+    invoice: "Faktura",
+    article: "Artikel",
+    salary: "Lön",
+    archive: "Arkivplats",
+  };
+  const connectedScopes = (status?.scope || "")
+    .split(/\s+/)
+    .map((scope) => scopeLabels[scope])
+    .filter(Boolean);
+  const connectedScopeText = connectedScopes.length
+    ? connectedScopes.join(", ")
+    : "Kund, Faktura, Lön";
 
   const loadStatus = async () => {
     if (isSuperAdmin && !companyId) return;
@@ -98,6 +118,32 @@ const InvoiceSettings = () => {
         <h1 className="text-3xl font-bold tracking-tight">Faktura-inställningar</h1>
         <p className="text-muted-foreground">Hantera standarder för fakturaunderlag och export.</p>
       </div>
+
+      {showConnectedBanner && status?.connected && (
+        <Card className="border-emerald-200 bg-emerald-50">
+          <CardContent className="flex flex-col gap-4 py-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-4">
+              <img
+                src="/opero-systems-logo.png"
+                alt="Opero Systems AB"
+                className="h-12 w-auto"
+              />
+              <div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
+                  <p className="text-lg font-semibold">Yes! Integrationen är kopplad.</p>
+                </div>
+                <p className="text-sm text-emerald-800">
+                  Du har kopplat: {connectedScopeText}.
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" onClick={() => setShowConnectedBanner(false)}>
+              Stäng
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

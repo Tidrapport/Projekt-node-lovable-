@@ -120,6 +120,18 @@
 
     .btn-primary:hover { background: #1e40af; }
 
+    .btn-success {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: none;
+      background: #16a34a;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-success:hover { background: #15803d; }
+
     .btn-secondary {
       padding: 8px 14px;
       border-radius: 999px;
@@ -204,7 +216,7 @@
     <div class="topbar">
       <div>
         <h1 class="company-name">Fakturering</h1>
-        <small>Filtrera tidrapporter per kund/projekt/användare och exportera som PDF eller Fortnox-fil.</small>
+        <small>Filtrera tidrapporter per kund/projekt/användare och exportera eller skicka till Fortnox.</small>
       </div>
       <div class="welcome" id="welcomeText">Välkommen</div>
     </div>
@@ -248,8 +260,8 @@
 
       <div class="actions">
         <button class="btn-secondary" id="resetFilters">Återställ filter</button>
-        <button class="btn-primary" id="downloadPdf">Ladda ner PDF</button>
         <button class="btn-primary" id="downloadFortnox">Exportera Fortnox-fil (CSV)</button>
+        <button class="btn-success" id="sendFortnox">Skicka till Fortnox</button>
       </div>
 
       <div class="summary" id="summaryRow">
@@ -509,8 +521,37 @@
       URL.revokeObjectURL(url);
     });
 
-    document.getElementById("downloadPdf").addEventListener("click", () => {
-      window.print(); // använd "Spara som PDF" i dialogen
+    document.getElementById("sendFortnox").addEventListener("click", async () => {
+      const filtered = filterReports();
+      if (!filtered.length) {
+        alert("Inget att skicka.");
+        return;
+      }
+      if (!confirm("Skicka underlag till Fortnox?")) return;
+
+      const csv = toCSV(filtered);
+      const filename = `fortnox_underlag_${new Date().toISOString().slice(0, 10)}.csv`;
+
+      try {
+        const res = await fetch("/admin/fortnox/push_invoice", {
+          method: "POST",
+          headers: { ...authHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ csv, filename }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.error || data.message || "Kunde inte skicka till Fortnox.");
+          return;
+        }
+        if (data.forwarded) {
+          alert("Skickat till Fortnox.");
+        } else {
+          alert(data.message || "Sparat lokalt, ingen Fortnox-token.");
+        }
+      } catch (err) {
+        console.error("Kunde inte skicka till Fortnox:", err);
+        alert("Kunde inte skicka till Fortnox.");
+      }
     });
 
     [filterCustomer, filterProject, filterSubproject, filterUser, filterFrom, filterTo].forEach((el) => {

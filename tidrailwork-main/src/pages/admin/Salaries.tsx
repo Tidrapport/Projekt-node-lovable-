@@ -25,6 +25,7 @@ interface Profile {
   employee_type: string | null;
   email: string | null;
   employee_number: string | null;
+  is_active?: number | null;
 }
 interface SalaryCode {
   code: string;
@@ -83,6 +84,7 @@ export default function AdminSalaries() {
   const [salaryCodes, setSalaryCodes] = useState<SalaryCode[]>([]);
   const [companyMappings, setCompanyMappings] = useState<CompanyMapping[]>([]);
   const [shiftConfig, setShiftConfig] = useState<any[]>([]);
+  const [includeEmptyEmployees, setIncludeEmptyEmployees] = useState(false);
 
   // Dialogs
   const [showMappingDialog, setShowMappingDialog] = useState(false);
@@ -90,6 +92,7 @@ export default function AdminSalaries() {
   const [showAddCodeDialog, setShowAddCodeDialog] = useState(false);
   const [showEmployeeDialog, setShowEmployeeDialog] = useState(false);
   const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+  const [exportAction, setExportAction] = useState<'download' | 'send' | 'calendar'>('download');
 
   // Mapping state
   const [missingMappings, setMissingMappings] = useState<SalaryCode[]>([]);
@@ -162,6 +165,7 @@ export default function AdminSalaries() {
   const employeeSummaries = useMemo(() => {
     const summaries: EmployeeSummary[] = [];
     for (const profile of profiles) {
+      if (profile.is_active === 0) continue;
       const profileId = String(profile.id);
       const userEntries = entries.filter(e => String(e.user_id) === profileId);
       // Include profiles even if they have no time entries so admins see all employees
@@ -267,8 +271,11 @@ export default function AdminSalaries() {
         hasEmployeeNumber: !!employeeNumber
       });
     }
-    return summaries.sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [profiles, entries, shiftConfig]);
+    const filtered = includeEmptyEmployees
+      ? summaries
+      : summaries.filter(summary => summary.entries.length > 0);
+    return filtered.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [profiles, entries, shiftConfig, includeEmptyEmployees]);
 
   // Select all employees by default when summaries change
   useEffect(() => {
@@ -331,7 +338,7 @@ export default function AdminSalaries() {
   };
 
   // Validate before export (only selected employees)
-  const validateExport = (): ValidationIssue[] => {
+  const validateExport = (action: 'download' | 'send' | 'calendar'): ValidationIssue[] => {
     const issues: ValidationIssue[] = [];
 
     // Check employee numbers for selected employees only
@@ -345,26 +352,30 @@ export default function AdminSalaries() {
       }
     }
 
-    // Check mappings for used codes (require explicit company mappings)
-    for (const code of usedCodes) {
-      if (!getFortnoxCode(code)) {
-        const salaryCode = salaryCodes.find(c => c.code === code);
-        issues.push({
-          type: 'mapping',
-          code,
-          codeName: salaryCode?.name || code
-        });
+    if (action !== 'calendar') {
+      // Check mappings for used codes (require explicit company mappings)
+      for (const code of usedCodes) {
+        if (!getFortnoxCode(code)) {
+          const salaryCode = salaryCodes.find(c => c.code === code);
+          issues.push({
+            type: 'mapping',
+            code,
+            codeName: salaryCode?.name || code
+          });
+        }
       }
     }
     return issues;
   };
 
   // Handle export click
-  const handleExportClick = () => {
-    const issues = validateExport();
+  const handleExportClick = (action: 'download' | 'send' | 'calendar' = 'download') => {
+    setExportAction(action);
+    const issues = validateExport(action);
     const employeeIssues = issues.filter(i => i.type === 'employee_number');
     const mappingIssues = issues.filter(i => i.type === 'mapping');
     if (mappingIssues.length > 0) {
+      toast.error('Löneart saknas. Gå till mappningar och lägg in löneart.');
       // Show mapping dialog first
       const missing = mappingIssues.map(i => salaryCodes.find(c => c.code === i.code)!).filter(Boolean);
       setMissingMappings(missing);
@@ -417,7 +428,7 @@ export default function AdminSalaries() {
       setShowMappingDialog(false);
 
       // Continue with validation
-      handleExportClick();
+      handleExportClick(exportAction);
     } catch (error) {
       console.error('Error saving mappings:', error);
       toast.error('Kunde inte spara mappningar');
@@ -468,6 +479,35 @@ export default function AdminSalaries() {
     } catch (error) {
       console.error('Error saving mappings:', error);
       toast.error('Kunde inte spara mappningar');
+    }
+  };
+
+  const handleResetMappings = async () => {
+    if (!companyId) return;
+    const codes = usedSalaryCodes.map(code => code.code);
+    if (!codes.length) {
+      toast.error('Inga mappningar att nollställa.');
+      return;
+    }
+    const confirmed = window.confirm('Nollställ mappning för valda koder?');
+    if (!confirmed) return;
+    try {
+      await apiFetch('/fortnox_company_mappings', {
+        method: 'DELETE',
+        json: { company_id: companyId, internal_codes: codes },
+      });
+      setCompanyMappings(prev => prev.filter(m => !codes.includes(m.internal_code)));
+      setAllMappingInputs(prev => {
+        const next = { ...prev };
+        codes.forEach(code => {
+          delete next[code];
+        });
+        return next;
+      });
+      toast.success('Mappningar nollställda');
+    } catch (error) {
+      console.error('Error resetting mappings:', error);
+      toast.error('Kunde inte nollställa mappningar');
     }
   };
 
@@ -543,8 +583,104 @@ export default function AdminSalaries() {
   };
 
   // Generate and download PAXml
-  const handleGenerateExport = async () => {
+  const buildAttendanceTransactions = () => {
+    const transactions: {
+      EmployeeId: string;
+      Date: string;
+      CauseCode: string;
+      Hours: string;
+    }[] = [];
+
+    const periodDateStr = format(periodDates.start, 'yyyy-MM-dd');
+    const toHours = (value: number) => Number(value).toFixed(2);
+
+    for (const summary of selectedSummaries) {
+      if (!summary.employeeNumber) continue;
+      if (summary.workHours > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'TID',
+          Hours: toHours(summary.workHours),
+        });
+      }
+      if (summary.overtimeWeekday > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'OT1',
+          Hours: toHours(summary.overtimeWeekday),
+        });
+      }
+      if (summary.overtimeWeekend > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'OT2',
+          Hours: toHours(summary.overtimeWeekend),
+        });
+      }
+      if (summary.obKvall > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'OB1',
+          Hours: toHours(summary.obKvall),
+        });
+      }
+      if (summary.obNatt > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'OB2',
+          Hours: toHours(summary.obNatt),
+        });
+      }
+      if (summary.obHelg > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'OB3',
+          Hours: toHours(summary.obHelg),
+        });
+      }
+      if (summary.travelHours > 0) {
+        transactions.push({
+          EmployeeId: summary.employeeNumber,
+          Date: periodDateStr,
+          CauseCode: 'RES',
+          Hours: toHours(summary.travelHours),
+        });
+      }
+    }
+
+    return transactions;
+  };
+
+  const handleGenerateExport = async (action: 'download' | 'send' | 'calendar') => {
     try {
+      if (action === 'calendar') {
+        const transactions = buildAttendanceTransactions();
+        if (!transactions.length) {
+          toast.error('Inga kalenderposter att skicka.');
+          setShowPreviewDialog(false);
+          return;
+        }
+        try {
+          await apiFetch('/admin/fortnox/attendance', {
+            method: 'POST',
+            json: { company_id: companyId, transactions },
+          });
+          toast.success('Kalenderposter skapade i Fortnox');
+        } catch (err) {
+          console.warn('Could not push attendance transactions:', err);
+          toast.error(err instanceof Error ? err.message : 'Kunde inte skapa kalenderposter');
+        } finally {
+          setShowPreviewDialog(false);
+        }
+        return;
+      }
+
       const employees: PAXmlEmployee[] = [];
       
       // Use the period start date for all entries (Fortnox expects a date)
@@ -694,25 +830,27 @@ export default function AdminSalaries() {
         }
       });
 
-      // Download
-      downloadPAXml(xml, filename);
-      toast.success(`Löneunderlag exporterat (${employees.length} anställda, ${totalEntries} poster)`);
-      setShowPreviewDialog(false);
-      try {
-        // Attempt to send to backend which will forward to Fortnox if connected
-        await apiFetch('/admin/fortnox/push_payroll', {
-          method: 'POST',
-          json: {
-            company_id: companyId,
-            filename,
-            xml,
-          }
-        });
-        toast.success('Löneunderlag skickat till server (för vidarebefordran till Fortnox)');
-      } catch (err) {
-        console.warn('Could not push payroll to server:', err);
-        toast.error('Kunde inte skicka underlag till server för Fortnox');
+      if (action === 'download') {
+        downloadPAXml(xml, filename);
+        toast.success(`Löneunderlag exporterat (${employees.length} anställda, ${totalEntries} poster)`);
       }
+      if (action === 'send') {
+        try {
+          const result = await apiFetch<{ message?: string }>('/admin/fortnox/push_payroll', {
+            method: 'POST',
+            json: {
+              company_id: companyId,
+              filename,
+              xml,
+            }
+          });
+          toast.success(result?.message || 'Löneunderlag skickat till Fortnox');
+        } catch (err) {
+          console.warn('Could not push payroll to server:', err);
+          toast.error(err instanceof Error ? err.message : 'Kunde inte skicka underlag till Fortnox');
+        }
+      }
+      setShowPreviewDialog(false);
     } catch (error) {
       console.error('Error generating export:', error);
       toast.error('Kunde inte skapa export');
@@ -733,9 +871,13 @@ export default function AdminSalaries() {
   }
   return (
     <div className="container mx-auto space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold"> Löner – Fortnox Export</h1>
-        <p className="text-muted-foreground"> Skapa och exportera löneunderlag för import till Fortnox Lön</p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Löner – Fortnox Export</h1>
+          <p className="text-sm text-muted-foreground">
+            Skapa och exportera löneunderlag för import till Fortnox Lön
+          </p>
+        </div>
       </div>
 
       {/* Period selection and stats */}
@@ -801,22 +943,37 @@ export default function AdminSalaries() {
       {/* Employee summary table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <CardTitle>Sammanställning per anställd</CardTitle>
               <CardDescription>
                 Översikt av tid, OB, övertid och traktamente för vald period
               </CardDescription>
             </div>
-            {employeeSummaries.length > 0 && <Button variant="outline" size="sm" onClick={allSelected ? deselectAll : selectAll}>
-                {allSelected ? <>
-                    <Square className="h-4 w-4 mr-2" />
-                    Avmarkera alla
-                  </> : <>
-                    <CheckSquare className="h-4 w-4 mr-2" />
-                    Markera alla
-                  </>}
-              </Button>}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={includeEmptyEmployees}
+                  onCheckedChange={(value) => setIncludeEmptyEmployees(value === true)}
+                />
+                Visa anställda utan tid
+              </label>
+              {employeeSummaries.length > 0 && (
+                <Button variant="outline" size="sm" onClick={allSelected ? deselectAll : selectAll}>
+                  {allSelected ? (
+                    <>
+                      <Square className="h-4 w-4 mr-2" />
+                      Avmarkera alla
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="h-4 w-4 mr-2" />
+                      Markera alla
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -888,14 +1045,30 @@ export default function AdminSalaries() {
       </Card>
 
       {/* Action buttons */}
-      <div className="flex justify-end gap-4">
-        <Button variant="outline" onClick={handleOpenAllMappings}>
+      <div className="flex justify-end gap-3">
+        <Button variant="outline" size="sm" onClick={handleOpenAllMappings}>
           <Settings className="mr-2 h-4 w-4" />
           Hantera Fortnox-mappningar
         </Button>
-        <Button onClick={handleExportClick} disabled={selectedCount === 0} size="lg">
-          <Download className="mr-2 h-5 w-5" />
-          Skapa löneunderlag för Fortnox ({selectedCount} anställda)
+        <Button onClick={() => handleExportClick('download')} disabled={selectedCount === 0} size="sm">
+          <Download className="mr-2 h-4 w-4" />
+          Ladda ner PAXml ({selectedCount} anställda)
+        </Button>
+        <Button
+          onClick={() => handleExportClick('send')}
+          disabled={selectedCount === 0}
+          size="sm"
+          className="bg-emerald-600 hover:bg-emerald-700"
+        >
+          Skicka till Fortnox Arkiv ({selectedCount} anställda)
+        </Button>
+        <Button
+          onClick={() => handleExportClick('calendar')}
+          disabled={selectedCount === 0}
+          size="sm"
+          className="bg-teal-600 hover:bg-teal-700"
+        >
+          Skicka till Fortnox Kalender ({selectedCount} anställda)
         </Button>
       </div>
 
@@ -953,7 +1126,10 @@ export default function AdminSalaries() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={handleResetMappings}>
+              Nollställ mappning
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowAddCodeDialog(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Lägg till egen lönekod
@@ -1157,10 +1333,24 @@ export default function AdminSalaries() {
             </div>
             
             <div className="p-3 bg-muted rounded-lg">
-              <p className="text-sm">
-                <strong>Tips:</strong> I Fortnox, gå till Lön → Kalender → Importera löneunderlag 
-                och välj den nedladdade XML-filen.
-              </p>
+              {exportAction === 'send' && (
+                <p className="text-sm">
+                  <strong>Tips:</strong> Filen skickas till Fortnox Arkiv. Du importerar den sedan i
+                  Fortnox via Lön → Kalender → Importera löneunderlag.
+                </p>
+              )}
+              {exportAction === 'download' && (
+                <p className="text-sm">
+                  <strong>Tips:</strong> I Fortnox, gå till Lön → Kalender → Importera löneunderlag 
+                  och välj den nedladdade XML-filen.
+                </p>
+              )}
+              {exportAction === 'calendar' && (
+                <p className="text-sm">
+                  <strong>Tips:</strong> Detta skapar kalenderposter direkt i Fortnox Lön.
+                  Traktamente ingår inte i kalendern.
+                </p>
+              )}
             </div>
           </div>
           
@@ -1168,9 +1358,21 @@ export default function AdminSalaries() {
             <Button variant="outline" onClick={() => setShowPreviewDialog(false)}>
               Avbryt
             </Button>
-            <Button onClick={handleGenerateExport}>
-              <Download className="mr-2 h-4 w-4" />
-              Ladda ner PAXml
+            <Button
+              onClick={() => handleGenerateExport(exportAction)}
+              className={
+                exportAction === 'send'
+                  ? 'bg-emerald-600 hover:bg-emerald-700'
+                  : exportAction === 'calendar'
+                    ? 'bg-teal-600 hover:bg-teal-700'
+                    : undefined
+              }
+            >
+              {exportAction === 'send'
+                ? 'Skicka till Fortnox Arkiv'
+                : exportAction === 'calendar'
+                  ? 'Skicka till Fortnox Kalender'
+                  : 'Ladda ner PAXml'}
             </Button>
           </DialogFooter>
         </DialogContent>

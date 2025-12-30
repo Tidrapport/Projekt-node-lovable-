@@ -3,7 +3,7 @@ import { addDays, format } from "date-fns";
 import { sv } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, Send } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -290,6 +290,14 @@ const Billing = () => {
     });
   }, [entries, customerId, projectId, subprojectId, userId, fromDate, toDate, customers, attestStatus, invoiceStatus]);
 
+  useEffect(() => {
+    if (!filteredEntries.length) {
+      setSelectedEntries(new Set());
+      return;
+    }
+    setSelectedEntries(new Set(filteredEntries.map((entry) => entry.id)));
+  }, [filteredEntries]);
+
   const totals = useMemo(() => {
     const hours = filteredEntries.reduce((sum, e) => sum + (e.total_hours || 0), 0);
     const travel = filteredEntries.reduce((sum, e) => sum + (e.travel_time_hours || 0), 0);
@@ -560,26 +568,89 @@ const Billing = () => {
       return;
     }
 
-    // Build CSV identical to exportCSV but only for chosen
-    const header = ["Datum", "Användare", "Kund", "Projekt", "Underprojekt", "Timmar", "Restid", "Status"];
-    const rows = chosen.map((e) => [
-      e.date,
-      getUserName(e),
-      getCustomerName(e),
-      getProjectName(e),
-      getSubprojectName(e),
-      e.total_hours?.toFixed(2) ?? "0",
-      (e.travel_time_hours ?? 0).toFixed(2),
-      e.attested_by ? "Attesterad" : "Ej attesterad",
-    ]);
-    const csv = [header, ...rows]
-      .map((r) => r.map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(";"))
-      .join("\n");
+    if (projectId === "all") {
+      toast.error("Välj ett projekt för fakturan.");
+      return;
+    }
 
-    const filename = `faktura_fortnox_${Date.now()}.csv`;
     try {
-      await apiFetch('/admin/fortnox/push_invoice', { method: 'POST', json: { company_id: companyId, filename, csv } });
-      toast.success('Faktura skickad till server (för vidarebefordran till Fortnox när anslutning finns)');
+      const entryDates = chosen
+        .map((entry) => (entry.date ? new Date(entry.date) : null))
+        .filter((d) => d && !Number.isNaN(d.getTime())) as Date[];
+      const periodStart = entryDates.length ? new Date(Math.min(...entryDates.map((d) => d.getTime()))) : new Date();
+      const priceListYear = periodStart.getFullYear();
+
+      const params = new URLSearchParams({ year: String(priceListYear), project_id: projectId });
+      let priceList = await apiFetch<PriceListResponse>(`/price-list?${params.toString()}`);
+      if (!hasProjectRates(priceList)) {
+        const baseParams = new URLSearchParams({ year: String(priceListYear) });
+        priceList = await apiFetch<PriceListResponse>(`/price-list?${baseParams.toString()}`);
+      }
+
+      const { lines } = buildInvoiceLines(chosen, priceList);
+      if (!lines.length) {
+        toast.error("Inga fakturarader kunde skapas.");
+        return;
+      }
+
+      const selectedProject = projects.find((p) => String(p.id) === projectId);
+      const targetCustomer =
+        customerId !== "all"
+          ? customers.find((c) => String(c.id) === customerId)
+          : customers.find((c) => String(c.id) === String(selectedProject?.customer_id || ""));
+      if (!targetCustomer) {
+        toast.error("Kunde inte hitta kund för fakturan.");
+        return;
+      }
+
+      const customerNumber = targetCustomer.customer_number || (targetCustomer.id ? String(targetCustomer.id) : "");
+      if (!customerNumber) {
+        toast.error("Kunden saknar Fortnox kundnummer.");
+        return;
+      }
+
+      const companies = await apiFetch<CompanyInfo[]>(`/companies`);
+      const company = companyId
+        ? (companies || []).find((c) => String(c.id) === String(companyId))
+        : (companies || [])[0];
+
+      const paymentTerms =
+        targetCustomer.payment_terms?.trim() || company?.invoice_payment_terms?.trim() || "30 dagar";
+      const numericDaysMatch = paymentTerms.match(/\d+/);
+      const paymentDays = numericDaysMatch ? Number(numericDaysMatch[0]) : 30;
+
+      const invoiceDate = new Date();
+      const dueDate = addDays(invoiceDate, Number.isFinite(paymentDays) ? paymentDays : 30);
+
+      const invoiceRows = lines.map((line) => {
+        const row: Record<string, any> = {
+          Description: line.description,
+          DeliveredQuantity: Number(line.quantity.toFixed(2)),
+          Unit: line.unit || "",
+          Price: Number(line.unit_price.toFixed(2)),
+        };
+        return row;
+      });
+
+      const invoicePayload = {
+        CustomerNumber: customerNumber,
+        InvoiceDate: format(invoiceDate, "yyyy-MM-dd"),
+        DueDate: format(dueDate, "yyyy-MM-dd"),
+        OurReference: company?.invoice_our_reference || user?.full_name || user?.email || "",
+        YourReference: targetCustomer.their_reference || targetCustomer.contact_name || "",
+        InvoiceRows: invoiceRows,
+      };
+
+      const filename = `fortnox_invoice_${Date.now()}.json`;
+      const result = await apiFetch<{ forwarded?: boolean; message?: string }>('/admin/fortnox/push_invoice', {
+        method: 'POST',
+        json: { company_id: companyId, filename, invoice: invoicePayload }
+      });
+      if (result?.forwarded) {
+        toast.success('Skickat till Fortnox.');
+      } else {
+        toast.success(result?.message || 'Sparat lokalt, ingen Fortnox-token.');
+      }
     } catch (err: any) {
       console.error('Error pushing invoice to server:', err);
       toast.error(err?.message || 'Kunde inte skicka faktura till server');
@@ -747,14 +818,10 @@ const Billing = () => {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Fakturering</h1>
           <p className="text-sm text-muted-foreground">
-            Filtrera tidrapporter per kund, projekt och användare. Exportera till PDF eller Fortnox.
+            Filtrera tidrapporter per kund, projekt och användare. Exportera eller skicka till Fortnox.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportPDF}>
-            <FileText className="mr-2 h-4 w-4" />
-            Underlag PDF
-          </Button>
           <Button variant="outline" onClick={exportInvoicePdf} disabled={exportingInvoicePdf}>
             <FileText className="mr-2 h-4 w-4" />
             Faktura PDF
@@ -762,6 +829,10 @@ const Billing = () => {
           <Button onClick={exportCSV}>
             <Download className="mr-2 h-4 w-4" />
             Fortnox-fil
+          </Button>
+          <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={sendSelectedToFortnox}>
+            <Send className="mr-2 h-4 w-4" />
+            Skicka till Fortnox
           </Button>
         </div>
       </div>
