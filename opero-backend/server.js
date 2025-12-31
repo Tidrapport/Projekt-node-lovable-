@@ -1509,13 +1509,28 @@ app.delete("/projects/:id", requireAuth, requireAdmin, (req, res) => {
   if (!companyId) return res.status(400).json({ error: "Company not found" });
 
   const id = req.params.id;
-  db.run("DELETE FROM projects WHERE id = ? AND company_id = ?", [id, companyId], function (err) {
-    if (err) {
-      console.error("DB-fel vid DELETE project:", err);
-      return res.status(500).json({ error: "DB error" });
-    }
-    if (this.changes === 0) return res.status(404).json({ error: "Not found" });
-    res.status(204).end();
+  db.serialize(() => {
+    db.run("BEGIN TRANSACTION");
+    db.run("UPDATE projects SET is_active = 0 WHERE id = ? AND company_id = ?", [id, companyId], function (err) {
+      if (err) {
+        console.error("DB-fel vid UPDATE project (soft delete):", err);
+        db.run("ROLLBACK");
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (this.changes === 0) {
+        db.run("ROLLBACK");
+        return res.status(404).json({ error: "Not found" });
+      }
+      db.run("UPDATE subprojects SET is_active = 0 WHERE project_id = ? AND company_id = ?", [id, companyId], (spErr) => {
+        if (spErr) {
+          console.error("DB-fel vid UPDATE subprojects (soft delete):", spErr);
+          db.run("ROLLBACK");
+          return res.status(500).json({ error: "DB error" });
+        }
+        db.run("COMMIT");
+        res.status(204).end();
+      });
+    });
   });
 });
 

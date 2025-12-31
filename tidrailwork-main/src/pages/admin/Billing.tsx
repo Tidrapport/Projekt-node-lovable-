@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { addDays, format } from "date-fns";
 import { sv } from "date-fns/locale";
 import jsPDF from "jspdf";
@@ -188,6 +188,8 @@ const Billing = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [exportingInvoicePdf, setExportingInvoicePdf] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
+  const markInvoicedAvailableRef = useRef(true);
+  const markInvoicedWarnedRef = useRef(false);
 
   const [customerId, setCustomerId] = useState<string>("all");
   const [projectId, setProjectId] = useState<string>("all");
@@ -626,6 +628,7 @@ const Billing = () => {
 
   const markEntriesInvoiced = async (ids: string[]) => {
     if (!ids.length) return false;
+    if (!markInvoicedAvailableRef.current) return false;
     try {
       await apiFetch("/admin/time-entries/mark-invoiced", {
         method: "POST",
@@ -636,7 +639,20 @@ const Billing = () => {
       );
       return true;
     } catch (err: any) {
-      console.error("Kunde inte markera fakturerade rader:", err);
+      const message = String(err?.message || "");
+      const isNotFound =
+        message.includes("404") ||
+        message.toLowerCase().includes("not found") ||
+        message.toLowerCase().includes("cannot post");
+      if (isNotFound) {
+        markInvoicedAvailableRef.current = false;
+        if (!markInvoicedWarnedRef.current) {
+          markInvoicedWarnedRef.current = true;
+          toast.message("Fakturan skapad, men markering som fakturerad saknas just nu.");
+        }
+        return false;
+      }
+      console.warn("Kunde inte markera fakturerade rader:", err);
       toast.error(err?.message || "Kunde inte markera fakturerade rader.");
       return false;
     }
@@ -730,11 +746,11 @@ const Billing = () => {
       });
       if (result?.forwarded) {
         toast.success("Skickat till Fortnox.");
+        const marked = await markEntriesInvoiced(ids);
+        if (marked) setSelectedEntries(new Set());
       } else {
         toast.success(result?.message || "Sparat lokalt, ingen Fortnox-token.");
       }
-      const marked = await markEntriesInvoiced(ids);
-      if (marked) setSelectedEntries(new Set());
     } catch (err: any) {
       console.error('Error pushing invoice to server:', err);
       toast.error(err?.message || 'Kunde inte skicka faktura till server');
@@ -894,8 +910,6 @@ const Billing = () => {
 
       await generateInvoicePdf(meta, lines, adjustedTotals, footer);
       toast.success("Faktura skapad.");
-      const ids = Array.from(new Set(selectedFilteredEntries.map((entry) => entry.id)));
-      await markEntriesInvoiced(ids);
     } catch (error: any) {
       console.error(error);
       toast.error("Kunde inte skapa faktura-PDF.");
