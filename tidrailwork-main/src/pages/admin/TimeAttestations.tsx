@@ -15,9 +15,10 @@ import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
 import { ensureArray } from "@/lib/ensureArray";
 import { useAuth } from "@/contexts/AuthContext";
-import { format, addWeeks, startOfWeek, getISOWeek, getISOWeekYear, isWithinInterval, parseISO } from "date-fns";
+import { format, addDays, startOfWeek, getISOWeek, getISOWeekYear, parseISO } from "date-fns";
 import { sv } from "date-fns/locale";
 import { CheckCircle, Lock, Unlock, Pencil, CheckCircle2, AlertCircle, Download, X, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
 
 const REST_OPTIONS = ["0", "15", "30", "45", "60"];
@@ -128,6 +129,7 @@ const statusBadge = (entry: TimeEntry) => {
 
 export default function TimeAttestations() {
   const { isAdmin, companyId } = useAuth();
+  const navigate = useNavigate();
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -140,7 +142,6 @@ export default function TimeAttestations() {
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [selectedSubproject, setSelectedSubproject] = useState<string>("all");
   const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
-  const [selectedInvoiceStatus, setSelectedInvoiceStatus] = useState<string>("all");
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   const [selectedWeek, setSelectedWeek] = useState<string>("all");
@@ -283,8 +284,6 @@ export default function TimeAttestations() {
       if (selectedUser !== "all" && e.user_id !== selectedUser) return false;
       if (selectedStatus === "attested" && !e.attested_by) return false;
       if (selectedStatus === "not_attested" && e.attested_by) return false;
-      if (selectedInvoiceStatus === "invoiced" && !e.invoiced) return false;
-      if (selectedInvoiceStatus === "not_invoiced" && e.invoiced) return false;
       if (selectedProject !== "all" && e.project_id !== selectedProject) return false;
       if (selectedSubproject !== "all" && e.subproject_id !== selectedSubproject) return false;
       if (selectedCustomer !== "all") {
@@ -308,7 +307,7 @@ export default function TimeAttestations() {
 
       return true;
     });
-  }, [entries, selectedUser, selectedStatus, selectedProject, selectedSubproject, fromDate, toDate, selectedWeek, selectedCustomer, selectedInvoiceStatus, customers]);
+  }, [entries, selectedUser, selectedStatus, selectedProject, selectedSubproject, fromDate, toDate, selectedWeek, selectedCustomer, customers]);
 
   const pendingFilteredCount = useMemo(
     () => filteredEntries.filter((entry) => !entry.attested_by).length,
@@ -622,12 +621,6 @@ export default function TimeAttestations() {
           : selectedStatus === "not_attested"
           ? "Ej attesterade"
           : "Alla";
-      const invoiceLabel =
-        selectedInvoiceStatus === "invoiced"
-          ? "Fakturerade"
-          : selectedInvoiceStatus === "not_invoiced"
-          ? "Ej fakturerade"
-          : "Alla";
 
       const getValidDate = (value?: string | null) => {
         if (!value) return null;
@@ -696,9 +689,8 @@ export default function TimeAttestations() {
       doc.text(`Underprojekt: ${subprojectName}`, 14, 38);
       doc.text(`Användare: ${userName}`, 14, 44);
       doc.text(`Atteststatus: ${statusLabel}`, 14, 50);
-      doc.text(`Fakturering: ${invoiceLabel}`, 14, 56);
-      doc.text(`Period: ${periodLabel}`, 14, 62);
-      doc.text(`Exportdatum: ${format(new Date(), "d MMMM yyyy", { locale: sv })}`, 14, 68);
+      doc.text(`Period: ${periodLabel}`, 14, 56);
+      doc.text(`Exportdatum: ${format(new Date(), "d MMMM yyyy", { locale: sv })}`, 14, 62);
 
       const sortedEntries = [...filteredEntries].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
@@ -1066,26 +1058,18 @@ export default function TimeAttestations() {
   );
 
   const weeksOverview = useMemo(() => {
-    const today = new Date();
-    const start = startOfWeek(addWeeks(today, -3), { weekStartsOn: 1 });
-    const end = addWeeks(start, 4);
-    const inRange = entries.filter((e) => {
-      const d = e.date ? new Date(e.date) : null;
-      return d && isWithinInterval(d, { start, end });
-    });
-
     const grouped = new Map<
       string,
-      { label: string; attested: number; total: number; invoiced: number; week: number; year: number }
+      { label: string; attested: number; total: number; invoiced: number; week: number; year: number; sampleDate: Date }
     >();
 
-    inRange.forEach((e) => {
+    entries.forEach((e) => {
       const d = e.date ? parseISO(e.date) : new Date(e.date || "");
       const wk = getISOWeek(d);
       const yr = getISOWeekYear(d);
       const key = `${yr}-W${String(wk).padStart(2, "0")}`;
       const label = `Vecka ${wk}`;
-      if (!grouped.has(key)) grouped.set(key, { label, attested: 0, total: 0, invoiced: 0, week: wk, year: yr });
+      if (!grouped.has(key)) grouped.set(key, { label, attested: 0, total: 0, invoiced: 0, week: wk, year: yr, sampleDate: d });
       const g = grouped.get(key)!;
       g.total += 1;
       if (e.attested_by) g.attested += 1;
@@ -1096,20 +1080,12 @@ export default function TimeAttestations() {
   }, [entries]);
 
   const pendingByWeek = useMemo(() => {
-    const today = new Date();
-    const start = startOfWeek(addWeeks(today, -3), { weekStartsOn: 1 });
-    const end = addWeeks(start, 4);
-    const inRange = entries.filter((e) => {
-      const d = e.date ? new Date(e.date) : null;
-      return d && isWithinInterval(d, { start, end });
-    });
-
     const grouped = new Map<
       string,
       { label: string; users: Map<string, { name: string; count: number }>; week: number; year: number; total: number; attested: number }
     >();
 
-    inRange.forEach((e) => {
+    entries.forEach((e) => {
       const d = e.date ? new Date(e.date) : null;
       if (!d) return;
       const wk = getISOWeek(d);
@@ -1196,22 +1172,35 @@ export default function TimeAttestations() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 md:grid-cols-4">
-            {weeksOverview.slice(0, 4).map(([key, data]) => {
+            {weeksOverview.map(([key, data]) => {
               const ready = data.attested === data.total && data.total > 0;
               const color = ready ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50";
+              const start = startOfWeek(data.sampleDate, { weekStartsOn: 1 });
+              const end = addDays(start, 6);
               return (
-                <Card key={key} className={`shadow-card ${color}`}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
+                <Card
+                  key={key}
+                  className={`shadow-card ${color} cursor-pointer transition hover:shadow-elevated`}
+                  onClick={() =>
+                    navigate("/admin/billing", {
+                      state: {
+                        fromDate: format(start, "yyyy-MM-dd"),
+                        toDate: format(end, "yyyy-MM-dd"),
+                      },
+                    })
+                  }
+                >
+                  <CardHeader className="py-1">
+                    <CardTitle className="text-sm flex items-center gap-2">
                       {ready ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
                       {data.label}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground space-y-1">
+                  <CardContent className="py-1 text-xs text-muted-foreground space-y-0.5">
                     <div>{data.attested}/{data.total} attesterade</div>
                     <div className="flex items-center gap-2">
                       <span>{data.invoiced}/{data.total} fakturerade</span>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-muted-foreground">
                         {data.total > 0 ? Math.round((data.invoiced / data.total) * 100) : 0}%
                       </span>
                     </div>
@@ -1228,14 +1217,14 @@ export default function TimeAttestations() {
         </CardContent>
       </Card>
 
-      {/* Oattesterade senaste veckorna */}
+      {/* Oattesterade per vecka */}
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Oattesterade tidrapporter (senaste 4 veckorna)</CardTitle>
+          <CardTitle>Oattesterade tidrapporter per vecka</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {pendingByWeek.length === 0 && (
-            <div className="text-sm text-muted-foreground">Alla tidrapporter är attesterade för de senaste veckorna.</div>
+            <div className="text-sm text-muted-foreground">Alla tidrapporter är attesterade.</div>
           )}
           {pendingByWeek.map(([key, data]) => (
             <Card key={key} className="border border-orange-200 bg-orange-50">
@@ -1359,20 +1348,6 @@ export default function TimeAttestations() {
           </div>
 
           <div className="space-y-1">
-            <Label className="text-sm text-muted-foreground">Fakturering</Label>
-            <Select value={selectedInvoiceStatus} onValueChange={setSelectedInvoiceStatus}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Alla" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Alla</SelectItem>
-                <SelectItem value="invoiced">Fakturerade</SelectItem>
-                <SelectItem value="not_invoiced">Ej fakturerade</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
             <Label className="text-sm text-muted-foreground">Vecka</Label>
             <Select value={selectedWeek} onValueChange={setSelectedWeek}>
               <SelectTrigger className="w-full">
@@ -1460,11 +1435,6 @@ export default function TimeAttestations() {
                 <div className="space-y-1">
                   <CardTitle className="text-lg flex items-center gap-2">
                     {statusBadge(entry)}
-                    {entry.invoiced && (
-                      <Badge variant="outline" className="border-emerald-200 text-emerald-700">
-                        Fakturerad
-                      </Badge>
-                    )}
                     <span>{userName} – {dateLabel}</span>
                     <span className="text-muted-foreground text-sm">{entry.total_hours.toFixed(2)} h</span>
                   </CardTitle>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { addDays, format } from "date-fns";
 import { sv } from "date-fns/locale";
 import jsPDF from "jspdf";
@@ -37,6 +37,7 @@ import { apiFetch } from "@/api/client";
 import { ensureArray } from "@/lib/ensureArray";
 import { calculateOBDistributionWithOvertime } from "@/lib/obDistribution";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
+import { useLocation } from "react-router-dom";
 
 interface TimeEntry {
   id: string;
@@ -181,6 +182,7 @@ type PriceListResponse = {
 
 const Billing = () => {
   const { user, companyId } = useAuth();
+  const location = useLocation();
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -188,8 +190,6 @@ const Billing = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [exportingInvoicePdf, setExportingInvoicePdf] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
-  const markInvoicedAvailableRef = useRef(true);
-  const markInvoicedWarnedRef = useRef(false);
 
   const [customerId, setCustomerId] = useState<string>("all");
   const [projectId, setProjectId] = useState<string>("all");
@@ -204,6 +204,12 @@ const Billing = () => {
     if (!user) return;
     void fetchData();
   }, [user]);
+
+  useEffect(() => {
+    const state = location.state as { fromDate?: string; toDate?: string } | null;
+    if (state?.fromDate) setFromDate(state.fromDate);
+    if (state?.toDate) setToDate(state.toDate);
+  }, [location.state]);
 
   const fetchData = async () => {
     try {
@@ -626,38 +632,6 @@ const Billing = () => {
     toast.success("Fortnox-fil genererad.");
   };
 
-  const markEntriesInvoiced = async (ids: string[]) => {
-    if (!ids.length) return false;
-    if (!markInvoicedAvailableRef.current) return false;
-    try {
-      await apiFetch("/admin/time-entries/mark-invoiced", {
-        method: "POST",
-        json: { ids, company_id: companyId }
-      });
-      setEntries((prev) =>
-        prev.map((entry) => (ids.includes(entry.id) ? { ...entry, invoiced: true } : entry))
-      );
-      return true;
-    } catch (err: any) {
-      const message = String(err?.message || "");
-      const isNotFound =
-        message.includes("404") ||
-        message.toLowerCase().includes("not found") ||
-        message.toLowerCase().includes("cannot post");
-      if (isNotFound) {
-        markInvoicedAvailableRef.current = false;
-        if (!markInvoicedWarnedRef.current) {
-          markInvoicedWarnedRef.current = true;
-          toast.message("Fakturan skapad, men markering som fakturerad saknas just nu.");
-        }
-        return false;
-      }
-      console.warn("Kunde inte markera fakturerade rader:", err);
-      toast.error(err?.message || "Kunde inte markera fakturerade rader.");
-      return false;
-    }
-  };
-
   const sendSelectedToFortnox = async () => {
     const chosen = selectedFilteredEntries;
     if (!chosen.length) {
@@ -746,8 +720,6 @@ const Billing = () => {
       });
       if (result?.forwarded) {
         toast.success("Skickat till Fortnox.");
-        const marked = await markEntriesInvoiced(ids);
-        if (marked) setSelectedEntries(new Set());
       } else {
         toast.success(result?.message || "Sparat lokalt, ingen Fortnox-token.");
       }

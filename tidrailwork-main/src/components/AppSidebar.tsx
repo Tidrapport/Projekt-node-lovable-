@@ -20,7 +20,8 @@ import {
   ChevronRight,
   FileText,
   Wallet,
-  ClipboardList
+  ClipboardList,
+  BadgeCheck
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -64,6 +65,7 @@ const adminMainItems = [
   { title: "Arbetsorder", url: "/admin/work-orders", icon: ClipboardList },
   { title: "Attestering", url: "/admin/attestations", icon: CheckSquare },
   { title: "Fakturering", url: "/admin/billing", icon: FileText },
+  { title: "Fakturering markera", url: "/admin/invoice-marking", icon: BadgeCheck },
   { title: "Löner", url: "/admin/salaries", icon: Wallet },
   { title: "Svetsrapporter", url: "/admin/welding-reports", icon: Briefcase },
   { title: "Resursplanering", url: "/admin/planning", icon: Calendar },
