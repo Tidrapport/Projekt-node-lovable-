@@ -154,6 +154,12 @@ type PriceListMaterial = {
 };
 
 type PriceListSettings = {
+  show_day?: boolean | number;
+  show_evening?: boolean | number;
+  show_night?: boolean | number;
+  show_weekend?: boolean | number;
+  show_overtime_weekday?: boolean | number;
+  show_overtime_weekend?: boolean | number;
   day_start?: string;
   day_end?: string;
   evening_start?: string;
@@ -329,6 +335,12 @@ const Billing = () => {
     return hours + minutes / 60;
   };
 
+  const toBool = (value: unknown, fallback = true) => {
+    if (value === null || value === undefined) return fallback;
+    if (value === true || value === "true" || value === 1 || value === "1") return true;
+    return false;
+  };
+
   const hasProjectRates = (priceList: PriceListResponse) => {
     const roleHasRate = priceList.job_roles.some((role) =>
       [
@@ -367,11 +379,47 @@ const Billing = () => {
     };
 
     const settings = priceList.settings || {};
+    const visibility = {
+      day: toBool(settings.show_day, true),
+      evening: toBool(settings.show_evening, true),
+      night: toBool(settings.show_night, true),
+      weekend: toBool(settings.show_weekend, true),
+      overtimeWeekday: toBool(settings.show_overtime_weekday, true),
+      overtimeWeekend: toBool(settings.show_overtime_weekend, true),
+    };
     const shiftWindows = {
       day: { start: timeToHours(settings.day_start, 6), end: timeToHours(settings.day_end, 18) },
       evening: { start: timeToHours(settings.evening_start, 18), end: timeToHours(settings.evening_end, 21) },
       night: { start: timeToHours(settings.night_start, 21), end: timeToHours(settings.night_end, 6) },
       weekend: { start: timeToHours(settings.weekend_start, 18), end: timeToHours(settings.weekend_end, 6) },
+    };
+
+    const mergeDistribution = (distribution: { day: number; evening: number; night: number; weekend: number }) => {
+      const next = { ...distribution };
+      const merge = (from: keyof typeof next, to: keyof typeof next) => {
+        if (next[from] <= 0) return;
+        next[to] += next[from];
+        next[from] = 0;
+      };
+      if (!visibility.weekend) {
+        if (visibility.night) merge("weekend", "night");
+        else if (visibility.evening) merge("weekend", "evening");
+        else if (visibility.day) merge("weekend", "day");
+      }
+      if (!visibility.night) {
+        if (visibility.evening) merge("night", "evening");
+        else if (visibility.day) merge("night", "day");
+      }
+      if (!visibility.evening) {
+        if (visibility.night) merge("evening", "night");
+        else if (visibility.day) merge("evening", "day");
+      }
+      if (!visibility.day) {
+        if (visibility.night) merge("day", "night");
+        else if (visibility.evening) merge("day", "evening");
+        else if (visibility.weekend) merge("day", "weekend");
+      }
+      return next;
     };
 
     const lineMap = new Map<string, InvoiceLine>();
@@ -394,8 +442,10 @@ const Billing = () => {
       const roleName = role?.name || "Yrkesroll";
       const baseArticleNumber = role?.article_number ? String(role.article_number).trim() : "";
       const totalHours = toPositive(entry.total_hours);
-      const overtimeWeekday = toPositive(entry.overtime_weekday_hours);
-      const overtimeWeekend = toPositive(entry.overtime_weekend_hours);
+      const overtimeWeekdayRaw = toPositive(entry.overtime_weekday_hours);
+      const overtimeWeekendRaw = toPositive(entry.overtime_weekend_hours);
+      const overtimeWeekday = visibility.overtimeWeekday ? overtimeWeekdayRaw : 0;
+      const overtimeWeekend = visibility.overtimeWeekend ? overtimeWeekendRaw : 0;
 
       let distribution = { day: totalHours, evening: 0, night: 0, weekend: 0 };
       if (entry.date && entry.start_time && entry.end_time) {
@@ -415,59 +465,68 @@ const Billing = () => {
         night: toPositive(distribution.night),
         weekend: toPositive(distribution.weekend),
       };
+      distribution = mergeDistribution(distribution);
 
-      addLine(`${roleName}-day`, {
-        item_no: getArticleNumber(role?.day_article_number, baseArticleNumber),
-        description: `${roleName} Dag`,
-        quantity: distribution.day,
-        unit: "tim",
-        unit_price: Number(role?.day_rate ?? 0),
-        total: distribution.day * Number(role?.day_rate ?? 0),
-      });
-      addLine(`${roleName}-evening`, {
-        item_no: getArticleNumber(role?.evening_article_number, baseArticleNumber),
-        description: `${roleName} Kväll`,
-        quantity: distribution.evening,
-        unit: "tim",
-        unit_price: Number(role?.evening_rate ?? 0),
-        total: distribution.evening * Number(role?.evening_rate ?? 0),
-      });
-      addLine(`${roleName}-night`, {
-        item_no: getArticleNumber(role?.night_article_number, baseArticleNumber),
-        description: `${roleName} Natt`,
-        quantity: distribution.night,
-        unit: "tim",
-        unit_price: Number(role?.night_rate ?? 0),
-        total: distribution.night * Number(role?.night_rate ?? 0),
-      });
-      addLine(`${roleName}-weekend`, {
-        item_no: getArticleNumber(role?.weekend_article_number, baseArticleNumber),
-        description: `${roleName} Helg`,
-        quantity: distribution.weekend,
-        unit: "tim",
-        unit_price: Number(role?.weekend_rate ?? 0),
-        total: distribution.weekend * Number(role?.weekend_rate ?? 0),
-      });
-
-      if (overtimeWeekday > 0) {
-        addLine(`${roleName}-overtime-weekday`, {
-          item_no: getArticleNumber(role?.overtime_weekday_article_number, baseArticleNumber),
-          description: `${roleName} Övertid vardag`,
-          quantity: overtimeWeekday,
+      if (visibility.day) {
+        addLine(`${roleName}-day`, {
+          item_no: getArticleNumber(role?.day_article_number, baseArticleNumber),
+          description: `${roleName} Dag`,
+          quantity: distribution.day,
           unit: "tim",
-          unit_price: Number(role?.overtime_weekday_rate ?? 0),
-          total: overtimeWeekday * Number(role?.overtime_weekday_rate ?? 0),
+          unit_price: Number(role?.day_rate ?? 0),
+          total: distribution.day * Number(role?.day_rate ?? 0),
+        });
+      }
+      if (visibility.evening) {
+        addLine(`${roleName}-evening`, {
+          item_no: getArticleNumber(role?.evening_article_number, baseArticleNumber),
+          description: `${roleName} Kväll`,
+          quantity: distribution.evening,
+          unit: "tim",
+          unit_price: Number(role?.evening_rate ?? 0),
+          total: distribution.evening * Number(role?.evening_rate ?? 0),
+        });
+      }
+      if (visibility.night) {
+        addLine(`${roleName}-night`, {
+          item_no: getArticleNumber(role?.night_article_number, baseArticleNumber),
+          description: `${roleName} Natt`,
+          quantity: distribution.night,
+          unit: "tim",
+          unit_price: Number(role?.night_rate ?? 0),
+          total: distribution.night * Number(role?.night_rate ?? 0),
+        });
+      }
+      if (visibility.weekend) {
+        addLine(`${roleName}-weekend`, {
+          item_no: getArticleNumber(role?.weekend_article_number, baseArticleNumber),
+          description: `${roleName} Helg`,
+          quantity: distribution.weekend,
+          unit: "tim",
+          unit_price: Number(role?.weekend_rate ?? 0),
+          total: distribution.weekend * Number(role?.weekend_rate ?? 0),
         });
       }
 
-      if (overtimeWeekend > 0) {
+      if (visibility.overtimeWeekday && overtimeWeekdayRaw > 0) {
+        addLine(`${roleName}-overtime-weekday`, {
+          item_no: getArticleNumber(role?.overtime_weekday_article_number, baseArticleNumber),
+          description: `${roleName} Övertid vardag`,
+          quantity: overtimeWeekdayRaw,
+          unit: "tim",
+          unit_price: Number(role?.overtime_weekday_rate ?? 0),
+          total: overtimeWeekdayRaw * Number(role?.overtime_weekday_rate ?? 0),
+        });
+      }
+
+      if (visibility.overtimeWeekend && overtimeWeekendRaw > 0) {
         addLine(`${roleName}-overtime-weekend`, {
           item_no: getArticleNumber(role?.overtime_weekend_article_number, baseArticleNumber),
           description: `${roleName} Övertid helg`,
-          quantity: overtimeWeekend,
+          quantity: overtimeWeekendRaw,
           unit: "tim",
           unit_price: Number(role?.overtime_weekend_rate ?? 0),
-          total: overtimeWeekend * Number(role?.overtime_weekend_rate ?? 0),
+          total: overtimeWeekendRaw * Number(role?.overtime_weekend_rate ?? 0),
         });
       }
 
