@@ -441,6 +441,9 @@ const Billing = () => {
       const role = entry.job_role_id ? jobRoleRates.get(entry.job_role_id) : null;
       const roleName = role?.name || "Yrkesroll";
       const baseArticleNumber = role?.article_number ? String(role.article_number).trim() : "";
+      const userLabel = entry.profiles?.full_name || (entry as any).user_full_name || "Okänd";
+      const userKey = entry.user_id || userLabel;
+      const linePrefix = userLabel ? `${userLabel} - ` : "";
       const totalHours = toPositive(entry.total_hours);
       const overtimeWeekdayRaw = toPositive(entry.overtime_weekday_hours);
       const overtimeWeekendRaw = toPositive(entry.overtime_weekend_hours);
@@ -468,9 +471,9 @@ const Billing = () => {
       distribution = mergeDistribution(distribution);
 
       if (visibility.day) {
-        addLine(`${roleName}-day`, {
+        addLine(`${userKey}-${roleName}-day`, {
           item_no: getArticleNumber(role?.day_article_number, baseArticleNumber),
-          description: `${roleName} Dag`,
+          description: `${linePrefix}${roleName} Dag`,
           quantity: distribution.day,
           unit: "tim",
           unit_price: Number(role?.day_rate ?? 0),
@@ -478,9 +481,9 @@ const Billing = () => {
         });
       }
       if (visibility.evening) {
-        addLine(`${roleName}-evening`, {
+        addLine(`${userKey}-${roleName}-evening`, {
           item_no: getArticleNumber(role?.evening_article_number, baseArticleNumber),
-          description: `${roleName} Kväll`,
+          description: `${linePrefix}${roleName} Kväll`,
           quantity: distribution.evening,
           unit: "tim",
           unit_price: Number(role?.evening_rate ?? 0),
@@ -488,9 +491,9 @@ const Billing = () => {
         });
       }
       if (visibility.night) {
-        addLine(`${roleName}-night`, {
+        addLine(`${userKey}-${roleName}-night`, {
           item_no: getArticleNumber(role?.night_article_number, baseArticleNumber),
-          description: `${roleName} Natt`,
+          description: `${linePrefix}${roleName} Natt`,
           quantity: distribution.night,
           unit: "tim",
           unit_price: Number(role?.night_rate ?? 0),
@@ -498,9 +501,9 @@ const Billing = () => {
         });
       }
       if (visibility.weekend) {
-        addLine(`${roleName}-weekend`, {
+        addLine(`${userKey}-${roleName}-weekend`, {
           item_no: getArticleNumber(role?.weekend_article_number, baseArticleNumber),
-          description: `${roleName} Helg`,
+          description: `${linePrefix}${roleName} Helg`,
           quantity: distribution.weekend,
           unit: "tim",
           unit_price: Number(role?.weekend_rate ?? 0),
@@ -509,9 +512,9 @@ const Billing = () => {
       }
 
       if (visibility.overtimeWeekday && overtimeWeekdayRaw > 0) {
-        addLine(`${roleName}-overtime-weekday`, {
+        addLine(`${userKey}-${roleName}-overtime-weekday`, {
           item_no: getArticleNumber(role?.overtime_weekday_article_number, baseArticleNumber),
-          description: `${roleName} Övertid vardag`,
+          description: `${linePrefix}${roleName} Övertid vardag`,
           quantity: overtimeWeekdayRaw,
           unit: "tim",
           unit_price: Number(role?.overtime_weekday_rate ?? 0),
@@ -520,9 +523,9 @@ const Billing = () => {
       }
 
       if (visibility.overtimeWeekend && overtimeWeekendRaw > 0) {
-        addLine(`${roleName}-overtime-weekend`, {
+        addLine(`${userKey}-${roleName}-overtime-weekend`, {
           item_no: getArticleNumber(role?.overtime_weekend_article_number, baseArticleNumber),
-          description: `${roleName} Övertid helg`,
+          description: `${linePrefix}${roleName} Övertid helg`,
           quantity: overtimeWeekendRaw,
           unit: "tim",
           unit_price: Number(role?.overtime_weekend_rate ?? 0),
@@ -532,9 +535,9 @@ const Billing = () => {
 
       if (entry.travel_time_hours) {
         const travelHours = toPositive(entry.travel_time_hours);
-        addLine(`${roleName}-travel`, {
+        addLine(`${userKey}-${roleName}-travel`, {
           item_no: getArticleNumber(role?.travel_time_article_number, baseArticleNumber),
-          description: `${roleName} Restid`,
+          description: `${linePrefix}${roleName} Restid`,
           quantity: travelHours,
           unit: "tim",
           unit_price: Number(role?.travel_time_rate ?? 0),
@@ -544,9 +547,9 @@ const Billing = () => {
 
       const perDiemDays = entry.per_diem_type === "full" ? 1 : entry.per_diem_type === "half" ? 0.5 : 0;
       if (perDiemDays) {
-        addLine(`${roleName}-perdiem`, {
+        addLine(`${userKey}-${roleName}-perdiem`, {
           item_no: getArticleNumber(role?.per_diem_article_number, baseArticleNumber),
-          description: `${roleName} Traktamente`,
+          description: `${linePrefix}${roleName} Traktamente`,
           quantity: perDiemDays,
           unit: "dag",
           unit_price: Number(role?.per_diem_rate ?? 0),
@@ -558,9 +561,9 @@ const Billing = () => {
         const materialInfo = materialRates.get(String(mat.material_type_id));
         const quantity = toPositive(mat.quantity);
         if (!materialInfo || quantity === 0) return;
-        addLine(`material-${materialInfo.id}`, {
+        addLine(`material-${userKey}-${materialInfo.id}`, {
           item_no: materialInfo.article_number ? String(materialInfo.article_number).trim() : "",
-          description: materialInfo.name,
+          description: `${linePrefix}${materialInfo.name}`,
           quantity,
           unit: materialInfo.unit || "",
           unit_price: Number(materialInfo.price ?? 0),

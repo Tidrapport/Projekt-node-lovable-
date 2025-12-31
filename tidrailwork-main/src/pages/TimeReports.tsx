@@ -9,7 +9,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
-import { addMaterialToTimeEntry, createTimeEntry, deleteTimeEntry, listTimeEntries, updateTimeEntry, TimeEntry } from "@/api/timeEntries";
+import {
+  addMaterialToTimeEntry,
+  createTimeEntry,
+  deleteMaterialFromTimeEntry,
+  deleteTimeEntry,
+  listTimeEntries,
+  updateMaterialForTimeEntry,
+  updateTimeEntry,
+  TimeEntry,
+} from "@/api/timeEntries";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { useImpersonation } from "@/contexts/ImpersonationContext";
@@ -19,6 +28,7 @@ import { Clock, Plus, Trash2, X, Pencil, CheckCircle, CalendarDays, List, Copy }
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 import { TimeReportsCalendarView } from "@/components/TimeReportsCalendarView";
+import { calculateOBDistributionWithOvertime, DEFAULT_SHIFT_WINDOWS, type ShiftWindowConfig } from "@/lib/obDistribution";
 
 interface Project {
   id: string;
@@ -42,6 +52,7 @@ interface MaterialType {
 }
 
 interface MaterialEntry {
+  id?: string;
   materialTypeId: string;
   quantity: number;
 }
@@ -93,6 +104,7 @@ const TimeReports = () => {
   const [deviationTitle, setDeviationTitle] = useState("");
   const [deviationDescription, setDeviationDescription] = useState("");
   const [deviationStatus, setDeviationStatus] = useState("none");
+  const [shiftWindows, setShiftWindows] = useState<ShiftWindowConfig>(DEFAULT_SHIFT_WINDOWS);
 
   useEffect(() => {
     fetchData();
@@ -148,6 +160,33 @@ const TimeReports = () => {
       if (materialTypesArray.length) setMaterialTypes(materialTypesArray.map((m: any) => ({ ...m, id: String(m.id) })));
     } catch (error) {
       console.error("Error fetching material types", error);
+    }
+
+    try {
+      const obSettingsData = await apiFetch(`/admin/ob-settings`);
+      const rows = Array.isArray(obSettingsData) ? obSettingsData : [];
+      const byType: Record<string, { start_hour?: number; end_hour?: number }> = {};
+      rows.forEach((row: any) => {
+        if (!row?.shift_type) return;
+        byType[String(row.shift_type)] = row;
+      });
+      const pick = (type: string, fallback: { start: number; end: number }) => {
+        const row = byType[type] || {};
+        const start = Number(row.start_hour);
+        const end = Number(row.end_hour);
+        return {
+          start: Number.isFinite(start) ? start : fallback.start,
+          end: Number.isFinite(end) ? end : fallback.end,
+        };
+      };
+      setShiftWindows({
+        day: pick("day", DEFAULT_SHIFT_WINDOWS.day),
+        evening: pick("evening", DEFAULT_SHIFT_WINDOWS.evening),
+        night: pick("night", DEFAULT_SHIFT_WINDOWS.night),
+        weekend: pick("weekend", DEFAULT_SHIFT_WINDOWS.weekend),
+      });
+    } catch (error) {
+      console.error("Error fetching OB settings", error);
     }
   };
 
@@ -225,19 +264,13 @@ const TimeReports = () => {
       return;
     }
 
-    // Check if material already added
-    if (materials.some(m => m.materialTypeId === selectedMaterial)) {
-      toast.error("Materialet är redan tillagt");
-      return;
-    }
-
     setMaterials([...materials, { materialTypeId: selectedMaterial, quantity }]);
     setSelectedMaterial("");
     setMaterialQuantity("");
   };
 
-  const removeMaterial = (materialTypeId: string) => {
-    setMaterials(materials.filter(m => m.materialTypeId !== materialTypeId));
+  const removeMaterialAt = (index: number) => {
+    setMaterials((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -254,7 +287,10 @@ const TimeReports = () => {
 
     setLoading(true);
     try {
-      const totalHours = calculateHours(startTime, endTime, parseInt(breakMinutes));
+      let totalHours = calculateHours(startTime, endTime, parseInt(breakMinutes));
+      if (totalHours <= 0 && editingEntry.total_hours > 0) {
+        totalHours = editingEntry.total_hours;
+      }
       const calculatedShiftType = determineShiftType(date, startTime, endTime);
       const overtimeWeekdayValue = Number(overtimeWeekdayHours) || 0;
       const overtimeWeekendValue = Number(overtimeWeekendHours) || 0;
@@ -363,6 +399,15 @@ const TimeReports = () => {
     setDeviationTitle(entry.deviation_title || "");
     setDeviationDescription(entry.deviation_description || "");
     setDeviationStatus(entry.deviation_status || "none");
+    setMaterials(
+      (entry.material_reports || []).map((m) => ({
+        id: m.id,
+        materialTypeId: m.material_type_id,
+        quantity: m.quantity,
+      }))
+    );
+    setSelectedMaterial("");
+    setMaterialQuantity("");
     setShowDialog(true);
   };
 
@@ -412,6 +457,26 @@ const TimeReports = () => {
         deviation_description: deviationDescription || null,
         deviation_status: deviationStatus === "none" ? null : deviationStatus,
       });
+
+      const originalMaterials = editingEntry.material_reports || [];
+      const currentIds = new Set(materials.filter((m) => m.id).map((m) => m.id as string));
+
+      const removed = originalMaterials.filter((m) => !currentIds.has(m.id));
+      const toUpdate = materials.filter((m) => m.id);
+      const toAdd = materials.filter((m) => !m.id);
+
+      await Promise.all([
+        ...removed.map((m) => deleteMaterialFromTimeEntry(editingEntry.id, m.id)),
+        ...toUpdate.map((m) =>
+          updateMaterialForTimeEntry(editingEntry.id, m.id as string, { quantity: m.quantity })
+        ),
+        ...toAdd.map((m) =>
+          addMaterialToTimeEntry(editingEntry.id, {
+            material_type_id: m.materialTypeId,
+            quantity: m.quantity,
+          })
+        ),
+      ]);
 
       toast.success("Tidrapport uppdaterad!");
       setShowDialog(false);
@@ -610,7 +675,35 @@ const TimeReports = () => {
                       </div>
                       <div>
                         <span className="text-muted-foreground">Skift:</span>{" "}
-                        <span className="font-medium">{entry.shift_type || "-"}</span>
+                        <span className="font-medium">
+                          {(() => {
+                            if (!entry.date || !entry.start_time || !entry.end_time) {
+                              const labelMap: Record<string, string> = {
+                                day: "DAG",
+                                evening: "KVÄLL",
+                                night: "NATT",
+                                weekend: "HELG",
+                              };
+                              return entry.shift_type ? labelMap[entry.shift_type] || entry.shift_type : "-";
+                            }
+                            const dist = calculateOBDistributionWithOvertime(
+                              entry.date,
+                              entry.start_time,
+                              entry.end_time,
+                              entry.break_minutes || 0,
+                              entry.overtime_weekday_hours || 0,
+                              entry.overtime_weekend_hours || 0,
+                              shiftWindows
+                            );
+                            const labels: string[] = [];
+                            if (dist.weekend > 0) labels.push("HELG");
+                            if (dist.night > 0) labels.push("NATT");
+                            if (dist.evening > 0) labels.push("KVÄLL");
+                            if ((entry.overtime_weekday_hours || 0) > 0) labels.push("ÖTV");
+                            if ((entry.overtime_weekend_hours || 0) > 0) labels.push("ÖTH");
+                            return labels.length ? labels.join(",") : "-";
+                          })()}
+                        </span>
                       </div>
                     </div>
                     <div className="text-sm text-muted-foreground mt-2">
@@ -629,11 +722,16 @@ const TimeReports = () => {
                     <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
                       <span className="text-sm text-muted-foreground mr-1">Tillägg:</span>
                       {entry.material_reports && entry.material_reports.length > 0 ? (
-                        entry.material_reports.map((material) => (
-                          <Badge key={material.id} variant="secondary" className="text-xs">
-                            {material.material_type.name}: {material.quantity} {material.material_type.unit}
-                          </Badge>
-                        ))
+                        entry.material_reports.map((material) => {
+                          const type = materialTypes.find((mt) => mt.id === material.material_type_id);
+                          const label = type?.name || material.material_type.name;
+                          const unit = type?.unit || material.material_type.unit;
+                          return (
+                            <Badge key={material.id} variant="secondary" className="text-xs">
+                              {label}: {material.quantity} {unit}
+                            </Badge>
+                          );
+                        })
                       ) : (
                         <span className="text-sm text-muted-foreground">Inga</span>
                       )}
@@ -958,14 +1056,18 @@ const TimeReports = () => {
               </div>
               {materials.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {materials.map((material) => {
-                    const materialType = materialTypes.find(mt => mt.id === material.materialTypeId);
+                  {materials.map((material, index) => {
+                    const materialType = materialTypes.find((mt) => mt.id === material.materialTypeId);
                     return (
-                      <Badge key={material.materialTypeId} variant="secondary" className="gap-1">
+                      <Badge
+                        key={material.id ? `${material.id}-${index}` : `${material.materialTypeId}-${index}`}
+                        variant="secondary"
+                        className="gap-1"
+                      >
                         {materialType?.name}: {material.quantity} {materialType?.unit}
                         <X
                           className="h-3 w-3 cursor-pointer hover:text-destructive"
-                          onClick={() => removeMaterial(material.materialTypeId)}
+                          onClick={() => removeMaterialAt(index)}
                         />
                       </Badge>
                     );

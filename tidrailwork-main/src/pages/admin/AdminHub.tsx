@@ -331,11 +331,15 @@ const AdminHub = () => {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-4">
                 <div className="h-20 w-36 rounded-md border bg-white p-2 flex items-center justify-center">
-                  <img
-                    src={logoUrl || "/railwork-logo.jpg"}
-                    alt="Företagslogga"
-                    className="max-h-full max-w-full object-contain"
-                  />
+                  {logoUrl ? (
+                    <img
+                      src={logoUrl}
+                      alt="Företagslogga"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Ingen logga</span>
+                  )}
                 </div>
                 <div className="text-sm text-muted-foreground">
                   PNG eller JPG, max 2 MB.

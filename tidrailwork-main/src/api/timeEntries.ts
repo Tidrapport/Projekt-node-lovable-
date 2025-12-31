@@ -79,6 +79,7 @@ export type TimeEntry = {
   job_role?: { name: string };
   material_reports?: {
     id: string;
+    material_type_id: string;
     quantity: number;
     material_type: { name: string; unit: string };
   }[];
@@ -128,6 +129,7 @@ const toBoolean = (value: unknown) => {
 
 const toMaterial = (raw: RawMaterial) => ({
   id: String(raw.id),
+  material_type_id: String(raw.material_type_id ?? ""),
   quantity: Number(raw.quantity || 0),
   material_type: {
     name: raw.material_name || "Tillägg",
@@ -265,4 +267,20 @@ export async function addMaterialToTimeEntry(
     place: payload.place,
   });
   return toMaterial(raw);
+}
+
+export async function updateMaterialForTimeEntry(
+  timeEntryId: string | number,
+  materialRowId: string | number,
+  payload: { quantity?: number; place?: string }
+) {
+  const raw = await api.put<RawMaterial>(`/time-entries/${timeEntryId}/materials/${materialRowId}`, {
+    quantity: payload.quantity,
+    place: payload.place,
+  });
+  return toMaterial(raw);
+}
+
+export async function deleteMaterialFromTimeEntry(timeEntryId: string | number, materialRowId: string | number) {
+  await api.del(`/time-entries/${timeEntryId}/materials/${materialRowId}`);
 }

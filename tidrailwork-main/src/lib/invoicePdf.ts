@@ -313,6 +313,7 @@ export async function generateInvoicePdf(
   drawValue(ibanValue, COORDS.iban_line.x, COORDS.iban_line.y, COORDS.iban_line.w);
   drawValue(bicValue, COORDS.bic_line.x, COORDS.bic_line.y, COORDS.bic_line.w);
 
+  clearArea(COORDS.logo.x, COORDS.logo.y, COORDS.logo.w, COORDS.logo.h);
   if (companyFooter?.logo_url) {
     await drawLogo(companyFooter.logo_url);
   }
