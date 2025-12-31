@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { GuideButton } from "@/components/GuideButton";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -316,9 +317,21 @@ const AdminDocuments = () => {
 
   return (
     <div className="container mx-auto space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dokument</h1>
-        <p className="text-muted-foreground">Hantera TDOK-dokument och intyg för kompetensmatris</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-bold">Dokument</h1>
+          <p className="text-muted-foreground">Hantera TDOK-dokument och intyg för kompetensmatris</p>
+        </div>
+        <GuideButton
+          title="Guide: Dokumentation"
+          steps={[
+            "Lägg upp aktuella TDOK- och styrande dokument.",
+            "Använd tydliga filnamn och versioner.",
+            "Uppdatera eller ersätt gamla dokument vid förändringar.",
+            "Ta bort föråldrade filer för att undvika fel underlag.",
+            "Kontrollera att dokumenten går att ladda ner vid behov.",
+          ]}
+        />
       </div>
 
       <Card>

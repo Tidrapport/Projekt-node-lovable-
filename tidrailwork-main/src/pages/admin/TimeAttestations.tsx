@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { GuideButton } from "@/components/GuideButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -241,7 +242,7 @@ export default function TimeAttestations() {
         job_role: e.job_role_name ? { name: e.job_role_name } : e.job_role,
         user_email: e.user_email || null,
         user_full_name: e.user_full_name || e.user_name || null,
-        invoiced: e.invoiced ?? false,
+        invoiced: Boolean(Number(e.invoiced)),
         customer_name: e.customer_name || null,
         shift_type: e.shift_type || null,
         ao_number: e.ao_number || null,
@@ -1171,11 +1172,21 @@ export default function TimeAttestations() {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-4">
         <div>
           <h2 className="text-3xl font-bold font-heading">Attestering</h2>
           <p className="text-muted-foreground">Granska och attestera tidrapporter för företaget.</p>
         </div>
+        <GuideButton
+          title="Guide: Attestera tidrapporter"
+          steps={[
+            "Filtrera på kund, projekt, användare och period för att hitta rätt rader.",
+            "Kontrollera tider, OB, restid, traktamente, tillägg samt avvikelser/bilder.",
+            "Säkerställ att rätt yrkesroll och prislista gäller för raderna.",
+            "Attestera när allt är korrekt – raderna låses för användaren.",
+            "Lås upp vid behov och korrigera innan fakturering eller lön.",
+          ]}
+        />
       </div>
 
       {/* Klart för fakturering */}
@@ -1198,7 +1209,12 @@ export default function TimeAttestations() {
                   </CardHeader>
                   <CardContent className="text-sm text-muted-foreground space-y-1">
                     <div>{data.attested}/{data.total} attesterade</div>
-                    <div>{data.invoiced}/{data.total} fakturerade</div>
+                    <div className="flex items-center gap-2">
+                      <span>{data.invoiced}/{data.total} fakturerade</span>
+                      <span className="text-xs text-muted-foreground">
+                        {data.total > 0 ? Math.round((data.invoiced / data.total) * 100) : 0}%
+                      </span>
+                    </div>
                   </CardContent>
                 </Card>
               );
@@ -1444,6 +1460,11 @@ export default function TimeAttestations() {
                 <div className="space-y-1">
                   <CardTitle className="text-lg flex items-center gap-2">
                     {statusBadge(entry)}
+                    {entry.invoiced && (
+                      <Badge variant="outline" className="border-emerald-200 text-emerald-700">
+                        Fakturerad
+                      </Badge>
+                    )}
                     <span>{userName} – {dateLabel}</span>
                     <span className="text-muted-foreground text-sm">{entry.total_hours.toFixed(2)} h</span>
                   </CardTitle>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GuideButton } from "@/components/GuideButton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -130,9 +131,20 @@ const AdminWeldingReports = () => {
 
   return (
     <div className="container mx-auto space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold">Svetsrapporter</h1>
-        <p className="text-muted-foreground">Hantera och ladda ner svetsrapporter</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-bold">Svetsrapporter</h1>
+          <p className="text-muted-foreground">Hantera och ladda ner svetsrapporter</p>
+        </div>
+        <GuideButton
+          title="Guide: Svetsrapporter"
+          steps={[
+            "Filtrera på år, månad och användare för att hitta rätt rapport.",
+            "Kontrollera svetsare, svets-ID, projekt och svetsrader.",
+            "Granska svetsmetod och eventuella avvikelser.",
+            "Ladda ner PDF och arkivera enligt era rutiner.",
+          ]}
+        />
       </div>
 
       {/* Filters */}

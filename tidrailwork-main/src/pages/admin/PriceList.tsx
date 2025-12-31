@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { GuideButton } from "@/components/GuideButton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -615,11 +616,24 @@ const PriceList = () => {
 
   return (
     <div className="space-y-6 p-4 md:p-6 lg:p-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Prislista</h1>
-        <p className="text-muted-foreground">
-          Skapa och hantera prislistor för fakturering.
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Prislista</h1>
+          <p className="text-muted-foreground">
+            Skapa och hantera prislistor för fakturering.
+          </p>
+        </div>
+        <GuideButton
+          title="Guide: Prislista, OB och artiklar"
+          steps={[
+            "Välj år och om prislistan är standard eller projektspecifik.",
+            "Ange pris per yrkesroll, OB, restid och traktamente.",
+            "Matcha rader mot Fortnox-artiklar för korrekta artikelnummer.",
+            "Spara prislistan innan fakturering eller export till Fortnox.",
+            "Testa med en tidrapport och kontrollera fakturaraderna.",
+          ]}
+          note="För korrekt OB på faktura måste OB-inställningar och prislista vara synkade."
+        />
       </div>
 
       <Card>

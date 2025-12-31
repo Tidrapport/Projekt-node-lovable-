@@ -5,6 +5,7 @@ import { ensureArray } from "@/lib/ensureArray";
 import { login, getMe, logout } from "@/api/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { GuideButton } from "@/components/GuideButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -878,13 +879,23 @@ export default function AdminSalaries() {
   }
   return (
     <div className="container mx-auto space-y-6 p-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Löner – Fortnox Export</h1>
           <p className="text-sm text-muted-foreground">
             Skapa och exportera löneunderlag för import till Fortnox Lön
           </p>
         </div>
+        <GuideButton
+          title="Guide: Fortnox-löner"
+          steps={[
+            "Säkerställ att namn och anställningsnummer matchar Fortnox.",
+            "Mappa interna koder till Fortnox lönearter i mappningsdelen.",
+            "Välj löneperiod och markera anställda för export.",
+            "Granska förhandsvisning innan du skickar eller exporterar.",
+            "I Fortnox: Lön -> Kalender -> Importera löneunderlag och verifiera.",
+          ]}
+        />
       </div>
 
       {/* Period selection and stats */}

@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { GuideButton } from "@/components/GuideButton";
 import { apiFetch } from "@/api/client";
 import { toast } from "sonner";
 import { Loader2, Percent, Clock } from "lucide-react";
@@ -112,11 +113,23 @@ const OBSettings = () => {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="mb-6">
-        <h2 className="text-3xl font-bold font-heading">OB-inställningar</h2>
-        <p className="text-muted-foreground">
-          Hantera OB-tillägg för olika tidsperioder
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-2">
+        <div>
+          <h2 className="text-3xl font-bold font-heading">OB-inställningar</h2>
+          <p className="text-muted-foreground">
+            Hantera OB-tillägg för olika tidsperioder
+          </p>
+        </div>
+        <GuideButton
+          title="Guide: Rätt OB på faktura"
+          steps={[
+            "Kontrollera tider för kväll, natt och helg så de matchar era avtal.",
+            "Säkerställ att prislistan har OB-priser för samma typer.",
+            "Testa med en tidrapport och verifiera att fakturan visar rätt OB.",
+            "Justera tider för särskilda regler (t.ex. natt från 18:00).",
+            "Justera och spara innan ny attestering/fakturering.",
+          ]}
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

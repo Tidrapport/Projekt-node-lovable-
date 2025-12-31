@@ -7,6 +7,7 @@ import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { CheckCircle, ChevronDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { GuideButton } from "@/components/GuideButton";
 
 type FortnoxStatus = {
   connected: boolean;
@@ -251,9 +252,22 @@ const InvoiceSettings = () => {
 
   const settingsView = (
     <div className="space-y-6 p-4 md:p-6 lg:p-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Integrationer</h1>
-        <p className="text-muted-foreground">Hantera kopplingar och behörigheter för externa system.</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Integrationer</h1>
+          <p className="text-muted-foreground">Hantera kopplingar och behörigheter för externa system.</p>
+        </div>
+        <GuideButton
+          title="Guide: Koppla Fortnox"
+          steps={[
+            "Välj rätt företag i AdminHub innan du startar kopplingen.",
+            "Klicka Anslut Fortnox och logga in som administratör i Fortnox.",
+            "Godkänn behörigheter för kund, faktura, artikel, lön, arkiv och kalender vid behov.",
+            "Kontrollera att status är Ansluten och att scope innehåller det ni behöver.",
+            "Om fel bolag eller saknade scopes: koppla bort och anslut igen.",
+          ]}
+          note="Om kalender eller arkiv inte fungerar: kontrollera att Fortnox har aktiverat API-behörigheter för kontot."
+        />
       </div>
 
       <Card>

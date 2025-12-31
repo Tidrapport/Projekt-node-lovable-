@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { GuideButton } from "@/components/GuideButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { apiFetch } from "@/api/client";
@@ -51,6 +52,7 @@ interface TimeEntry {
   job_role_id?: string | null;
   materials?: { material_type_id: string | number; quantity: number }[];
   attested_by: string | null;
+  invoiced?: boolean;
   project_id: string | null;
   subproject_id: string | null;
   user_id: string;
@@ -228,7 +230,7 @@ const Billing = () => {
           quantity: Number(m.quantity) || 0,
         })),
         attested_by: e.attested_by != null ? String(e.attested_by) : null,
-        invoiced: e.invoiced ?? false,
+        invoiced: Boolean(Number(e.invoiced)),
         project_id: e.project_id != null ? String(e.project_id) : null,
         subproject_id: e.subproject_id != null ? String(e.subproject_id) : null,
         user_id: e.user_id != null ? String(e.user_id) : "",
@@ -281,8 +283,8 @@ const Billing = () => {
       if (userId !== "all" && String(entry.user_id || "") !== userId) return false;
       if (attestStatus === "attested" && !entry.attested_by) return false;
       if (attestStatus === "not_attested" && entry.attested_by) return false;
-      if (invoiceStatus === "invoiced" && !(entry as any).invoiced) return false;
-      if (invoiceStatus === "not_invoiced" && (entry as any).invoiced) return false;
+      if (invoiceStatus === "invoiced" && !entry.invoiced) return false;
+      if (invoiceStatus === "not_invoiced" && entry.invoiced) return false;
 
       const d = entry.date ? new Date(entry.date) : null;
       const fromD = fromDate ? new Date(fromDate) : null;
@@ -617,6 +619,24 @@ const Billing = () => {
     toast.success("Fortnox-fil genererad.");
   };
 
+  const markEntriesInvoiced = async (ids: string[]) => {
+    if (!ids.length) return false;
+    try {
+      await apiFetch("/admin/time-entries/mark-invoiced", {
+        method: "POST",
+        json: { ids, company_id: companyId }
+      });
+      setEntries((prev) =>
+        prev.map((entry) => (ids.includes(entry.id) ? { ...entry, invoiced: true } : entry))
+      );
+      return true;
+    } catch (err: any) {
+      console.error("Kunde inte markera fakturerade rader:", err);
+      toast.error(err?.message || "Kunde inte markera fakturerade rader.");
+      return false;
+    }
+  };
+
   const sendSelectedToFortnox = async () => {
     const ids = Array.from(selectedEntries);
     if (ids.length === 0) {
@@ -709,10 +729,12 @@ const Billing = () => {
         json: { company_id: companyId, filename, invoice: invoicePayload }
       });
       if (result?.forwarded) {
-        toast.success('Skickat till Fortnox.');
+        toast.success("Skickat till Fortnox.");
       } else {
-        toast.success(result?.message || 'Sparat lokalt, ingen Fortnox-token.');
+        toast.success(result?.message || "Sparat lokalt, ingen Fortnox-token.");
       }
+      const marked = await markEntriesInvoiced(ids);
+      if (marked) setSelectedEntries(new Set());
     } catch (err: any) {
       console.error('Error pushing invoice to server:', err);
       toast.error(err?.message || 'Kunde inte skicka faktura till server');
@@ -866,6 +888,8 @@ const Billing = () => {
 
       await generateInvoicePdf(meta, lines, adjustedTotals, footer);
       toast.success("Faktura skapad.");
+      const ids = Array.from(new Set(filteredEntries.map((entry) => entry.id)));
+      await markEntriesInvoiced(ids);
     } catch (error: any) {
       console.error(error);
       toast.error("Kunde inte skapa faktura-PDF.");
@@ -896,6 +920,16 @@ const Billing = () => {
             <Send className="mr-2 h-4 w-4" />
             Skicka till Fortnox
           </Button>
+          <GuideButton
+            title="Guide: Fakturera korrekt"
+            steps={[
+              "Filtrera på kund, projekt och period så att bara relevanta rader visas.",
+              "Kontrollera att tidrapporter är attesterade och har rätt yrkesroll/OB.",
+              "Säkerställ att prislista, OB-inställningar och artiklar är uppdaterade.",
+              "Kontrollera att kunden har Fortnox kundnummer innan du skickar.",
+              "Skicka till Fortnox eller exportera fil och granska fakturautkast.",
+            ]}
+          />
         </div>
       </div>
 

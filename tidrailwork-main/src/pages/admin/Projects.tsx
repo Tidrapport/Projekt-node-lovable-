@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { GuideButton } from "@/components/GuideButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -387,6 +388,16 @@ const AdminProjects = () => {
             <Plus className="mr-2 h-4 w-4" />
             Nytt underprojekt
           </Button>
+          <GuideButton
+            title="Guide: Projektstruktur"
+            steps={[
+              "Skapa kund först och koppla projektet till kunden.",
+              "Ange projektnamn, kod och anteckningar för tydlighet.",
+              "Skapa underprojekt för delmoment eller etapper.",
+              "Använd projekten i planering och tidrapporter.",
+              "Prislista kan sättas per projekt för korrekt fakturering.",
+            ]}
+          />
         </div>
       </div>
 

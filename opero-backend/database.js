@@ -746,6 +746,9 @@ db.serialize(() => {
       status TEXT DEFAULT 'Ny',
       attested_by INTEGER,
       attested_at TEXT,
+      invoiced INTEGER DEFAULT 0,
+      invoiced_at TEXT,
+      invoiced_by INTEGER,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
@@ -769,6 +772,9 @@ db.serialize(() => {
     const hasSaveCompTime = cols.some((c) => c.name === "save_comp_time");
     const hasCompTimeSaved = cols.some((c) => c.name === "comp_time_saved_hours");
     const hasCompTimeTaken = cols.some((c) => c.name === "comp_time_taken_hours");
+    const hasInvoiced = cols.some((c) => c.name === "invoiced");
+    const hasInvoicedAt = cols.some((c) => c.name === "invoiced_at");
+    const hasInvoicedBy = cols.some((c) => c.name === "invoiced_by");
     if (!hasType) {
       db.run(`ALTER TABLE time_reports ADD COLUMN traktamente_type TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till traktamente_type:", e);
@@ -824,6 +830,21 @@ db.serialize(() => {
     if (!hasCompTimeTaken) {
       db.run(`ALTER TABLE time_reports ADD COLUMN comp_time_taken_hours REAL DEFAULT 0;`, (e) => {
         if (e) console.error("Kunde inte lägga till comp_time_taken_hours:", e);
+      });
+    }
+    if (!hasInvoiced) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN invoiced INTEGER DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till invoiced:", e);
+      });
+    }
+    if (!hasInvoicedAt) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN invoiced_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till invoiced_at:", e);
+      });
+    }
+    if (!hasInvoicedBy) {
+      db.run(`ALTER TABLE time_reports ADD COLUMN invoiced_by INTEGER;`, (e) => {
+        if (e) console.error("Kunde inte lägga till invoiced_by:", e);
       });
     }
   });

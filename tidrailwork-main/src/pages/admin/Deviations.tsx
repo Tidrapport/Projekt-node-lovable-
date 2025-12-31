@@ -4,6 +4,7 @@ import { ensureArray } from "@/lib/ensureArray";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { GuideButton } from "@/components/GuideButton";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -163,9 +164,21 @@ export default function AdminDeviations() {
 
   return (
     <div className="container mx-auto p-6 space-y-4">
-      <div>
-        <h1 className="text-3xl font-bold">Avvikelser</h1>
-        <p className="text-muted-foreground">Översikt av rapporterade avvikelser kopplade till tidrapporter.</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-3xl font-bold">Avvikelser</h1>
+          <p className="text-muted-foreground">Översikt av rapporterade avvikelser kopplade till tidrapporter.</p>
+        </div>
+        <GuideButton
+          title="Guide: Avvikelser"
+          steps={[
+            "Granska avvikelser och kontrollera kopplad tidrapport.",
+            "Kontrollera bilder, beskrivning och allvarlighetsgrad.",
+            "Uppdatera status och skriv eventuell admin-kommentar.",
+            "Markera åtgärdad när felet är hanterat.",
+            "Exportera PDF vid behov för dokumentation.",
+          ]}
+        />
       </div>
 
       {loading ? (

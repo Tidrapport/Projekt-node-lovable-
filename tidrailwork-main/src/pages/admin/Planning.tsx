@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { GuideButton } from "@/components/GuideButton";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -254,14 +255,15 @@ export default function AdminPlanning() {
             Hantera arbetsplanering för användare
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
-          <DialogTrigger asChild>
-            <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
-              <Plus className="mr-2 h-4 w-4" />
-              Ny resursplan
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+        <div className="flex items-center gap-2">
+          <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+            <DialogTrigger asChild>
+              <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
+                <Plus className="mr-2 h-4 w-4" />
+                Ny resursplan
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingAssignmentId ? "Redigera planering" : "Skapa ny planering"}</DialogTitle>
               <DialogDescription>
@@ -418,8 +420,19 @@ export default function AdminPlanning() {
                 {editingAssignmentId ? "Uppdatera planering" : "Skapa planering"}
               </Button>
             </div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+          <GuideButton
+            title="Guide: Resursplanering"
+            steps={[
+              "Välj användare, projekt och period för planeringen.",
+              "Fyll i kontakt, adress, fordon och starttid för första skiftet.",
+              "Ange anteckningar för uppstart eller arbetsplatsinfo.",
+              "Markera preliminärt om planeringen inte är spikad.",
+              "Spara så att användaren ser planeringen i sin vy.",
+            ]}
+          />
+        </div>
       </div>
 
       <Tabs defaultValue="gantt" className="space-y-4">

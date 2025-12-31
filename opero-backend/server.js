@@ -6325,6 +6325,49 @@ app.get("/debug-users", (req, res) => {
 //   TIME REPORTS (tidrapporter)
 // ==========================
 
+// Markera tidrapporter som fakturerade (admin)
+app.post("/admin/time-entries/mark-invoiced", requireAuth, requireAdmin, (req, res) => {
+  const { ids, invoiced = true, company_id } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "ids required" });
+  }
+
+  const allowAll = req.company_scope_all === true;
+  const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
+  if (!targetCompanyId) return res.status(400).json({ error: "Company not found" });
+
+  const normalizedIds = ids
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id));
+
+  if (normalizedIds.length === 0) {
+    return res.status(400).json({ error: "ids required" });
+  }
+  if (normalizedIds.length > 500) {
+    return res.status(400).json({ error: "Too many ids" });
+  }
+
+  const flag = invoiced === false || invoiced === 0 || invoiced === "0" ? 0 : 1;
+  const invoicedAt = flag ? new Date().toISOString() : null;
+  const invoicedBy = flag ? getAuthUserId(req) : null;
+
+  const placeholders = normalizedIds.map(() => "?").join(",");
+  const sql = `
+    UPDATE time_reports
+    SET invoiced = ?, invoiced_at = ?, invoiced_by = ?
+    WHERE id IN (${placeholders})
+      AND user_id IN (SELECT id FROM users WHERE company_id = ?)
+  `;
+
+  db.run(sql, [flag, invoicedAt, invoicedBy, ...normalizedIds, targetCompanyId], function (err) {
+    if (err) {
+      console.error("DB-fel vid markera fakturerade tidrapporter:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    res.json({ updated: this.changes || 0 });
+  });
+});
+
 // Hämta tidrapporter
 // Alias: TIME ENTRIES (tenant-scoped, with filters)
 app.get("/time-entries", requireAuth, (req, res) => {

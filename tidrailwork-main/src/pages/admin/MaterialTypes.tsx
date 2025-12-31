@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { GuideButton } from "@/components/GuideButton";
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -92,10 +93,21 @@ const AdminMaterialTypes = () => {
           <h2 className="text-3xl font-bold font-heading">Tillägg</h2>
           <p className="text-muted-foreground">Hantera tillgängliga tillägg och materialtyper</p>
         </div>
-        <Button onClick={() => setShowDialog(true)} className="bg-gradient-primary">
-          <Plus className="mr-2 h-4 w-4" />
-          Nytt tillägg
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowDialog(true)} className="bg-gradient-primary">
+            <Plus className="mr-2 h-4 w-4" />
+            Nytt tillägg
+          </Button>
+          <GuideButton
+            title="Guide: Tillägg & artiklar"
+            steps={[
+              "Skapa material/tillägg med tydligt namn och enhet.",
+              "Använd samma enhet som i Fortnox-artikeln (st, h, m).",
+              "Använd tillägg i tidrapport för att få med dem på faktura.",
+              "Kontrollera prislista/artikelkoppling om ni fakturerar via Fortnox.",
+            ]}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
