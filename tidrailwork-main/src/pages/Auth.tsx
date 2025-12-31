@@ -19,6 +19,15 @@ interface CompanyOption {
   logo_url: string | null;
 }
 
+const Logo3D = ({ className = "" }: { className?: string }) => (
+  <iframe
+    src="/rotlogo3d.html"
+    title="OPERO Systems 3D-logga"
+    className={`mx-auto block border-0 ${className}`}
+    style={{ border: 0 }}
+  />
+);
+
 const Auth = () => {
   const { user, login } = useAuth();
   const navigate = useNavigate();
@@ -144,11 +153,7 @@ const Auth = () => {
       <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
         <div className="w-full max-w-md space-y-6">
           <div className="text-center space-y-2 text-slate-100">
-            <img
-              src="/opero-systems-logo.png"
-              alt="Opero Systems AB"
-              className="h-24 mx-auto object-contain"
-            />
+            <Logo3D className="h-64 w-full max-w-[840px]" />
             <p className="text-slate-300">Laddar...</p>
           </div>
         </div>
@@ -162,11 +167,7 @@ const Auth = () => {
       <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
         <div className="w-full max-w-md space-y-6">
           <div className="text-center space-y-2 text-slate-100">
-            <img
-              src="/opero-systems-logo.png"
-              alt="Opero Systems AB"
-              className="h-24 mx-auto object-contain"
-            />
+            <Logo3D className="h-64 w-full max-w-[840px]" />
             <p className="text-slate-300">Systemadministratör</p>
           </div>
 
@@ -231,17 +232,13 @@ const Auth = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
       <div className="w-full max-w-md space-y-6">
+        <div className="text-center space-y-2 text-slate-100">
+          <Logo3D className="h-72 w-full max-w-[920px]" />
+          <p className="text-sm text-slate-300">Företags operativsystem</p>
+        </div>
 
         <Card className="shadow-elevated">
-          <CardHeader className="space-y-3">
-            <div className="flex flex-col items-center gap-2 text-center">
-              <img
-                src="/opero-systems-logo.png"
-                alt="Opero Systems AB"
-                className="h-28 mx-auto object-contain rounded-md bg-slate-950 p-2"
-              />
-              <p className="text-sm text-muted-foreground">Företags operativsystem</p>
-            </div>
+          <CardHeader className="space-y-2">
             <CardTitle className="text-center">Välkommen</CardTitle>
             <CardDescription className="text-center">
               Logga in med din e-postadress
