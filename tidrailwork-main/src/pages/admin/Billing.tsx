@@ -298,6 +298,11 @@ const Billing = () => {
     });
   }, [entries, customerId, projectId, subprojectId, userId, fromDate, toDate, customers, attestStatus, invoiceStatus]);
 
+  const selectedFilteredEntries = useMemo(
+    () => filteredEntries.filter((entry) => selectedEntries.has(entry.id)),
+    [filteredEntries, selectedEntries]
+  );
+
   useEffect(() => {
     if (!filteredEntries.length) {
       setSelectedEntries(new Set());
@@ -591,12 +596,12 @@ const Billing = () => {
   };
 
   const exportCSV = () => {
-    if (!filteredEntries.length) {
-      toast.error("Inget att exportera.");
+    if (!selectedFilteredEntries.length) {
+      toast.error(filteredEntries.length ? "Välj minst en rad att exportera." : "Inget att exportera.");
       return;
     }
     const header = ["Datum", "Användare", "Kund", "Projekt", "Underprojekt", "Timmar", "Restid", "Status"];
-    const rows = filteredEntries.map((e) => [
+    const rows = selectedFilteredEntries.map((e) => [
       e.date,
       getUserName(e),
       getCustomerName(e),
@@ -638,17 +643,12 @@ const Billing = () => {
   };
 
   const sendSelectedToFortnox = async () => {
-    const ids = Array.from(selectedEntries);
-    if (ids.length === 0) {
+    const chosen = selectedFilteredEntries;
+    if (!chosen.length) {
       toast.error("Välj minst en rad att skicka.");
       return;
     }
-
-    const chosen = filteredEntries.filter((e) => selectedEntries.has(e.id));
-    if (!chosen.length) {
-      toast.error("Inga valda rader hittades i filtren.");
-      return;
-    }
+    const ids = chosen.map((entry) => entry.id);
 
     if (projectId === "all") {
       toast.error("Välj ett projekt för fakturan.");
@@ -742,10 +742,16 @@ const Billing = () => {
   };
 
   const exportPDF = () => {
-    if (!filteredEntries.length) {
-      toast.error("Inget att exportera.");
+    if (!selectedFilteredEntries.length) {
+      toast.error(filteredEntries.length ? "Välj minst en rad att exportera." : "Inget att exportera.");
       return;
     }
+    const exportTotals = {
+      count: selectedFilteredEntries.length,
+      hours: selectedFilteredEntries.reduce((sum, e) => sum + (e.total_hours || 0), 0),
+      travel: selectedFilteredEntries.reduce((sum, e) => sum + (e.travel_time_hours || 0), 0),
+      attested: selectedFilteredEntries.filter((e) => e.attested_by).length,
+    };
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text("Fakturaunderlag", 14, 18);
@@ -759,7 +765,7 @@ const Billing = () => {
     autoTable(doc, {
       startY: 34,
       head: [["Datum", "Användare", "Kund", "Projekt", "Underprojekt", "Timmar", "Restid", "Status"]],
-      body: filteredEntries.map((e) => [
+      body: selectedFilteredEntries.map((e) => [
         safeFormatDate(e.date),
         getUserName(e),
         getCustomerName(e),
@@ -773,18 +779,18 @@ const Billing = () => {
       headStyles: { fillColor: [6, 99, 197] },
     });
 
-    doc.text(`Rader: ${totals.count}`, 14, doc.lastAutoTable.finalY + 10);
-    doc.text(`Totalt timmar: ${totals.hours.toFixed(2)}`, 14, doc.lastAutoTable.finalY + 16);
-    doc.text(`Restid: ${totals.travel.toFixed(2)} h`, 14, doc.lastAutoTable.finalY + 22);
-    doc.text(`Attesterade: ${totals.attested}`, 14, doc.lastAutoTable.finalY + 28);
+    doc.text(`Rader: ${exportTotals.count}`, 14, doc.lastAutoTable.finalY + 10);
+    doc.text(`Totalt timmar: ${exportTotals.hours.toFixed(2)}`, 14, doc.lastAutoTable.finalY + 16);
+    doc.text(`Restid: ${exportTotals.travel.toFixed(2)} h`, 14, doc.lastAutoTable.finalY + 22);
+    doc.text(`Attesterade: ${exportTotals.attested}`, 14, doc.lastAutoTable.finalY + 28);
 
     doc.save("fakturering.pdf");
     toast.success("PDF skapad.");
   };
 
   const exportInvoicePdf = async () => {
-    if (!filteredEntries.length) {
-      toast.error("Inget att fakturera.");
+    if (!selectedFilteredEntries.length) {
+      toast.error(filteredEntries.length ? "Välj minst en rad att fakturera." : "Inget att fakturera.");
       return;
     }
     if (projectId === "all") {
@@ -793,7 +799,7 @@ const Billing = () => {
     }
     setExportingInvoicePdf(true);
     try {
-      const entryDates = filteredEntries
+      const entryDates = selectedFilteredEntries
         .map((entry) => (entry.date ? new Date(entry.date) : null))
         .filter((d) => d && !Number.isNaN(d.getTime())) as Date[];
       const periodStart = entryDates.length ? new Date(Math.min(...entryDates.map((d) => d.getTime()))) : new Date();
@@ -806,7 +812,7 @@ const Billing = () => {
         priceList = await apiFetch<PriceListResponse>(`/price-list?${baseParams.toString()}`);
       }
 
-      const { lines, totals } = buildInvoiceLines(filteredEntries, priceList);
+      const { lines, totals } = buildInvoiceLines(selectedFilteredEntries, priceList);
       if (!lines.length) {
         toast.error("Inga fakturarader kunde skapas.");
         return;
@@ -888,7 +894,7 @@ const Billing = () => {
 
       await generateInvoicePdf(meta, lines, adjustedTotals, footer);
       toast.success("Faktura skapad.");
-      const ids = Array.from(new Set(filteredEntries.map((entry) => entry.id)));
+      const ids = Array.from(new Set(selectedFilteredEntries.map((entry) => entry.id)));
       await markEntriesInvoiced(ids);
     } catch (error: any) {
       console.error(error);
