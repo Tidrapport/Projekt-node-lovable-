@@ -47,6 +47,11 @@ const Auth = () => {
   const [password, setPassword] = useState("");
   const [forgotDialogOpen, setForgotDialogOpen] = useState(false);
 
+  const lightBlueBackground = {
+    backgroundColor: "#0b1220",
+    backgroundImage: "linear-gradient(180deg, #16223a 0%, #1f2f4f 50%, #18233c 100%)",
+  };
+
   useEffect(() => {
     setInitialLoading(false);
   }, []);
@@ -150,7 +155,7 @@ const Auth = () => {
   // Show loading while checking for saved company code
   if (initialLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+      <div className="min-h-screen flex items-center justify-center p-4" style={lightBlueBackground}>
         <div className="w-full max-w-md space-y-6">
           <div className="text-center space-y-2 text-slate-100">
             <Logo3D className="h-64 w-full max-w-[840px]" />
@@ -164,7 +169,7 @@ const Auth = () => {
   // Super admin login form
   if (isSuperAdminMode) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+      <div className="min-h-screen flex items-center justify-center p-4" style={lightBlueBackground}>
         <div className="w-full max-w-md space-y-6">
           <div className="text-center space-y-2 text-slate-100">
             <Logo3D className="h-64 w-full max-w-[840px]" />
@@ -230,7 +235,7 @@ const Auth = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
+    <div className="min-h-screen flex items-center justify-center p-4" style={lightBlueBackground}>
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2 text-slate-100">
           <Logo3D className="h-72 w-full max-w-[920px]" />

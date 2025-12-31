@@ -31,17 +31,20 @@
     renderer.setClearColor(0x000000, 0);
     renderer.setSize(innerWidth, innerHeight);
     document.getElementById('canvas-container').appendChild(renderer.domElement);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-    const dl1 = new THREE.DirectionalLight(0xffffff, 1.8); dl1.position.set(8,6,10); scene.add(dl1);
-    const dl2 = new THREE.DirectionalLight(0x7285ff, 1.4); dl2.position.set(-8,-2,6); scene.add(dl2);
-    const dl3 = new THREE.DirectionalLight(0x9db0ff, 1.2); dl3.position.set(0,6,-10); scene.add(dl3);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const dl1 = new THREE.DirectionalLight(0xffffff, 2.9); dl1.position.set(8,6,10); scene.add(dl1);
+    const dl2 = new THREE.DirectionalLight(0xbfe7ff, 2.4); dl2.position.set(-8,-2,6); scene.add(dl2);
+    const dl3 = new THREE.DirectionalLight(0xf1f7ff, 2.2); dl3.position.set(0,6,-10); scene.add(dl3);
     const mat = new THREE.MeshPhysicalMaterial({
-      color:'#5f6dff',
-      metalness:0.8,
-      roughness:0.15,
+      color:'#cfeaff',
+      metalness:1,
+      roughness:0.012,
+      emissive:new THREE.Color('#8cc9ff'),
+      emissiveIntensity:0.2,
       clearcoat:1,
-      clearcoatRoughness:0.08,
-      reflectivity:1
+      clearcoatRoughness:0.01,
+      reflectivity:1,
+      envMapIntensity:3.2
     });
     const group = new THREE.Group(); scene.add(group);
     let t = 0;
