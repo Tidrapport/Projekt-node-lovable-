@@ -45,6 +45,7 @@ export default defineConfig({
       "/fortnox_export_logs": { target: "http://localhost:3000", changeOrigin: true },
       "/profiles": { target: "http://localhost:3000", changeOrigin: true },
       "/shift_types_config": { target: "http://localhost:3000", changeOrigin: true },
+      "/uploads": { target: "http://localhost:3000", changeOrigin: true },
     },
   },
 
