@@ -1,0 +1,65 @@
+{
+  "Invoice": {
+    "CustomerNumber": "20244",
+    "InvoiceDate": "2025-12-31",
+    "DueDate": "2026-01-30",
+    "OurReference": "Lukas Nilsson",
+    "YourReference": "",
+    "InvoiceRows": [
+      {
+        "Description": "Edgar Zubkov - Maskinförare Dag",
+        "DeliveredQuantity": 11,
+        "Unit": "tim",
+        "Price": 400
+      },
+      {
+        "Description": "Edgar Zubkov - Maskinförare Natt",
+        "DeliveredQuantity": 1,
+        "Unit": "tim",
+        "Price": 550
+      },
+      {
+        "Description": "Edgar Zubkov - Maskinförare Övertid helg",
+        "DeliveredQuantity": 5,
+        "Unit": "tim",
+        "Price": 0
+      },
+      {
+        "Description": "Edgar Zubkov - Maskinförare Traktamente",
+        "DeliveredQuantity": 2,
+        "Unit": "dag",
+        "Price": 0
+      },
+      {
+        "Description": "Edgar Zubkov - Kapskivor 355",
+        "DeliveredQuantity": 4,
+        "Unit": "styck",
+        "Price": 56
+      },
+      {
+        "Description": "Edgar Zubkov - Mil inom arbete",
+        "DeliveredQuantity": 4,
+        "Unit": "mil",
+        "Price": 50
+      },
+      {
+        "Description": "Edgar Zubkov - Slipskålar",
+        "DeliveredQuantity": 4,
+        "Unit": "styck",
+        "Price": 340
+      },
+      {
+        "Description": "Edgar Zubkov - test",
+        "DeliveredQuantity": 4,
+        "Unit": "liter",
+        "Price": 0
+      },
+      {
+        "Description": "Edgar Zubkov - Maskinförare Övertid vardag",
+        "DeliveredQuantity": 2,
+        "Unit": "tim",
+        "Price": 0
+      }
+    ]
+  }
+}

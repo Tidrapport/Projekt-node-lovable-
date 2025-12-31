@@ -1,0 +1,17 @@
+{
+  "Invoice": {
+    "CustomerNumber": "20244",
+    "InvoiceDate": "2025-12-31",
+    "DueDate": "2026-01-30",
+    "OurReference": "Lukas Nilsson",
+    "YourReference": "",
+    "InvoiceRows": [
+      {
+        "Description": "Edgar Zubkov - Bantekniker Natt",
+        "DeliveredQuantity": 1,
+        "Unit": "tim",
+        "Price": 500
+      }
+    ]
+  }
+}
