@@ -6,12 +6,9 @@ const LEGACY_TOKEN_KEY = "access_token";
 export function getToken() {
   try {
     const local = localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY);
-    // Allow a developer override via Vite env var `VITE_DEV_TOKEN` for local development
-    const devToken = (import.meta as any).env?.VITE_DEV_TOKEN || (window as any).__DEV_API_TOKEN__;
-    return local || devToken || null;
+    return local || null;
   } catch {
-    // If localStorage isn't available (e.g. SSR), fall back to env var
-    return (import.meta as any).env?.VITE_DEV_TOKEN || null;
+    return null;
   }
 }
 export function setToken(token: string) {
