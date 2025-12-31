@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     host: true,
+    allowedHosts: true,
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const accept = req.headers.accept || "";
