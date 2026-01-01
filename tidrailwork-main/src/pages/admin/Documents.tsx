@@ -54,6 +54,9 @@ const toISODate = (value?: string | null) => {
   return value.slice(0, 10);
 };
 
+const PDFJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+
 const AdminDocuments = () => {
   const { companyId } = useAuth();
   const apiBase = import.meta.env.VITE_API_BASE_URL?.trim() || "";
@@ -63,6 +66,11 @@ const AdminDocuments = () => {
   const [docName, setDocName] = useState("");
   const [docContent, setDocContent] = useState("");
   const [docEditing, setDocEditing] = useState<string | null>(null);
+  const [docFileName, setDocFileName] = useState("");
+  const [docFileData, setDocFileData] = useState("");
+  const [docIsBinary, setDocIsBinary] = useState(false);
+  const [docDownloadUrl, setDocDownloadUrl] = useState<string | null>(null);
+  const [docExtractedText, setDocExtractedText] = useState("");
 
   const [users, setUsers] = useState<UserOption[]>([]);
   const [certificates, setCertificates] = useState<CertificateRow[]>([]);
@@ -131,6 +139,11 @@ const AdminDocuments = () => {
     setDocName("");
     setDocContent("");
     setDocEditing(null);
+    setDocFileName("");
+    setDocFileData("");
+    setDocIsBinary(false);
+    setDocDownloadUrl(null);
+    setDocExtractedText("");
   };
 
   const openCreateDoc = () => {
@@ -140,9 +153,23 @@ const AdminDocuments = () => {
 
   const openEditDoc = async (name: string) => {
     try {
-      const data = await apiFetch<{ name: string; content: string }>(`/admin/tdok-docs/${encodeURIComponent(name)}`);
-      setDocName(data?.name || name);
-      setDocContent(data?.content || "");
+      const data = await apiFetch<{ name: string; content: string; file_url?: string; is_binary?: boolean; extracted_text?: string | null }>(
+        `/admin/tdok-docs/${encodeURIComponent(name)}`
+      );
+      const docNameValue = data?.name || name;
+      const isBinary = data?.is_binary || docNameValue.toLowerCase().endsWith(".pdf");
+      const downloadUrl = data?.file_url
+        ? apiBase
+          ? `${apiBase}${data.file_url}`
+          : data.file_url
+        : apiBase
+        ? `${apiBase}/admin/tdok-docs/${encodeURIComponent(docNameValue)}/download`
+        : `/admin/tdok-docs/${encodeURIComponent(docNameValue)}/download`;
+      setDocName(docNameValue);
+      setDocContent(isBinary ? "" : data?.content || "");
+      setDocIsBinary(Boolean(isBinary));
+      setDocDownloadUrl(isBinary ? downloadUrl : null);
+      setDocExtractedText(isBinary ? String(data?.extracted_text || "") : "");
       setDocEditing(name);
       setDocDialogOpen(true);
     } catch (error: any) {
@@ -152,14 +179,92 @@ const AdminDocuments = () => {
 
   const handleDocFile = (file?: File | null) => {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".txt") && !file.name.toLowerCase().endsWith(".md")) {
-      toast.error("Endast .txt eller .md tillåts");
+    const lower = file.name.toLowerCase();
+    const isPdf = lower.endsWith(".pdf");
+    const isText = lower.endsWith(".txt") || lower.endsWith(".md");
+    if (!isPdf && !isText) {
+      toast.error("Endast .txt, .md eller .pdf tillåts");
+      return;
+    }
+    if (isPdf) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setDocName(file.name);
+        setDocContent("");
+        setDocFileName(file.name);
+        setDocFileData(String(reader.result || ""));
+        setDocIsBinary(true);
+        setDocDownloadUrl(null);
+        setDocExtractedText("");
+      };
+      reader.readAsDataURL(file);
+
+      const extractText = async (buffer: ArrayBuffer) => {
+        const loadPdfJs = async () => {
+          const w = window as any;
+          if (w.pdfjsLib) return w.pdfjsLib;
+          await new Promise<void>((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = PDFJS_CDN;
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error("Kunde inte ladda pdf.js"));
+            document.head.appendChild(script);
+          });
+          if (!w.pdfjsLib) throw new Error("pdfjsLib saknas efter laddning");
+          w.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+          return w.pdfjsLib;
+        };
+
+        const pdfjs = await loadPdfJs();
+        const data = new Uint8Array(buffer);
+        const loadDoc = async (options: Record<string, any>) => {
+          const pdf = await pdfjs.getDocument(options).promise;
+          let text = "";
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+            const page = await pdf.getPage(pageNum);
+            const content = await page.getTextContent();
+            const pageText = content.items
+              .map((item: any) => ("str" in item ? item.str : ""))
+              .filter(Boolean)
+              .join(" ");
+            if (pageText) text += `${pageText}\n\n`;
+          }
+          return text.trim();
+        };
+        return await loadDoc({ data, disableWorker: true });
+      };
+
+      file
+        .arrayBuffer()
+        .then(async (buffer) => {
+          try {
+            const cleaned = await extractText(buffer);
+            setDocExtractedText(cleaned);
+            if (!cleaned) {
+              toast.message("PDF sparas, men ingen text kunde extraheras.");
+            }
+          } catch (err) {
+            console.warn("PDF-extrahering misslyckades:", err);
+            toast.message("PDF sparas, men text kunde inte extraheras.");
+            setDocExtractedText("");
+          }
+        })
+        .catch(() => {
+          toast.message("PDF sparas, men text kunde inte extraheras.");
+          setDocExtractedText("");
+        });
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       setDocName(file.name);
       setDocContent(String(reader.result || ""));
+      setDocFileName("");
+      setDocFileData("");
+      setDocIsBinary(false);
+      setDocDownloadUrl(null);
+      setDocExtractedText("");
     };
     reader.readAsText(file);
   };
@@ -170,17 +275,35 @@ const AdminDocuments = () => {
       return;
     }
     try {
+      const isPdf = docName.trim().toLowerCase().endsWith(".pdf");
+      if (!docEditing && isPdf && !docFileData) {
+        toast.error("Ladda upp en PDF-fil.");
+        return;
+      }
+      if (!docEditing && !isPdf && !docContent.trim()) {
+        toast.error("Ange innehåll");
+        return;
+      }
+      const payload: any = {
+        new_name: docName.trim(),
+      };
+      if (isPdf) {
+        if (docFileData) {
+          payload.content_base64 = docFileData;
+          payload.name = docName.trim();
+        }
+        if (docExtractedText) {
+          payload.extracted_text = docExtractedText;
+        }
+      } else {
+        payload.content = docContent;
+        payload.name = docName.trim();
+      }
       if (docEditing) {
-        await apiFetch(`/admin/tdok-docs/${encodeURIComponent(docEditing)}`, {
-          method: "PUT",
-          json: { content: docContent, new_name: docName.trim() },
-        });
+        await apiFetch(`/admin/tdok-docs/${encodeURIComponent(docEditing)}`, { method: "PUT", json: payload });
         toast.success("Dokument uppdaterat");
       } else {
-        await apiFetch("/admin/tdok-docs", {
-          method: "POST",
-          json: { name: docName.trim(), content: docContent, overwrite: false },
-        });
+        await apiFetch("/admin/tdok-docs", { method: "POST", json: { ...payload, overwrite: false } });
         toast.success("Dokument tillagt");
       }
       setDocDialogOpen(false);
@@ -377,6 +500,21 @@ const AdminDocuments = () => {
                           <Pencil className="h-4 w-4 mr-1" />
                           Redigera
                         </Button>
+                        {doc.name.toLowerCase().endsWith(".pdf") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const url = apiBase
+                                ? `${apiBase}/admin/tdok-docs/${encodeURIComponent(doc.name)}/download`
+                                : `/admin/tdok-docs/${encodeURIComponent(doc.name)}/download`;
+                              window.open(url, "_blank", "noreferrer");
+                            }}
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            Ladda ner
+                          </Button>
+                        )}
                         <Button variant="outline" size="sm" className="text-destructive" onClick={() => deleteDoc(doc.name)}>
                           <Trash2 className="h-4 w-4 mr-1" />
                           Ta bort
@@ -507,7 +645,7 @@ const AdminDocuments = () => {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{docEditing ? "Redigera dokument" : "Nytt dokument"}</DialogTitle>
-            <DialogDescription>Endast .txt eller .md kan användas av TDOK AI.</DialogDescription>
+            <DialogDescription>TDOK AI läser .txt/.md. PDF extraheras till text för AI.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
@@ -515,9 +653,38 @@ const AdminDocuments = () => {
               <Input value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="tdok.txt" />
             </div>
             <div className="space-y-2">
-              <Label>Innehåll</Label>
-              <Textarea value={docContent} onChange={(e) => setDocContent(e.target.value)} rows={12} />
+              <Label>Ladda upp fil (.txt, .md eller .pdf)</Label>
+              <Input type="file" accept=".txt,.md,.pdf" onChange={(e) => handleDocFile(e.target.files?.[0])} />
+              {docIsBinary && docDownloadUrl && (
+                <a className="text-sm text-primary underline" href={docDownloadUrl} target="_blank" rel="noreferrer">
+                  Ladda ner aktuell PDF
+                </a>
+              )}
+              {docIsBinary && (
+                <p className="text-xs text-muted-foreground">PDF text tolkas automatiskt och sparas som .md för AI.</p>
+              )}
             </div>
+            <div className="space-y-2">
+              <Label>Innehåll</Label>
+              <Textarea
+                value={docContent}
+                onChange={(e) => setDocContent(e.target.value)}
+                rows={12}
+                disabled={docIsBinary}
+                placeholder={docIsBinary ? "PDF kan inte redigeras här." : ""}
+              />
+            </div>
+            {docIsBinary && (
+              <div className="space-y-2">
+                <Label>Extraherad text (för AI)</Label>
+                <Textarea
+                  value={docExtractedText}
+                  onChange={(e) => setDocExtractedText(e.target.value)}
+                  rows={8}
+                  placeholder="Text som AI läser. Du kan justera vid behov."
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Ladda upp fil</Label>
               <Input type="file" accept=".txt,.md" onChange={(e) => handleDocFile(e.target.files?.[0])} />

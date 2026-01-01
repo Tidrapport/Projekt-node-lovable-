@@ -100,6 +100,7 @@ function resolveSuperAdminCompanyId(callback) {
 
 const KNOWLEDGE_ROOT = path.join(__dirname, "tdok");
 const KNOWLEDGE_EXTS = new Set([".txt", ".md", ".markdown"]);
+const ADMIN_DOC_EXTS = new Set([...KNOWLEDGE_EXTS, ".pdf"]);
 const MAX_CHUNK_CHARS = 1200;
 const MAX_CONTEXT_CHUNKS = 4;
 const knowledgeCacheByDir = new Map();
@@ -601,10 +602,11 @@ function ensureDirExists(dirPath) {
   }
 }
 
-function sanitizeDocName(name) {
+function sanitizeDocName(name, allowPdf = false) {
   const base = path.basename(String(name || ""));
   const ext = path.extname(base).toLowerCase();
-  if (!base || !KNOWLEDGE_EXTS.has(ext)) return null;
+  const allowed = allowPdf ? ADMIN_DOC_EXTS : KNOWLEDGE_EXTS;
+  if (!base || !allowed.has(ext)) return null;
   return base;
 }
 
@@ -4447,7 +4449,8 @@ app.get("/admin/tdok-docs", requireAuth, requireAdmin, (req, res) => {
   const docs = entries
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
-    .filter((name) => KNOWLEDGE_EXTS.has(path.extname(name).toLowerCase()))
+    .filter((name) => ADMIN_DOC_EXTS.has(path.extname(name).toLowerCase()))
+    .filter((name) => !name.toLowerCase().endsWith(".pdf.md"))
     .map((name) => {
       const fullPath = path.join(knowledgeDir, name);
       let stat = null;
@@ -4474,7 +4477,7 @@ app.get("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
   const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
   if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  const fileName = sanitizeDocName(req.params.name);
+  const fileName = sanitizeDocName(req.params.name, true);
   if (!fileName) return res.status(400).json({ error: "Invalid filename" });
 
   const knowledgeDir = getKnowledgeDir(targetCompanyId);
@@ -4482,12 +4485,49 @@ app.get("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "Not found" });
 
   try {
+    const ext = path.extname(fileName).toLowerCase();
+    if (ext === ".pdf") {
+      const sidecarPath = path.join(knowledgeDir, `${fileName}.md`);
+      let extractedText = null;
+      if (fs.existsSync(sidecarPath)) {
+        try {
+          extractedText = fs.readFileSync(sidecarPath, "utf8");
+        } catch {
+          extractedText = null;
+        }
+      }
+      res.json({
+        name: fileName,
+        content: "",
+        file_url: `/admin/tdok-docs/${encodeURIComponent(fileName)}/download`,
+        is_binary: true,
+        extracted_text: extractedText,
+      });
+      return;
+    }
     const content = fs.readFileSync(fullPath, "utf8");
-    res.json({ name: fileName, content });
+    res.json({ name: fileName, content, is_binary: false });
   } catch (err) {
     console.error("Kunde inte läsa TDOK-dokument:", err);
     res.status(500).json({ error: "Could not read document" });
   }
+});
+
+app.get("/admin/tdok-docs/:name/download", requireAuth, requireAdmin, (req, res) => {
+  const actorRole = (req.user.role || "").toLowerCase();
+  const allowAll = actorRole === "super_admin";
+  const scopedCompanyId = getScopedCompanyId(req);
+  const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
+  if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
+
+  const fileName = sanitizeDocName(req.params.name, true);
+  if (!fileName) return res.status(400).json({ error: "Invalid filename" });
+
+  const knowledgeDir = getKnowledgeDir(targetCompanyId);
+  const fullPath = path.join(knowledgeDir, fileName);
+  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "Not found" });
+
+  res.download(fullPath, fileName);
 });
 
 app.post("/admin/tdok-docs", requireAuth, requireAdmin, (req, res) => {
@@ -4497,8 +4537,8 @@ app.post("/admin/tdok-docs", requireAuth, requireAdmin, (req, res) => {
   const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
   if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  const { name, content, overwrite } = req.body || {};
-  const fileName = sanitizeDocName(name);
+  const { name, content, content_base64, extracted_text, overwrite } = req.body || {};
+  const fileName = sanitizeDocName(name, true);
   if (!fileName) return res.status(400).json({ error: "Invalid filename" });
 
   const knowledgeDir = getKnowledgeDir(targetCompanyId);
@@ -4510,7 +4550,18 @@ app.post("/admin/tdok-docs", requireAuth, requireAdmin, (req, res) => {
   }
 
   try {
-    fs.writeFileSync(fullPath, String(content || ""), "utf8");
+    const ext = path.extname(fileName).toLowerCase();
+    if (ext === ".pdf") {
+      if (!content_base64) return res.status(400).json({ error: "content_base64 required" });
+      const data = String(content_base64).split(",").pop();
+      fs.writeFileSync(fullPath, data, { encoding: "base64" });
+      if (extracted_text && String(extracted_text).trim()) {
+        const sidecarPath = path.join(knowledgeDir, `${fileName}.md`);
+        fs.writeFileSync(sidecarPath, String(extracted_text).trim(), "utf8");
+      }
+    } else {
+      fs.writeFileSync(fullPath, String(content || ""), "utf8");
+    }
     logAudit({
       req,
       companyId: targetCompanyId,
@@ -4535,10 +4586,10 @@ app.put("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
   const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
   if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  const currentName = sanitizeDocName(req.params.name);
+  const currentName = sanitizeDocName(req.params.name, true);
   if (!currentName) return res.status(400).json({ error: "Invalid filename" });
-  const { content, new_name } = req.body || {};
-  const nextName = new_name ? sanitizeDocName(new_name) : currentName;
+  const { content, content_base64, extracted_text, new_name } = req.body || {};
+  const nextName = new_name ? sanitizeDocName(new_name, true) : currentName;
   if (!nextName) return res.status(400).json({ error: "Invalid filename" });
 
   const knowledgeDir = getKnowledgeDir(targetCompanyId);
@@ -4554,8 +4605,25 @@ app.put("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
   try {
     if (nextName !== currentName) {
       fs.renameSync(currentPath, nextPath);
+      if (path.extname(nextName).toLowerCase() === ".pdf") {
+        const currentSidecar = path.join(knowledgeDir, `${currentName}.md`);
+        const nextSidecar = path.join(knowledgeDir, `${nextName}.md`);
+        if (fs.existsSync(currentSidecar)) {
+          fs.renameSync(currentSidecar, nextSidecar);
+        }
+      }
     }
-    if (content !== undefined) {
+    const ext = path.extname(nextName).toLowerCase();
+    if (ext === ".pdf") {
+      if (content_base64) {
+        const data = String(content_base64).split(",").pop();
+        fs.writeFileSync(nextPath, data, { encoding: "base64" });
+      }
+      if (extracted_text && String(extracted_text).trim()) {
+        const sidecarPath = path.join(knowledgeDir, `${nextName}.md`);
+        fs.writeFileSync(sidecarPath, String(extracted_text).trim(), "utf8");
+      }
+    } else if (content !== undefined) {
       fs.writeFileSync(nextPath, String(content || ""), "utf8");
     }
     logAudit({
@@ -4582,7 +4650,7 @@ app.delete("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
   const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : scopedCompanyId;
   if (!targetCompanyId && !allowAll) return res.status(400).json({ error: "Company not found" });
 
-  const fileName = sanitizeDocName(req.params.name);
+  const fileName = sanitizeDocName(req.params.name, true);
   if (!fileName) return res.status(400).json({ error: "Invalid filename" });
 
   const knowledgeDir = getKnowledgeDir(targetCompanyId);
@@ -4591,6 +4659,12 @@ app.delete("/admin/tdok-docs/:name", requireAuth, requireAdmin, (req, res) => {
 
   try {
     fs.unlinkSync(fullPath);
+    if (path.extname(fileName).toLowerCase() === ".pdf") {
+      const sidecarPath = path.join(knowledgeDir, `${fileName}.md`);
+      if (fs.existsSync(sidecarPath)) {
+        fs.unlinkSync(sidecarPath);
+      }
+    }
     logAudit({
       req,
       companyId: targetCompanyId,

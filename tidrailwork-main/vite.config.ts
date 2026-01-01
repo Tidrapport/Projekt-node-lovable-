@@ -23,6 +23,7 @@ export default defineConfig({
       "/admin": { target: "http://localhost:3000", changeOrigin: true },
       "/auth": { target: "http://localhost:3000", changeOrigin: true },
       "/fortnox": { target: "http://localhost:3000", changeOrigin: true },
+      "/help": { target: "http://localhost:3000", changeOrigin: true },
 
       // Common backend endpoints used by the frontend (both hyphen and underscore variants)
       "/welding-reports": { target: "http://localhost:3000", changeOrigin: true },
