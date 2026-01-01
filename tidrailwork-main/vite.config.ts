@@ -11,9 +11,19 @@ export default defineConfig({
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const accept = req.headers.accept || "";
-        if (req.method === "GET" && accept.includes("text/html") && req.url?.startsWith("/admin")) {
-          req.url = "/";
+        if (req.method !== "GET" || !accept.includes("text/html")) return next();
+        const url = req.url || "/";
+        if (
+          url.startsWith("/api") ||
+          url.startsWith("/auth") ||
+          url.startsWith("/fortnox") ||
+          url.startsWith("/help") ||
+          url.startsWith("/uploads")
+        ) {
+          return next();
         }
+        if (path.extname(url)) return next();
+        req.url = "/";
         next();
       });
     },
