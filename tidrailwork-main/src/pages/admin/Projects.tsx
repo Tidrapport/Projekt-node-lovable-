@@ -236,18 +236,11 @@ const AdminProjects = () => {
     }
   };
 
-  const deleteProject = async (id: string) => {
-    // First check if there are any subprojects
-    const projectSubprojects = subprojects.filter(sp => String(sp.project_id) === String(id));
-    if (projectSubprojects.length > 0) {
-      toast.error("Kan inte ta bort projektet. Ta bort alla underprojekt först.");
-      return;
-    }
-
-    // Check if there are time entries
+  const deleteProject = async (project: Project) => {
+    const isInactive = Number(project.is_active) === 0;
     try {
-      await apiFetch(`/projects/${id}`, { method: "DELETE" });
-      toast.success("Projekt borttaget");
+      await apiFetch(`/projects/${project.id}`, { method: "DELETE" });
+      toast.success(isInactive ? "Projekt borttaget" : "Projekt avslutat");
       fetchData();
     } catch (err: any) {
       toast.error(err.message || "Kunde inte ta bort projektet");
@@ -325,7 +318,7 @@ const AdminProjects = () => {
             <Button
               size="sm"
               variant="destructive"
-              onClick={() => deleteProject(project.id)}
+              onClick={() => deleteProject(project)}
             >
               <Trash2 className="h-4 w-4" />
             </Button>

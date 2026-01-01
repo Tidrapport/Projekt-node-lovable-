@@ -3,3 +3,4 @@ opero.db
 .env
 .env.*
 !.env.example
+tdok/

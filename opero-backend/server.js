@@ -1511,28 +1511,81 @@ app.delete("/projects/:id", requireAuth, requireAdmin, (req, res) => {
   if (!companyId) return res.status(400).json({ error: "Company not found" });
 
   const id = req.params.id;
-  db.serialize(() => {
-    db.run("BEGIN TRANSACTION");
-    db.run("UPDATE projects SET is_active = 0 WHERE id = ? AND company_id = ?", [id, companyId], function (err) {
-      if (err) {
-        console.error("DB-fel vid UPDATE project (soft delete):", err);
-        db.run("ROLLBACK");
-        return res.status(500).json({ error: "DB error" });
-      }
-      if (this.changes === 0) {
-        db.run("ROLLBACK");
-        return res.status(404).json({ error: "Not found" });
-      }
-      db.run("UPDATE subprojects SET is_active = 0 WHERE project_id = ? AND company_id = ?", [id, companyId], (spErr) => {
-        if (spErr) {
-          console.error("DB-fel vid UPDATE subprojects (soft delete):", spErr);
-          db.run("ROLLBACK");
+  db.get("SELECT id, is_active FROM projects WHERE id = ? AND company_id = ?", [id, companyId], (err, project) => {
+    if (err) {
+      console.error("DB-fel vid SELECT project (delete):", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!project) return res.status(404).json({ error: "Not found" });
+
+    const isInactive = Number(project.is_active) === 0;
+
+    if (!isInactive) {
+      db.serialize(() => {
+        db.run("BEGIN TRANSACTION");
+        db.run("UPDATE projects SET is_active = 0 WHERE id = ? AND company_id = ?", [id, companyId], function (uErr) {
+          if (uErr) {
+            console.error("DB-fel vid UPDATE project (soft delete):", uErr);
+            db.run("ROLLBACK");
+            return res.status(500).json({ error: "DB error" });
+          }
+          db.run("UPDATE subprojects SET is_active = 0 WHERE project_id = ? AND company_id = ?", [id, companyId], (spErr) => {
+            if (spErr) {
+              console.error("DB-fel vid UPDATE subprojects (soft delete):", spErr);
+              db.run("ROLLBACK");
+              return res.status(500).json({ error: "DB error" });
+            }
+            db.run("COMMIT");
+            res.status(204).end();
+          });
+        });
+      });
+      return;
+    }
+
+    db.get(
+      `SELECT
+        (SELECT COUNT(1) FROM time_reports WHERE project_id = ?) AS time_count,
+        (SELECT COUNT(1) FROM work_orders WHERE project_id = ? AND company_id = ?) AS work_order_count`,
+      [id, id, companyId],
+      (countErr, counts) => {
+        if (countErr) {
+          console.error("DB-fel vid SELECT project dependencies:", countErr);
           return res.status(500).json({ error: "DB error" });
         }
-        db.run("COMMIT");
-        res.status(204).end();
-      });
-    });
+        if ((counts?.time_count || 0) > 0 || (counts?.work_order_count || 0) > 0) {
+          return res.status(409).json({
+            error: "Projektet har kopplade tidrapporter eller arbetsorder och kan inte raderas helt."
+          });
+        }
+
+        db.serialize(() => {
+          db.run("BEGIN TRANSACTION");
+          db.run(
+            "DELETE FROM project_price_list_settings WHERE project_id = ? AND company_id = ?",
+            [id, companyId]
+          );
+          db.run(
+            "DELETE FROM project_job_role_rates WHERE project_id = ? AND company_id = ?",
+            [id, companyId]
+          );
+          db.run(
+            "DELETE FROM project_material_type_rates WHERE project_id = ? AND company_id = ?",
+            [id, companyId]
+          );
+          db.run("DELETE FROM subprojects WHERE project_id = ? AND company_id = ?", [id, companyId]);
+          db.run("DELETE FROM projects WHERE id = ? AND company_id = ?", [id, companyId], function (dErr) {
+            if (dErr) {
+              console.error("DB-fel vid DELETE project (hard):", dErr);
+              db.run("ROLLBACK");
+              return res.status(500).json({ error: "DB error" });
+            }
+            db.run("COMMIT");
+            res.status(204).end();
+          });
+        });
+      }
+    );
   });
 });
 

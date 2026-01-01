@@ -1427,7 +1427,24 @@ export default function TimeAttestations() {
               : entry.date || "Okänt datum";
 
           const userName = entry.user_full_name || entry.user_email || entry.user_id;
-          const shift = entry.shift_type || "–";
+          const obDist =
+            entry.date && entry.start_time && entry.end_time
+              ? calculateOBDistributionWithOvertime(
+                  entry.date,
+                  entry.start_time,
+                  entry.end_time,
+                  entry.break_minutes || 0,
+                  entry.overtime_weekday_hours,
+                  entry.overtime_weekend_hours
+                )
+              : null;
+          const hasHours = (value?: number | null) => Number(value || 0) > 0.01;
+          const shiftLabels: string[] = [];
+          const weekdayHours = (obDist?.day || 0) + (obDist?.evening || 0);
+          if (hasHours(weekdayHours)) shiftLabels.push("VARDAG");
+          if (hasHours(obDist?.night)) shiftLabels.push("NATT");
+          if (hasHours(obDist?.weekend)) shiftLabels.push("HELG");
+          const shift = shiftLabels.length ? shiftLabels.join(",") : entry.shift_type || "–";
           const restLabel = entry.break_minutes ? `${entry.break_minutes} min` : "Ingen rast";
           return (
             <Card key={entry.id} className="shadow-card hover:shadow-elevated transition-shadow">
