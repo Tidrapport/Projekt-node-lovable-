@@ -135,9 +135,19 @@ export default function AppShell({ children }) {
     [colors, headerTextColor, headerSubColor]
   );
 
+  // Target a smaller total header height (reduced ~15%). Compute a paddingTop that
+  // respects half the safe-area inset but does not exceed the room available
+  // (target - baseContentHeight). This keeps the header compact on devices
+  // with a notch while avoiding overlap.
+  const halfTop = Math.floor(insets.top / 2);
+  const targetTotal = 51; // desired total header height in px (60 * 0.85)
+  const baseContent = 44; // content area height
+  const paddingTop = Math.max(0, Math.min(halfTop, targetTotal - baseContent));
+  const headerHeight = paddingTop + baseContent;
+
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={[styles.header, { paddingTop: insets.top + 2 }]}>
+      <View style={[styles.header, { paddingTop, height: paddingTop + baseContent }]}>
         <Pressable
           onPress={() => {
             setProfileOpen(false);
@@ -145,7 +155,7 @@ export default function AppShell({ children }) {
           }}
           style={styles.headerIcon}
         >
-          <Ionicons name="menu" size={22} color={headerTextColor} />
+          <Ionicons name="menu" size={20} color={headerTextColor} />
         </Pressable>
         <View style={styles.headerCenter}>
           <Text style={styles.brandOverline}>OPERO</Text>
@@ -158,7 +168,7 @@ export default function AppShell({ children }) {
           }}
           style={styles.headerIcon}
         >
-          <Ionicons name="person-circle" size={28} color={headerTextColor} />
+          <Ionicons name="person-circle" size={24} color={headerTextColor} />
         </Pressable>
       </View>
 
@@ -174,7 +184,8 @@ export default function AppShell({ children }) {
       {profileOpen ? <Pressable style={styles.overlay} onPress={() => setProfileOpen(false)} /> : null}
 
       <Animated.View style={[styles.drawer, { transform: [{ translateX: drawerX }] }]}>
-        <View style={[styles.drawerHeader, { paddingTop: insets.top + spacing.lg }]}>
+        {/* Drawer header: align under the adjusted header using calculated headerHeight */}
+        <View style={[styles.drawerHeader, { paddingTop: headerHeight + spacing.sm }]}>
           <Text style={styles.drawerTitle}>Meny</Text>
         </View>
         <ScrollView contentContainerStyle={styles.drawerBody} showsVerticalScrollIndicator={false}>
@@ -213,7 +224,7 @@ export default function AppShell({ children }) {
         </ScrollView>
       </Animated.View>
 
-      <Animated.View style={[styles.profileDrawer, { transform: [{ translateX: profileX }] }]}>
+      <Animated.View style={[styles.profileDrawer, { transform: [{ translateX: profileX }], paddingTop: headerHeight + spacing.sm }]}>
         <View style={styles.profileHeader}>
           <Ionicons name="person-circle" size={46} color={colors.primary} />
           <Text style={styles.profileName}>{user?.full_name || user?.email || "Profil"}</Text>
@@ -260,7 +271,7 @@ export default function AppShell({ children }) {
 const createStyles = (colors, headerTextColor, headerSubColor) => StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.navBgDark,
   },
   header: {
     flexDirection: "row",
@@ -273,8 +284,8 @@ const createStyles = (colors, headerTextColor, headerSubColor) => StyleSheet.cre
     borderBottomColor: colors.border,
   },
   headerIcon: {
-    width: 26,
-    height: 26,
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -284,18 +295,19 @@ const createStyles = (colors, headerTextColor, headerSubColor) => StyleSheet.cre
   },
   brandOverline: {
     color: headerSubColor,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "700",
     letterSpacing: 1.2,
   },
   brandTitle: {
     color: headerTextColor,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "600",
     letterSpacing: 0.2,
   },
   content: {
     flex: 1,
+    backgroundColor: "#ffffff",
   },
   overlay: {
     position: "absolute",
@@ -377,7 +389,7 @@ const createStyles = (colors, headerTextColor, headerSubColor) => StyleSheet.cre
     bottom: 0,
     right: 0,
     width: profileWidth,
-    backgroundColor: colors.navBg,
+    backgroundColor: "#ffffff",
     padding: spacing.md,
     paddingTop: spacing.xl,
   },
