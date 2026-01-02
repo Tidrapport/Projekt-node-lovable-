@@ -540,6 +540,74 @@ function postJson(url, headers, body) {
   });
 }
 
+const EXPO_PUSH_ENDPOINT = process.env.EXPO_PUSH_ENDPOINT || "https://exp.host/--/api/v2/push/send";
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function sendExpoPush(tokens, { title, body, data }) {
+  if (!tokens.length) return { sent: 0 };
+  const messages = tokens.map((token) => ({
+    to: token,
+    sound: "default",
+    title,
+    body,
+    data: data || null
+  }));
+
+  const chunks = chunkArray(messages, 100);
+  let sent = 0;
+
+  for (const chunk of chunks) {
+    const response = await fetch(EXPO_PUSH_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(chunk)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      console.error("Expo push error:", response.status, text);
+    } else {
+      sent += chunk.length;
+    }
+  }
+
+  return { sent };
+}
+
+function fetchPushTokensForUsers(userIds, companyId, allowAll = false) {
+  return new Promise((resolve, reject) => {
+    if (!userIds.length) return resolve([]);
+    const placeholders = userIds.map(() => "?").join(",");
+    const where = [];
+    const params = [];
+    if (companyId) {
+      where.push("u.company_id = ?");
+      params.push(companyId);
+    } else if (!allowAll) {
+      return resolve([]);
+    }
+    where.push(`u.id IN (${placeholders})`);
+    params.push(...userIds);
+
+    const sql = `
+      SELECT pt.token
+      FROM push_tokens pt
+      JOIN users u ON u.id = pt.user_id
+      WHERE ${where.join(" AND ")}
+    `;
+    db.all(sql, params, (err, rows) => {
+      if (err) return reject(err);
+      resolve((rows || []).map((r) => r.token));
+    });
+  });
+}
+
 async function requestOpenAi(payload, apiKey) {
   const url = "https://api.openai.com/v1/chat/completions";
   const headers = {
@@ -4841,6 +4909,77 @@ app.get("/profiles/:id", requireAuth, (req, res) => {
   });
 });
 
+// Register push token for logged-in user
+app.post("/push/register", requireAuth, (req, res) => {
+  const token = String(req.body?.token || "").trim();
+  if (!token) return res.status(400).json({ error: "token required" });
+  const platform = req.body?.platform ? String(req.body.platform) : null;
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Missing user" });
+
+  db.run(
+    `INSERT INTO push_tokens (user_id, token, platform, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, platform = excluded.platform, updated_at = datetime('now')`,
+    [userId, token, platform],
+    (err) => {
+      if (err) {
+        console.error("DB-fel vid POST /push/register:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      return res.json({ success: true });
+    }
+  );
+});
+
+// Unregister push token for logged-in user
+app.delete("/push/register", requireAuth, (req, res) => {
+  const token = String(req.body?.token || "").trim();
+  if (!token) return res.status(400).json({ error: "token required" });
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Missing user" });
+
+  db.run(
+    `DELETE FROM push_tokens WHERE token = ? AND user_id = ?`,
+    [token, userId],
+    (err) => {
+      if (err) {
+        console.error("DB-fel vid DELETE /push/register:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      return res.json({ success: true });
+    }
+  );
+});
+
+// Admin push notifications to selected users
+app.post("/admin/push/send", requireAuth, requireAdmin, async (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId && req.company_scope_all !== true) {
+    return res.status(400).json({ error: "Company not found" });
+  }
+
+  const userIds = Array.isArray(req.body?.user_ids) ? req.body.user_ids : [];
+  const title = String(req.body?.title || "Tidrapportering");
+  const body = String(req.body?.body || "").trim();
+
+  if (!userIds.length) return res.status(400).json({ error: "user_ids required" });
+  if (!body) return res.status(400).json({ error: "body required" });
+
+  try {
+    const tokens = await fetchPushTokensForUsers(
+      userIds.map(String),
+      companyId,
+      req.company_scope_all === true
+    );
+    const result = await sendExpoPush(tokens, { title, body, data: { type: "admin_push" } });
+    return res.json({ success: true, tokens: tokens.length, sent: result.sent });
+  } catch (err) {
+    console.error("Push send error:", err);
+    return res.status(500).json({ error: "Push send failed" });
+  }
+});
+
 // ======================
 //   FORTNOX LÖNEKODER & MAPPNINGAR
 // ======================
@@ -5555,6 +5694,19 @@ app.post("/plans", requireAuth, (req, res) => {
             console.error("DB-fel vid GET ny planering:", gErr);
             return res.status(201).json({ id: this.lastID });
           }
+          const companyForPush = scopedCompanyId || uRow.company_id;
+          fetchPushTokensForUsers([String(user_id)], companyForPush)
+            .then((tokens) => {
+              if (tokens.length === 0) return null;
+              return sendExpoPush(tokens, {
+                title: "Planering uppdaterad",
+                body: `Ny planering: ${String(project).trim()}`,
+                data: { type: "plan_updated", plan_id: this.lastID }
+              });
+            })
+            .catch((pushErr) => {
+              console.error("Push plan error:", pushErr);
+            });
           res.status(201).json(row);
         }
       );

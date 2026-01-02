@@ -11,7 +11,22 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-direction: column;
+      gap: 24px;
       background: #020617;
+    }
+    .logo-frame {
+      width: 420px;
+      height: 200px;
+      border: 0;
+      overflow: hidden;
+    }
+    .logo-frame iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: transparent;
     }
     .card {
       background: #ffffff;
@@ -79,6 +94,9 @@
   <script src="auth.js"></script>
 </head>
 <body>
+  <div class="logo-frame" aria-hidden="true">
+    <iframe src="/rotlogo3d.html" title="Opero Systems 3D-logga"></iframe>
+  </div>
   <div class="card">
     <h1>Admina Bas</h1>
     <p class="subtitle">Logga in med din e‑postadress och lösenord.</p>

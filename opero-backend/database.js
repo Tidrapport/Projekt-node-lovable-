@@ -180,6 +180,19 @@ db.serialize(() => {
     );
   `);
 
+  // --- Push tokens ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS push_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      platform TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+
   // Lägg till "hourly_wage" om den saknas
   db.all(`PRAGMA table_info(users);`, (err, columns) => {
     if (err) {

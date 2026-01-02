@@ -21,3 +21,10 @@ export async function login(email, password) {
 export async function me() {
   return apiFetch("/auth/me");
 }
+
+export async function changePassword(password) {
+  return apiFetch("/auth/me", {
+    method: "PUT",
+    body: { password },
+  });
+}
