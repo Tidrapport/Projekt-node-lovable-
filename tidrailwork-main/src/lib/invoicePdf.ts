@@ -29,7 +29,7 @@ type CompanyFooter = {
   logo_url?: string | null;
   org_number?: string | null;
   vat_number?: string | null;
-  f_skatt?: boolean | number | null;
+  f_skatt?: boolean | number | string | null;
 };
 
 type InvoiceMeta = {
@@ -62,8 +62,11 @@ const fetchTemplate = async () => {
   return res.arrayBuffer();
 };
 
+const toBlobPart = (data: Uint8Array) =>
+  data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+
 const downloadBlob = (data: Uint8Array, filename: string) => {
-  const blob = new Blob([data], { type: "application/pdf" });
+  const blob = new Blob([toBlobPart(data)], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -142,13 +145,8 @@ export async function generateInvoicePdf(
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
   const clearArea = (x: number, y: number, width: number, height: number) => {
-    page.drawRectangle({
-      x,
-      y,
-      width,
-      height,
-      color: rgb(1, 1, 1),
-    });
+    // Disabled: do not draw white rectangles. Clearing is turned off globally for invoices.
+    return;
   };
 
   const clearTextArea = (x: number, y: number, width: number, size: number) => {

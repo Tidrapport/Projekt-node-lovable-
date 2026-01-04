@@ -74,7 +74,7 @@ const FORTNOX_REDIRECT_URI = process.env.FORTNOX_REDIRECT_URI;
 const FORTNOX_SCOPE = process.env.FORTNOX_SCOPE || "";
 const FORTNOX_SUCCESS_REDIRECT = process.env.FORTNOX_SUCCESS_REDIRECT;
 const FORTNOX_PAYROLL_PATH = process.env.FORTNOX_PAYROLL_PATH || "/archive";
-const FORTNOX_REQUIRED_SCOPES = ["customer"];
+const FORTNOX_REQUIRED_SCOPES = ["customer", "offer", "archive"];
 const FORTNOX_CUSTOMER_SCOPE_ALIASES = ["customer", "customers"];
 
 console.log("Fortnox config:", {
@@ -2093,6 +2093,192 @@ app.post("/work-orders", requireAuth, requireAdmin, (req, res) => {
   }
 });
 
+// Delete work order (admin)
+app.delete("/work-orders/:id", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const id = req.params.id;
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order för DELETE:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row || String(row.company_id) !== String(companyId)) return res.status(404).json({ error: "Not found" });
+
+    // Remove assignees
+    db.run(`DELETE FROM work_order_assignees WHERE work_order_id = ?`, [id], (aErr) => {
+      if (aErr) console.error("DB-fel vid DELETE work_order_assignees:", aErr);
+
+      // Remove comments
+      db.run(`DELETE FROM work_order_comments WHERE work_order_id = ?`, [id], (cErr) => {
+        if (cErr) console.error("DB-fel vid DELETE work_order_comments:", cErr);
+
+        // Finally remove the work order
+        db.run(`DELETE FROM work_orders WHERE id = ? AND company_id = ?`, [id, companyId], function (dErr) {
+          if (dErr) {
+            console.error("DB-fel vid DELETE work_order:", dErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          if (this.changes === 0) return res.status(404).json({ error: "Not found" });
+          res.status(204).end();
+        });
+      });
+    });
+  });
+});
+
+// Update work order (admin)
+app.put("/work-orders/:id", requireAuth, requireAdmin, (req, res) => {
+  const scopedCompanyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  let companyId = scopedCompanyId;
+
+  if (!companyId && allowAll && req.body?.company_id) {
+    companyId = req.body.company_id;
+  }
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const id = req.params.id;
+  const {
+    title,
+    description = null,
+    instructions = null,
+    project_id = null,
+    priority = null,
+    deadline = null,
+    address = null,
+    contact_name = null,
+    contact_phone = null,
+    status = null,
+    assignees = null,
+  } = req.body || {};
+
+  db.get(`SELECT company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid SELECT work_order för UPDATE:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row || String(row.company_id) !== String(companyId)) return res.status(404).json({ error: "Not found" });
+
+    const updates = [];
+    const params = [];
+    if (typeof title !== "undefined") {
+      updates.push("title = ?");
+      params.push(String(title).trim());
+    }
+    if (typeof description !== "undefined") {
+      updates.push("description = ?");
+      params.push(description ? String(description).trim() : null);
+    }
+    if (typeof instructions !== "undefined") {
+      updates.push("instructions = ?");
+      params.push(instructions ? String(instructions).trim() : null);
+    }
+    if (typeof project_id !== "undefined") {
+      updates.push("project_id = ?");
+      params.push(project_id || null);
+    }
+    if (typeof priority !== "undefined") {
+      updates.push("priority = ?");
+      params.push(priority || null);
+    }
+    if (typeof deadline !== "undefined") {
+      updates.push("deadline = ?");
+      params.push(deadline || null);
+    }
+    if (typeof address !== "undefined") {
+      updates.push("address = ?");
+      params.push(address ? String(address).trim() : null);
+    }
+    if (typeof contact_name !== "undefined") {
+      updates.push("contact_name = ?");
+      params.push(contact_name ? String(contact_name).trim() : null);
+    }
+    if (typeof contact_phone !== "undefined") {
+      updates.push("contact_phone = ?");
+      params.push(contact_phone ? String(contact_phone).trim() : null);
+    }
+    if (typeof status !== "undefined") {
+      updates.push("status = ?");
+      params.push(status || null);
+    }
+
+    if (updates.length === 0) {
+      // Nothing to update, but still process assignees if provided
+      processAssignees();
+    } else {
+      params.push(id);
+      const sql = `UPDATE work_orders SET ${updates.join(", ")}, updated_at = datetime('now') WHERE id = ?`;
+      db.run(sql, params, function (uErr) {
+        if (uErr) {
+          console.error("DB-fel vid UPDATE work_order:", uErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        processAssignees();
+      });
+    }
+
+    function processAssignees() {
+      if (!Array.isArray(assignees)) return finish();
+      const parsed = assignees.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+      const unique = Array.from(new Set(parsed));
+      if (!unique.length) {
+        // Remove existing assignees
+        db.run(`DELETE FROM work_order_assignees WHERE work_order_id = ?`, [id], (dErr) => {
+          if (dErr) console.error("DB-fel vid DELETE work_order_assignees:", dErr);
+          return finish();
+        });
+        return;
+      }
+      const placeholders = unique.map(() => "?").join(", ");
+      db.all(`SELECT id FROM users WHERE id IN (${placeholders}) AND company_id = ?`, [...unique, companyId], (uErr, rows) => {
+        if (uErr) {
+          console.error("DB-fel vid SELECT assignees validation:", uErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        if ((rows || []).length !== unique.length) return res.status(400).json({ error: "Invalid assignees" });
+
+        // Replace assignees atomically-ish: delete then insert
+        db.run(`DELETE FROM work_order_assignees WHERE work_order_id = ?`, [id], (delErr) => {
+          if (delErr) console.error("DB-fel vid DELETE work_order_assignees:", delErr);
+          const values = unique.map((userId) => [id, userId]);
+          const ph = values.map(() => "(?, ?)").join(", ");
+          const flat = values.flat();
+          db.run(`INSERT INTO work_order_assignees (work_order_id, user_id) VALUES ${ph}`, flat, (iErr) => {
+            if (iErr) {
+              console.error("DB-fel vid INSERT work_order_assignees:", iErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            return finish();
+          });
+        });
+      });
+    }
+
+    function finish() {
+      db.get(
+        `SELECT wo.*, p.name AS project_name FROM work_orders wo LEFT JOIN projects p ON p.id = wo.project_id AND p.company_id = wo.company_id WHERE wo.id = ?`,
+        [id],
+        (gErr, row) => {
+          if (gErr || !row) {
+            if (gErr) console.error("DB-fel vid SELECT work_order efter UPDATE:", gErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          // fetch assignees
+          db.all(`SELECT u.id, (u.first_name || ' ' || u.last_name) AS full_name, u.email FROM users u JOIN work_order_assignees w ON w.user_id = u.id WHERE w.work_order_id = ?`, [id], (aErr, aRows) => {
+            if (aErr) {
+              console.error("DB-fel vid SELECT assignees efter UPDATE:", aErr);
+              return res.status(500).json({ error: "DB error" });
+            }
+            res.json({ ...row, assignees: aRows || [] });
+          });
+        }
+      );
+    }
+  });
+});
+
 // Start work order (assigned user)
 app.post("/work-orders/:id/start", requireAuth, (req, res) => {
   const companyId = getScopedCompanyId(req);
@@ -2409,46 +2595,77 @@ app.get("/work-orders/:id/pdf", requireAuth, (req, res) => {
             const doc = new PDFDocument({ margin: 40, size: "A4" });
             doc.pipe(res);
 
-            doc.fontSize(20).text("Arbetsorder", { align: "left" });
+            // Header
+            doc.fillColor("#0f172a");
+            doc.fontSize(18).font("Helvetica-Bold").text("Arbetsorder", { align: "left" });
+            doc.moveDown(0.25);
+            doc.fontSize(10).font("Helvetica");
+
+            // Order code and company block
+            const startX = doc.x;
+            const metaTop = doc.y;
+            doc.rect(startX, metaTop - 2, 520, 58).stroke();
+
+            // Left column: key info
+            const leftX = startX + 8;
+            let cursorY = metaTop + 4;
+            doc.fontSize(10).font("Helvetica-Bold").text(orderCode, leftX, cursorY);
+            cursorY += 14;
+            if (order.company_name) {
+              doc.fontSize(9).font("Helvetica").text(`Företag: ${order.company_name}`, leftX, cursorY);
+              cursorY += 12;
+            }
+            if (order.project_name) {
+              doc.fontSize(9).font("Helvetica").text(`Projekt: ${order.project_name}`, leftX, cursorY);
+            }
+
+            // Right column: status/prio/deadline
+            const rightX = startX + 300;
+            let ry = metaTop + 4;
+            doc.fontSize(9).font("Helvetica-Bold").text("Status:", rightX, ry);
+            doc.font("Helvetica").text(statusLabel, rightX + 48, ry);
+            ry += 12;
+            doc.font("Helvetica-Bold").text("Prioritet:", rightX, ry);
+            doc.font("Helvetica").text(order.priority || "-", rightX + 64, ry);
+            ry += 12;
+            doc.font("Helvetica-Bold").text("Deadline:", rightX, ry);
+            doc.font("Helvetica").text(order.deadline || "-", rightX + 56, ry);
+
+            doc.moveDown(4);
+
+            // Assignees line
+            doc.fontSize(10).font("Helvetica-Bold").text("Tilldelade:", { continued: true });
+            doc.font("Helvetica").text(` ${assigneesText || "-"}`);
+
             doc.moveDown(0.5);
-            doc.fontSize(10).text(`Ordernr: ${orderCode}`);
-            if (order.company_name) doc.text(`Företag: ${order.company_name}`);
-            if (order.project_name) doc.text(`Projekt: ${order.project_name}`);
-            doc.text(`Status: ${statusLabel}`);
-            doc.text(`Prioritet: ${order.priority || "-"}`);
-            doc.text(`Deadline: ${order.deadline || "-"}`);
-            doc.text(`Tilldelade: ${assigneesText || "-"}`);
-            doc.text(`Skapad: ${order.created_at || "-"}`);
-            doc.text(`Startad: ${order.started_at || "-"}`);
-            doc.text(`Startad av: ${order.started_by_name || "-"}`);
-            doc.text(`Avslutad: ${order.closed_at || "-"}`);
-            doc.text(`Avslutad av: ${order.closed_by_name || "-"}`);
-            doc.text(`Attesterad: ${order.attested_at || "-"}`);
-            doc.text(`Attesterad av: ${order.attested_by_name || "-"}`);
-            doc.text(`Rapport uppdaterad: ${order.report_updated_at || "-"}`);
-            doc.text(`Rapport uppdaterad av: ${order.report_updated_by_name || "-"}`);
 
-            doc.moveDown();
-            doc.fontSize(12).text("Beskrivning", { underline: true });
-            doc.moveDown(0.25);
-            doc.fontSize(10).text(order.description || "-", { width: 520 });
+            // Sections with clear headings
+            const section = (title, content) => {
+              doc.moveDown(0.25);
+              doc.fontSize(12).font("Helvetica-Bold").text(title);
+              doc.moveDown(0.15);
+              doc.fontSize(10).font("Helvetica").text(content || "-", { width: 520 });
+            };
 
-            doc.moveDown();
-            doc.fontSize(12).text("Instruktioner", { underline: true });
-            doc.moveDown(0.25);
-            doc.fontSize(10).text(order.instructions || "-", { width: 520 });
+            section("Beskrivning", order.description);
+            section("Instruktioner", order.instructions);
+            section("Utfört arbete", order.report_text);
 
-            doc.moveDown();
-            doc.fontSize(12).text("Utfört arbete", { underline: true });
-            doc.moveDown(0.25);
-            doc.fontSize(10).text(order.report_text || "-", { width: 520 });
-
-            doc.moveDown();
-            doc.fontSize(12).text("Kontaktuppgifter", { underline: true });
-            doc.moveDown(0.25);
-            doc.fontSize(10).text(`Adress: ${order.address || "-"}`);
+            doc.moveDown(0.5);
+            doc.fontSize(12).font("Helvetica-Bold").text("Kontaktuppgifter");
+            doc.moveDown(0.15);
+            doc.fontSize(10).font("Helvetica");
+            doc.text(`Adress: ${order.address || "-"}`);
             doc.text(`Kontakt: ${order.contact_name || "-"}`);
             doc.text(`Telefon: ${order.contact_phone || "-"}`);
+
+            // Footer: meta timestamps
+            doc.moveDown(1);
+            doc.fontSize(9).fillColor("#374151");
+            doc.text(`Skapad: ${order.created_at || "-"}`);
+            doc.text(`Startad: ${order.started_at || "-"} — Startad av: ${order.started_by_name || "-"}`);
+            doc.text(`Avslutad: ${order.closed_at || "-"} — Avslutad av: ${order.closed_by_name || "-"}`);
+            doc.text(`Attesterad: ${order.attested_at || "-"} — Av: ${order.attested_by_name || "-"}`);
 
             doc.end();
           }
@@ -4079,6 +4296,216 @@ app.post("/admin/fortnox/push_invoice", requireAuth, requireAdmin, async (req, r
     }
   } catch (err) {
     console.error("Error in /admin/fortnox/push_invoice:", err);
+    return res.status(500).json({ error: err?.message || "Server error" });
+  }
+});
+
+// Push offer file to Fortnox (store and optionally forward using saved connection)
+app.post("/admin/fortnox/push_offer", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { offer, filename, company_id, pdf_base64 } = req.body || {};
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const hasOffer = offer && typeof offer === "object";
+    const hasPdf = typeof pdf_base64 === "string" && pdf_base64.trim().length > 0;
+    if (!hasOffer && !hasPdf) {
+      return res.status(400).json({ error: "offer or pdf_base64 required" });
+    }
+
+    // Ensure uploads dir
+    const uploadsDir = path.join(__dirname, "uploads", "fortnox_offers");
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const defaultName = hasPdf ? `offer_${Date.now()}.pdf` : `offer_${Date.now()}.json`;
+    let safeFilename = (filename || defaultName).replace(/[^a-zA-Z0-9._-]/g, "_");
+    if (hasPdf && !safeFilename.toLowerCase().endsWith(".pdf")) {
+      safeFilename += ".pdf";
+    }
+    const filePath = path.join(uploadsDir, safeFilename);
+    let pdfBuffer = null;
+    if (hasPdf) {
+      const raw = pdf_base64.includes(",") ? pdf_base64.split(",").pop() : pdf_base64;
+      pdfBuffer = Buffer.from(String(raw || ""), "base64");
+      fs.writeFileSync(filePath, pdfBuffer);
+    } else if (hasOffer) {
+      const storedBody = JSON.stringify({ Offer: offer }, null, 2);
+      fs.writeFileSync(filePath, storedBody, "utf8");
+    }
+
+    // Log export in DB
+    db.run(
+      `INSERT INTO fortnox_export_logs
+        (company_id, period_start, period_end, employee_count, entry_count, exported_by, filename)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [targetCompanyId, null, null, null, null, getAuthUserId(req), safeFilename],
+      function (err) {
+        if (err) console.error("DB-fel vid POST /fortnox_export_logs (push_offer):", err);
+      }
+    );
+
+    // Try to forward to Fortnox if we have an access token
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.json({
+        success: true,
+        stored: true,
+        offer_forwarded: false,
+        pdf_forwarded: false,
+        message: "Saved locally; no Fortnox token available."
+      });
+    }
+
+    try {
+      let offerResponse = null;
+      if (hasOffer) {
+        const fortnoxUrl = `${FORTNOX_API_BASE}/offers`;
+        const headers = {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        };
+        const body = JSON.stringify({ Offer: offer });
+        const response = await fetch(fortnoxUrl, {
+          method: "POST",
+          headers,
+          body,
+        });
+        const text = await response.text();
+        if (!response.ok) {
+          console.error("Fortnox offer push failed:", response.status, text);
+          return res.status(502).json({ success: false, offer_forwarded: false, status: response.status, error: text, body: text });
+        }
+        offerResponse = text;
+      }
+
+      let pdfResponse = null;
+      if (hasPdf && pdfBuffer) {
+        const conn = await getFortnoxConnection(targetCompanyId).catch(() => null);
+        const savedScope = conn ? String(conn.scope || "").trim() : "";
+        if (savedScope && !savedScope.includes("archive")) {
+          return res.status(403).json({
+            success: false,
+            pdf_forwarded: false,
+            error: "Missing required Fortnox scope: archive",
+            message: "Your Fortnox token does not include the 'archive' scope. Please reconnect the Fortnox app with the required permissions."
+          });
+        }
+        const archiveUrl = `${FORTNOX_API_BASE}${FORTNOX_PAYROLL_PATH}`;
+        const form = new FormData();
+        form.append("file", new Blob([pdfBuffer], { type: "application/pdf" }), safeFilename);
+        const response = await fetch(archiveUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json"
+          },
+          body: form,
+        });
+        const text = await response.text().catch(() => "");
+        if (!response.ok) {
+          console.error("Fortnox offer PDF push failed:", response.status, text);
+          return res.status(502).json({ success: false, pdf_forwarded: false, status: response.status, error: text, body: text });
+        }
+        pdfResponse = text;
+      }
+
+      return res.json({
+        success: true,
+        stored: true,
+        offer_forwarded: Boolean(offerResponse),
+        pdf_forwarded: Boolean(pdfResponse),
+        offer_body: offerResponse,
+        pdf_body: pdfResponse
+      });
+    } catch (err) {
+      console.error("Error forwarding offer to Fortnox:", err);
+      return res.status(500).json({ success: false, offer_forwarded: false, pdf_forwarded: false, error: err?.message || String(err) });
+    }
+  } catch (err) {
+    console.error("Error in /admin/fortnox/push_offer:", err);
+    return res.status(500).json({ error: err?.message || "Server error" });
+  }
+});
+
+// Push work order PDF to Fortnox (store and optionally forward using saved connection)
+app.post("/admin/fortnox/push_work_order", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { pdf_base64, filename, company_id, work_order_id } = req.body || {};
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && company_id ? company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const hasPdf = typeof pdf_base64 === "string" && pdf_base64.trim().length > 0;
+    if (!hasPdf) {
+      return res.status(400).json({ error: "pdf_base64 required" });
+    }
+
+    // Ensure uploads dir
+    const uploadsDir = path.join(__dirname, "uploads", "fortnox_work_orders");
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const defaultName = `work_order_${work_order_id || Date.now()}.pdf`;
+    let safeFilename = (filename || defaultName).replace(/[^a-zA-Z0-9._-]/g, "_");
+    if (!safeFilename.toLowerCase().endsWith(".pdf")) {
+      safeFilename += ".pdf";
+    }
+    const filePath = path.join(uploadsDir, safeFilename);
+
+    const raw = pdf_base64.includes(",") ? pdf_base64.split(",").pop() : pdf_base64;
+    const pdfBuffer = Buffer.from(String(raw || ""), "base64");
+    fs.writeFileSync(filePath, pdfBuffer);
+
+    // Log export in DB
+    db.run(
+      `INSERT INTO fortnox_export_logs
+        (company_id, period_start, period_end, employee_count, entry_count, exported_by, filename)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [targetCompanyId, null, null, null, null, getAuthUserId(req), safeFilename],
+      function (err) {
+        if (err) console.error("DB-fel vid POST /fortnox_export_logs (push_work_order):", err);
+      }
+    );
+
+    // Try to forward to Fortnox if we have an access token
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.json({ success: true, stored: true, pdf_forwarded: false, message: "Saved locally; no Fortnox token available." });
+    }
+
+    const conn = await getFortnoxConnection(targetCompanyId).catch(() => null);
+    const savedScope = conn ? String(conn.scope || "").trim() : "";
+    if (savedScope && !savedScope.includes("archive")) {
+      return res.status(403).json({
+        success: false,
+        pdf_forwarded: false,
+        error: "Missing required Fortnox scope: archive",
+        message: "Your Fortnox token does not include the 'archive' scope. Please reconnect the Fortnox app with the required permissions."
+      });
+    }
+
+    const archiveUrl = `${FORTNOX_API_BASE}${FORTNOX_PAYROLL_PATH}`;
+    try {
+      const form = new FormData();
+      form.append("file", new Blob([pdfBuffer], { type: "application/pdf" }), safeFilename);
+      const response = await fetch(archiveUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json"
+        },
+        body: form,
+      });
+      const text = await response.text().catch(() => "");
+      if (!response.ok) {
+        console.error("Fortnox work order PDF push failed:", response.status, text);
+        return res.status(502).json({ success: false, pdf_forwarded: false, status: response.status, error: text, body: text });
+      }
+      return res.json({ success: true, stored: true, pdf_forwarded: true, body: text });
+    } catch (err) {
+      console.error("Error forwarding work order PDF to Fortnox:", err);
+      return res.status(500).json({ success: false, pdf_forwarded: false, error: err?.message || String(err) });
+    }
+  } catch (err) {
+    console.error("Error in /admin/fortnox/push_work_order:", err);
     return res.status(500).json({ error: err?.message || "Server error" });
   }
 });
@@ -8431,6 +8858,79 @@ app.delete("/time-entries/:id/materials/:materialRowId", requireAuth, (req, res)
         }
       );
     });
+  });
+});
+
+// Start a work order (mark as in_progress) - any assigned user in the same company can start
+app.post("/work-orders/:id/start", requireAuth, (req, res) => {
+  const companyId = req.user.company_id;
+  const userId = req.user.user_id;
+  const id = req.params.id;
+
+  db.get(`SELECT id, company_id FROM work_orders WHERE id = ?`, [id], (err, row) => {
+    if (err) {
+      console.error("DB error selecting work_order for start:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (String(row.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+
+    // mark as in_progress and record starter
+    db.run(
+      `UPDATE work_orders SET status = ?, started_at = datetime('now'), started_by = ? WHERE id = ?`,
+      ["in_progress", userId, id],
+      function (uErr) {
+        if (uErr) {
+          console.error("DB error updating work_order start:", uErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+        db.get(`SELECT * FROM work_orders WHERE id = ?`, [id], (selErr, updated) => {
+          if (selErr) return res.status(500).json({ error: "DB error" });
+          return res.json(updated);
+        });
+      }
+    );
+  });
+});
+
+// GET comp time balance (cumulative) for a user
+app.get("/comp-time-balance", requireAuth, (req, res) => {
+  const requestedUserId = req.query.user_id || req.user.user_id;
+  if (!requestedUserId) return res.status(400).json({ error: "user_id required" });
+
+  // Verify user exists and belongs to the same company as the requester
+  db.get(`SELECT id, company_id FROM users WHERE id = ?`, [requestedUserId], (err, userRow) => {
+    if (err) {
+      console.error("DB error fetching user for comp-time-balance:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!userRow) return res.status(404).json({ error: "User not found" });
+
+    const requesterCompanyId = req.user.company_id;
+    if (String(userRow.company_id) !== String(requesterCompanyId)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Sum saved and taken comp time from time_reports table
+    db.get(
+      `SELECT
+         COALESCE(SUM(CAST(comp_time_saved_hours AS REAL)), 0) AS saved_hours,
+         COALESCE(SUM(CAST(comp_time_taken_hours AS REAL)), 0) AS taken_hours
+       FROM time_reports
+       WHERE user_id = ? AND (company_id IS NULL OR company_id = ?)`,
+      [requestedUserId, requesterCompanyId],
+      (sumErr, sums) => {
+        if (sumErr) {
+          console.error("DB error calculating comp-time-balance:", sumErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+
+        const saved = Number(sums?.saved_hours || 0);
+        const taken = Number(sums?.taken_hours || 0);
+        const balance = saved - taken;
+        res.json({ saved_hours: saved, taken_hours: taken, balance_hours: balance });
+      }
+    );
   });
 });
 

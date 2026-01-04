@@ -13,6 +13,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { apiFetch, getToken } from "@/api/client";
+import { translatePriority } from "@/lib/translate";
 import { toast } from "sonner";
 import { ClipboardCheck, MessageSquare, Play, CheckCircle2, MapPin, User, Download } from "lucide-react";
 
@@ -112,6 +113,14 @@ const WorkOrders = () => {
       toast.success("Arbetsorder påbörjad");
       fetchOrders();
       openReportDialog({ ...order, status: "in_progress" });
+      // Broadcast update to other tabs/admin views in this browser so they can refresh
+      try {
+        const payload = { id: order.id, status: "in_progress", ts: Date.now() };
+        localStorage.setItem("work_orders_update", JSON.stringify(payload));
+        window.dispatchEvent(new CustomEvent("workOrdersUpdated", { detail: payload }));
+      } catch (e) {
+        // ignore storage errors
+      }
     } catch (error: any) {
       toast.error(error.message || "Kunde inte påbörja arbetsorder");
     } finally {
@@ -361,6 +370,16 @@ const WorkOrders = () => {
                   AO {selectedOrder.order_year}-{String(selectedOrder.order_number).padStart(4, "0")}
                 </p>
                 <p className="text-lg font-semibold">{selectedOrder.title}</p>
+                <div className="flex gap-4 mt-1 text-sm text-muted-foreground">
+                  <div>
+                    <p className="text-xs">Prioritet</p>
+                    <p className="font-medium">{translatePriority(selectedOrder.priority)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs">Deadline</p>
+                    <p className="font-medium">{selectedOrder.deadline ? new Date(selectedOrder.deadline).toLocaleDateString("sv-SE") : "-"}</p>
+                  </div>
+                </div>
               </div>
               {selectedOrder.description && (
                 <div>

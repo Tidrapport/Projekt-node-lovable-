@@ -31,6 +31,10 @@ export default defineConfig({
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: true },
       "/admin": { target: "http://localhost:3000", changeOrigin: true },
+      // Note: we keep an explicit proxy for `/admin` API endpoints so
+      // frontend requests like `fetch('/admin/ob-settings')` reach the
+      // backend. The middleware above rewrites browser navigation requests
+      // (those with `Accept: text/html`) to `/` so SPA refresh still works.
       "/auth": { target: "http://localhost:3000", changeOrigin: true },
       "/fortnox": { target: "http://localhost:3000", changeOrigin: true },
       "/help": { target: "http://localhost:3000", changeOrigin: true },

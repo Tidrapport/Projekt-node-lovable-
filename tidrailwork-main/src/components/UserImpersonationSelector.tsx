@@ -4,19 +4,22 @@ import { useImpersonation } from "@/contexts/ImpersonationContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Eye } from "lucide-react";
 import { apiFetch } from "@/api/client";
+import { ensureArray } from "@/lib/ensureArray";
 
 export const UserImpersonationSelector = () => {
   const { companyId, isAdmin } = useAuth();
   const { impersonatedUser, setImpersonatedUser } = useImpersonation();
 
-  const { data: users = [] } = useQuery({
+  const { data: usersRaw } = useQuery({
     queryKey: ["company-users", companyId],
     queryFn: async () => {
       const data = await apiFetch(`/admin/users?company_id=${companyId}`);
-      return data || [];
+      return data;
     },
     enabled: !!companyId && isAdmin,
   });
+
+  const users = ensureArray(usersRaw);
 
   if (!isAdmin || users.length === 0) return null;
 

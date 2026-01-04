@@ -21,9 +21,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch, getToken } from "@/api/client";
+import { generateWorkOrderPDF } from "@/lib/workOrderPdf";
+import { translatePriority } from "@/lib/translate";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { ChevronDown, Download, Filter, Plus, Search } from "lucide-react";
+import { ChevronDown, Download, Filter, Plus, Search, Send } from "lucide-react";
 
 type WorkOrderAssignee = {
   id: number;
@@ -65,6 +67,7 @@ const WorkOrders = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeTab, setActiveTab] = useState("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<WorkOrder | null>(null);
 
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -85,6 +88,7 @@ const WorkOrders = () => {
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
   const [attesting, setAttesting] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [sendingOrderId, setSendingOrderId] = useState<number | null>(null);
 
   const normalizeStatus = (status?: string | null) => {
     const value = String(status || "not_started").toLowerCase();
@@ -92,9 +96,54 @@ const WorkOrders = () => {
     return value;
   };
 
+  const toBase64 = (bytes: Uint8Array) => {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.slice(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
   useEffect(() => {
     fetchData();
   }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for updates from other tabs/parts of the app (optimistic broadcasts)
+  useEffect(() => {
+    const onCustom = (e: any) => {
+      try {
+        const d = e?.detail;
+        if (d && d.id) fetchData();
+      } catch (err) {
+        fetchData();
+      }
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "work_orders_update") {
+        try {
+          const d = JSON.parse(String(e.newValue || "null"));
+          if (d && d.id) fetchData();
+        } catch (err) {
+          fetchData();
+        }
+      }
+    };
+    window.addEventListener("workOrdersUpdated", onCustom);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("workOrdersUpdated", onCustom);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!showCreateDialog) {
+      setEditingOrder(null);
+      resetForm();
+    }
+  }, [showCreateDialog]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -150,6 +199,33 @@ const WorkOrders = () => {
     }
     setSaving(true);
     try {
+      if (editingOrder) {
+        // update existing
+        await apiFetch(`/work-orders/${editingOrder.id}`, {
+          method: "PUT",
+          json: {
+            title: title.trim(),
+            description: description.trim() || null,
+            instructions: instructions.trim() || null,
+            project_id: projectId ? Number(projectId) : null,
+            priority,
+            deadline: deadline || null,
+            address: address.trim() || null,
+            contact_name: contactName.trim() || null,
+            contact_phone: contactPhone.trim() || null,
+            assignees: selectedAssignees,
+            company_id: companyId || null,
+          },
+        });
+        toast.success("Arbetsorder uppdaterad");
+        setShowCreateDialog(false);
+        setEditingOrder(null);
+        resetForm();
+        fetchData();
+        setSaving(false);
+        return;
+      }
+
       await apiFetch("/work-orders", {
         method: "POST",
         json: {
@@ -177,6 +253,34 @@ const WorkOrders = () => {
     }
   };
 
+  const openEdit = (order: WorkOrder) => {
+    setEditingOrder(order);
+    setTitle(order.title || "");
+    setDescription(order.description || "");
+    setInstructions(order.instructions || "");
+    setProjectId(order.project_id ? String(order.project_id) : "");
+    setPriority(order.priority || "medium");
+    setDeadline(order.deadline ? order.deadline.split("T")[0] : "");
+    setAddress(order.address || "");
+    setContactName(order.contact_name || "");
+    setContactPhone(order.contact_phone || "");
+    setSelectedAssignees((order.assignees || []).map((a) => a.id));
+    setShowCreateDialog(true);
+  };
+
+  const handleDelete = async (order: WorkOrder) => {
+    if (!order) return;
+    const ok = window.confirm("Är du säker på att du vill ta bort denna arbetsorder? Detta går inte att ångra.");
+    if (!ok) return;
+    try {
+      await apiFetch(`/work-orders/${order.id}`, { method: "DELETE" });
+      toast.success("Arbetsorder borttagen");
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte ta bort arbetsorder");
+    }
+  };
+
   const handleAttest = async (order: WorkOrder) => {
     if (!order || attesting) return;
     setAttesting(true);
@@ -195,27 +299,62 @@ const WorkOrders = () => {
     if (!order || downloadingId) return;
     setDownloadingId(order.id);
     try {
-      const token = getToken();
-      const base = import.meta.env.VITE_API_BASE_URL?.trim() || "";
-      const query = isSuperAdmin && companyId ? `?company_id=${companyId}` : "";
-      const url = base ? `${base}/work-orders/${order.id}/pdf${query}` : `/work-orders/${order.id}/pdf${query}`;
-      const res = await fetch(url, {
-        credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error("Kunde inte hämta arbetsorder");
-      const blob = await res.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      const orderCode = `${order.order_year}-${String(order.order_number).padStart(4, "0")}`;
-      a.href = downloadUrl;
-      a.download = `arbetsorder_${orderCode}.pdf`;
-      a.click();
-      window.URL.revokeObjectURL(downloadUrl);
+      // Generate PDF client-side using same layout as kundunderlag
+      // Ensure we have company name if available (fetch when superadmin)
+      let company: any = undefined;
+      if (isSuperAdmin && companyId) {
+        try {
+          company = await apiFetch(`/companies/${companyId}`);
+        } catch {
+          company = undefined;
+        }
+      }
+      await generateWorkOrderPDF(order, company);
     } catch (error: any) {
-      toast.error(error.message || "Kunde inte ladda ner arbetsorder");
+      console.error(error);
+      toast.error(error.message || "Kunde inte skapa arbetsorder-PDF");
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  const handleSendToFortnox = async (order: WorkOrder) => {
+    if (!order || sendingOrderId) return;
+    if (!companyId) {
+      toast.error("Välj företag innan du skickar till Fortnox.");
+      return;
+    }
+    setSendingOrderId(order.id);
+    try {
+      let company: any = undefined;
+      if (isSuperAdmin && companyId) {
+        try {
+          company = await apiFetch(`/companies/${companyId}`);
+        } catch {
+          company = undefined;
+        }
+      }
+      const orderCode = `AO ${order.order_year}-${String(order.order_number).padStart(4, "0")}`;
+      const pdfBytes = await generateWorkOrderPDF(order, company, { download: false });
+      const pdfBase64 = toBase64(pdfBytes);
+      const safeName = `arbetsorder_${orderCode.replace(/[^a-zA-Z0-9_-]+/g, "_")}.pdf`;
+      const result = await apiFetch<{ pdf_forwarded?: boolean; message?: string }>(
+        "/admin/fortnox/push_work_order",
+        {
+          method: "POST",
+          json: { company_id: companyId, pdf_base64: pdfBase64, filename: safeName, work_order_id: order.id },
+        }
+      );
+      if (result?.pdf_forwarded) {
+        toast.success("Arbetsorder skickad till Fortnox.");
+      } else {
+        toast.success(result?.message || "Arbetsorder sparad lokalt (ingen Fortnox-token).");
+      }
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message || "Kunde inte skicka arbetsorder till Fortnox");
+    } finally {
+      setSendingOrderId(null);
     }
   };
 
@@ -231,12 +370,7 @@ const WorkOrders = () => {
     return deadlineDate < today;
   };
 
-  const activeOrders = workOrders.filter(
-    (order) => {
-      const status = normalizeStatus(order.status);
-      return status !== "closed" && status !== "attested" && !isOverdue(order);
-    }
-  );
+  const inProgressOrders = workOrders.filter((order) => normalizeStatus(order.status) === "in_progress");
   const closedOrders = workOrders.filter(
     (order) => {
       const status = normalizeStatus(order.status);
@@ -245,7 +379,7 @@ const WorkOrders = () => {
   );
   const overdueOrders = workOrders.filter((order) => isOverdue(order));
   const totalCount = workOrders.length;
-  const activeCount = activeOrders.length;
+  const activeCount = inProgressOrders.length;
   const closedCount = closedOrders.length;
   const overdueCount = overdueOrders.length;
 
@@ -267,17 +401,17 @@ const WorkOrders = () => {
         );
       })
       .filter((order) => {
-        if (activeTab === "active") return activeOrders.some((o) => o.id === order.id);
+        if (activeTab === "active") return inProgressOrders.some((o) => o.id === order.id);
         if (activeTab === "closed") return closedOrders.some((o) => o.id === order.id);
         return true;
       })
       .filter((order) => {
-        if (statusFilter === "active") return activeOrders.some((o) => o.id === order.id);
+        if (statusFilter === "active") return inProgressOrders.some((o) => o.id === order.id);
         if (statusFilter === "closed") return closedOrders.some((o) => o.id === order.id);
         if (statusFilter === "overdue") return overdueOrders.some((o) => o.id === order.id);
         return true;
       });
-  }, [workOrders, searchTerm, activeTab, statusFilter, activeOrders, closedOrders, overdueOrders]);
+  }, [workOrders, searchTerm, activeTab, statusFilter, inProgressOrders, closedOrders, overdueOrders]);
 
 
   const assigneeLabel = selectedAssignees.length
@@ -302,7 +436,7 @@ const WorkOrders = () => {
           </DialogTrigger>
           <DialogContent className="max-w-3xl">
             <DialogHeader>
-              <DialogTitle>Skapa ny arbetsorder</DialogTitle>
+                <DialogTitle>{editingOrder ? "Ändra arbetsorder" : "Skapa ny arbetsorder"}</DialogTitle>
             </DialogHeader>
             <div className="space-y-5">
               <div className="space-y-2">
@@ -453,7 +587,7 @@ const WorkOrders = () => {
                 <Button variant="outline">Avbryt</Button>
               </DialogClose>
               <Button className="bg-slate-400 hover:bg-slate-500" onClick={handleCreate} disabled={saving}>
-                {saving ? "Skapar..." : "Skapa arbetsorder"}
+                {saving ? (editingOrder ? "Sparar..." : "Skapar...") : editingOrder ? "Spara ändringar" : "Skapa arbetsorder"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -469,7 +603,7 @@ const WorkOrders = () => {
         </Card>
         <Card className="shadow-card">
           <CardContent className="pt-6 space-y-1">
-            <p className="text-sm text-muted-foreground">Aktiva</p>
+            <p className="text-sm text-muted-foreground">Pågående</p>
             <p className="text-2xl font-bold font-heading text-blue-600">{activeCount}</p>
           </CardContent>
         </Card>
@@ -504,7 +638,7 @@ const WorkOrders = () => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Alla statusar</SelectItem>
-            <SelectItem value="active">Aktiva</SelectItem>
+            <SelectItem value="active">Pågående</SelectItem>
             <SelectItem value="closed">Avslutade</SelectItem>
             <SelectItem value="overdue">Försenade</SelectItem>
           </SelectContent>
@@ -514,7 +648,7 @@ const WorkOrders = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="all">Alla</TabsTrigger>
-          <TabsTrigger value="active">Aktiva</TabsTrigger>
+          <TabsTrigger value="active">Pågående</TabsTrigger>
           <TabsTrigger value="closed">Avslutade</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -587,15 +721,21 @@ const WorkOrders = () => {
                       <TableCell>
                         <Badge className={statusClass}>{statusLabel}</Badge>
                       </TableCell>
-                      <TableCell className="capitalize">{order.priority || "medium"}</TableCell>
+                      <TableCell className="capitalize">{translatePriority(order.priority)}</TableCell>
                       <TableCell>
                         {order.deadline
                           ? new Date(order.deadline).toLocaleDateString("sv-SE")
                           : "-"}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => setSelectedOrder(order)}>
                           Visa
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(order)}>
+                          Ändra
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={() => handleDelete(order)}>
+                          Ta bort
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -631,6 +771,10 @@ const WorkOrders = () => {
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">Prioritet</p>
+                  <p className="font-medium">{translatePriority(selectedOrder.priority)}</p>
+                </div>
                 <div className="space-y-1">
                   <p className="text-sm text-muted-foreground">Avslutad av</p>
                   <p className="font-medium">{selectedOrder.closed_by_name || "-"}</p>
@@ -670,6 +814,16 @@ const WorkOrders = () => {
               >
                 <Download className="h-4 w-4 mr-2" />
                 {downloadingId === selectedOrder.id ? "Laddar..." : "Ladda ner PDF"}
+              </Button>
+            )}
+            {selectedOrder && (
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={() => handleSendToFortnox(selectedOrder)}
+                disabled={sendingOrderId === selectedOrder.id}
+              >
+                <Send className="h-4 w-4 mr-2" />
+                {sendingOrderId === selectedOrder.id ? "Skickar..." : "Skicka till Fortnox"}
               </Button>
             )}
             {selectedOrder && String(selectedOrder.status || "").toLowerCase() === "closed" && (

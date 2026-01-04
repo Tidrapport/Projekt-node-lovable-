@@ -15,6 +15,19 @@ export function createWorkOrder(payload) {
   });
 }
 
+export function updateWorkOrder(id, payload) {
+  return apiFetch(`/work-orders/${id}`, {
+    method: "PUT",
+    body: payload,
+  });
+}
+
+export function deleteWorkOrder(id) {
+  return apiFetch(`/work-orders/${id}`, {
+    method: "DELETE",
+  });
+}
+
 export function startWorkOrder(id) {
   return apiFetch(`/work-orders/${id}/start`, { method: "POST" });
 }

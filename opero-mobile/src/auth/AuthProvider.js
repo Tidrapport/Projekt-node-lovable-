@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getToken, clearToken } from "./authStore";
 import { me } from "../api/endpoints";
-import { registerForPushNotificationsAsync } from "../notifications/push";
+import { registerForPushNotificationsAsync, disableAllNotifications } from "../notifications/push";
 
 const AuthContext = createContext(null);
 
@@ -44,6 +44,12 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => { refresh(); }, []);
+  // Immediately disable any scheduled/delivered notifications on app start
+  useEffect(() => {
+    disableAllNotifications().catch((err) => {
+      console.warn("disableAllNotifications failed:", err?.message || err);
+    });
+  }, []);
   useEffect(() => {
     if (!user) {
       didRegisterPush.current = false;

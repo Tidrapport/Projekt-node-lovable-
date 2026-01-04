@@ -80,3 +80,13 @@ export async function registerForPushNotificationsAsync() {
   await registerPushToken(token, Platform.OS);
   return token;
 }
+
+export async function disableAllNotifications() {
+  try {
+    // Cancel scheduled notifications and remove delivered ones locally
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    await Notifications.removeAllDeliveredNotificationsAsync();
+  } catch (err) {
+    console.warn("Failed to disable notifications:", err?.message || err);
+  }
+}

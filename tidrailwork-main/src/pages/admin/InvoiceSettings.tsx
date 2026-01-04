@@ -60,6 +60,8 @@ const InvoiceSettings = () => {
   const scopeLabels: Record<string, string> = {
     customer: "Kund",
     invoice: "Faktura",
+    offer: "Offert",
+    order: "Order",
     article: "Artikel",
     salary: "Lön",
     archive: "Arkivplats",
@@ -69,7 +71,7 @@ const InvoiceSettings = () => {
     ? status.scope.split(" ")
     : allowedScopes.length
       ? allowedScopes
-      : ["customer", "invoice", "article", "salary", "archive"];
+      : ["customer", "invoice", "offer", "order", "article", "salary", "archive"];
   const connectedScopes = scopeSource
     .map((scope) => scopeLabels[scope])
     .filter(Boolean);

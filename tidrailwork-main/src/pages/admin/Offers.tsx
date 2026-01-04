@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/api/client";
-import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,15 +31,17 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Edit, Trash2, FileText, Eye, Building2, Download } from "lucide-react";
+import { Plus, Edit, Trash2, FileText, Eye, Building2, Download, Send } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
-import { generateOfferPDF } from "@/lib/offerPdf";
+import { generateOfferPDF, OfferCompany } from "@/lib/offerPdf";
+import { ensureArray } from "@/lib/ensureArray";
 
 interface Customer {
   id: string;
   name: string;
+  customer_number?: string | null;
   org_number: string | null;
   address: string | null;
   postal_code: string | null;
@@ -49,6 +50,45 @@ interface Customer {
   contact_email: string | null;
   contact_phone: string | null;
 }
+
+type ApiCustomer = {
+  id: string | number;
+  name?: string | null;
+  customer_number?: string | null;
+  orgnr?: string | null;
+  org_number?: string | null;
+  invoice_address1?: string | null;
+  invoice_address2?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  contact_name?: string | null;
+  contact_person?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+};
+
+type ApiCompany = {
+  id?: string | number | null;
+  name?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  org_number?: string | null;
+  orgnr?: string | null;
+  logo_url?: string | null;
+  billing_email?: string | null;
+  bankgiro?: string | null;
+  bic_number?: string | null;
+  iban_number?: string | null;
+  vat_number?: string | null;
+  f_skatt?: number | null;
+  invoice_payment_terms?: string | null;
+  invoice_our_reference?: string | null;
+  invoice_late_interest?: string | null;
+};
 
 interface Offer {
   id: string;
@@ -73,7 +113,58 @@ interface Offer {
   customer_id: string | null;
   customer?: Customer;
   include_vat: boolean;
+  line_items?: OfferItem[];
 }
+
+type OfferItem = {
+  id: string;
+  source: "custom" | "job_role" | "material";
+  source_id?: string | null;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+};
+
+type JobRoleOption = {
+  id: string;
+  name: string;
+  rate: number;
+  unit: string;
+};
+
+type MaterialOption = {
+  id: string;
+  name: string;
+  unit: string;
+  price: number;
+};
+
+type PriceListJobRole = {
+  id: string | number;
+  name?: string | null;
+  day_rate?: number | null;
+  evening_rate?: number | null;
+  night_rate?: number | null;
+  weekend_rate?: number | null;
+  overtime_weekday_rate?: number | null;
+  overtime_weekend_rate?: number | null;
+  per_diem_rate?: number | null;
+  travel_time_rate?: number | null;
+};
+
+type PriceListMaterial = {
+  id: string | number;
+  name?: string | null;
+  price?: number | null;
+  unit?: string | null;
+};
+
+type PriceListResponse = {
+  year?: number;
+  job_roles?: PriceListJobRole[];
+  material_types?: PriceListMaterial[];
+};
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-500",
@@ -91,17 +182,172 @@ const statusLabels: Record<string, string> = {
   expired: "Utgången",
 };
 
+const getOfferStorageKey = (companyId?: string | null) =>
+  `tidrailwork_offers:${companyId || "default"}`;
+
+const loadOffersFromStorage = (companyId?: string | null) => {
+  if (typeof window === "undefined") return [];
+  const key = getOfferStorageKey(companyId);
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((offer) => ({
+      ...offer,
+      include_vat: offer?.include_vat !== false,
+    }));
+  } catch {
+    return [];
+  }
+};
+
+const saveOffersToStorage = (companyId: string | null | undefined, offers: Offer[]) => {
+  if (typeof window === "undefined") return;
+  const key = getOfferStorageKey(companyId);
+  window.localStorage.setItem(key, JSON.stringify(offers));
+};
+
+const normalizeCustomer = (customer: ApiCustomer): Customer => {
+  const address = [customer.invoice_address1, customer.invoice_address2]
+    .filter(Boolean)
+    .join(", ");
+  return {
+    id: String(customer.id),
+    name: customer.name || "",
+    customer_number: customer.customer_number || null,
+    org_number: customer.org_number || customer.orgnr || null,
+    address: address || null,
+    postal_code: customer.postal_code || null,
+    city: customer.city || null,
+    contact_person: customer.contact_person || customer.contact_name || null,
+    contact_email: customer.contact_email || null,
+    contact_phone: customer.contact_phone || null,
+  };
+};
+
+const normalizeCompany = (company: ApiCompany | null) => {
+  if (!company) return null;
+  return {
+    name: company.name || "",
+    org_number: company.org_number || company.orgnr || null,
+    logo_url: company.logo_url || null,
+    billing_email: company.billing_email || null,
+    address_line1: company.address_line1 || null,
+    address_line2: company.address_line2 || null,
+    postal_code: company.postal_code || null,
+    city: company.city || null,
+    country: company.country || null,
+    phone: company.phone || null,
+    bankgiro: company.bankgiro || null,
+    bic_number: company.bic_number || null,
+    iban_number: company.iban_number || null,
+    vat_number: company.vat_number || null,
+    f_skatt: company.f_skatt ?? null,
+    invoice_payment_terms: company.invoice_payment_terms || null,
+    invoice_our_reference: company.invoice_our_reference || null,
+    invoice_late_interest: company.invoice_late_interest || null,
+  };
+};
+
+const generateOfferNumber = (offers: Offer[]) => {
+  const year = new Date().getFullYear();
+  const regex = new RegExp(`${year}\\D*(\\d+)`);
+  let max = 0;
+  offers.forEach((offer) => {
+    const match = offer.offer_number.match(regex);
+    if (match) {
+      const value = Number(match[1]);
+      if (Number.isFinite(value)) max = Math.max(max, value);
+    }
+  });
+  const next = max + 1;
+  return `${year}${String(next).padStart(2, "0")}`;
+};
+
+const createOfferId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `offer_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const createOfferItemId = () =>
+  `offer_item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const parseNumber = (value: unknown) => {
+  if (typeof value === "string" && value.trim() === "") return 0;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const pickJobRoleRate = (role: PriceListJobRole) => {
+  const candidates = [
+    role.day_rate,
+    role.evening_rate,
+    role.night_rate,
+    role.weekend_rate,
+    role.overtime_weekday_rate,
+    role.overtime_weekend_rate,
+    role.per_diem_rate,
+    role.travel_time_rate,
+  ];
+  for (const value of candidates) {
+    const num = parseNumber(value);
+    if (num > 0) return num;
+  }
+  return 0;
+};
+
+const normalizeOfferItems = (items?: OfferItem[]) =>
+  (items || []).map((item) => ({
+    ...item,
+    id: item.id || createOfferItemId(),
+    quantity: parseNumber(item.quantity),
+    unit_price: parseNumber(item.unit_price),
+    unit: item.unit || "",
+    description: item.description || "",
+  }));
+
+const toBase64 = (bytes: Uint8Array) => {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.slice(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+};
+
 export default function AdminOffers() {
   const { user, companyId } = useAuth();
   const [offers, setOffers] = useState<Offer[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [company, setCompany] = useState<{ name: string; org_number: string | null; logo_url: string | null; billing_email: string | null } | null>(null);
+  const [company, setCompany] = useState<OfferCompany | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [editingOffer, setEditingOffer] = useState<Offer | null>(null);
+  const [sendingOfferId, setSendingOfferId] = useState<string | null>(null);
+  const [offerItems, setOfferItems] = useState<OfferItem[]>([]);
+  const [jobRoleOptions, setJobRoleOptions] = useState<JobRoleOption[]>([]);
+  const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
+  const [selectedJobRoleId, setSelectedJobRoleId] = useState("");
+  const [jobRoleQuantity, setJobRoleQuantity] = useState("1");
+  const [jobRoleUnit, setJobRoleUnit] = useState("h");
+  const [jobRoleUnitPrice, setJobRoleUnitPrice] = useState("");
+  const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [materialQuantity, setMaterialQuantity] = useState("1");
+  const [materialUnit, setMaterialUnit] = useState("");
+  const [materialUnitPrice, setMaterialUnitPrice] = useState("");
+  const [customItem, setCustomItem] = useState({
+    description: "",
+    quantity: "1",
+    unit: "st",
+    unitPrice: "",
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -141,51 +387,107 @@ export default function AdminOffers() {
   }, [companyId]);
 
   const fetchData = async () => {
-    if (!companyId) return;
-
     setLoading(true);
+    const storedOffers = loadOffersFromStorage(companyId).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    setOffers(storedOffers);
 
-    // Fetch offers
-    const { data: offersData, error: offersError } = await supabase
-      .from("offers")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
-
-    if (offersError) {
-      console.error("Error fetching offers:", offersError);
+    try {
+      const [customersData, companiesData] = await Promise.all([
+        apiFetch<ApiCustomer[]>("/customers?order=name").catch(() => []),
+        apiFetch<ApiCompany[]>("/companies").catch(() => []),
+      ]);
+      const normalizedCustomers = (Array.isArray(customersData) ? customersData : [])
+        .map(normalizeCustomer);
+      setCustomers(normalizedCustomers);
+      const companyList = Array.isArray(companiesData) ? companiesData : [];
+      const selectedCompany = companyId
+        ? companyList.find((item) => String(item.id) === String(companyId))
+        : companyList[0];
+      setCompany(normalizeCompany(selectedCompany || null));
+    } catch (error) {
+      console.error("Error fetching offer data:", error);
       toast.error("Kunde inte hämta offerter");
-    } else {
-      setOffers(offersData || []);
     }
-
-    // Fetch customers
-    const { data: customersData, error: customersError } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("company_id", companyId)
-      .order("name");
-
-    if (customersError) {
-      console.error("Error fetching customers:", customersError);
-    } else {
-      setCustomers(customersData || []);
-    }
-
-    // Fetch company info
-    const { data: companyData, error: companyError } = await supabase
-      .from("companies")
-      .select("name, org_number, logo_url, billing_email")
-      .eq("id", companyId)
-      .single();
-
-    if (companyError) {
-      console.error("Error fetching company:", companyError);
-    } else {
-      setCompany(companyData);
-    }
-
+    await fetchItemOptions();
     setLoading(false);
+  };
+
+  const resetItemInputs = () => {
+    setSelectedJobRoleId("");
+    setJobRoleQuantity("1");
+    setJobRoleUnit("h");
+    setJobRoleUnitPrice("");
+    setSelectedMaterialId("");
+    setMaterialQuantity("1");
+    setMaterialUnit("");
+    setMaterialUnitPrice("");
+    setCustomItem({
+      description: "",
+      quantity: "1",
+      unit: "st",
+      unitPrice: "",
+    });
+  };
+
+  const fetchItemOptions = async () => {
+    const year = new Date().getFullYear();
+    let jobRoles: JobRoleOption[] = [];
+    let materials: MaterialOption[] = [];
+
+    try {
+      const priceList = await apiFetch<PriceListResponse>(`/price-list?year=${year}`);
+      const jobRolesData = ensureArray<PriceListJobRole>(priceList?.job_roles);
+      const materialData = ensureArray<PriceListMaterial>(priceList?.material_types);
+
+      jobRoles = jobRolesData.map((role) => ({
+        id: String(role.id),
+        name: role.name || "Yrkesroll",
+        rate: pickJobRoleRate(role),
+        unit: "h",
+      }));
+
+      materials = materialData.map((material) => ({
+        id: String(material.id),
+        name: material.name || "Tillägg",
+        unit: material.unit || "st",
+        price: parseNumber(material.price),
+      }));
+    } catch (error) {
+      console.warn("Price list missing for offers:", error);
+    }
+
+    if (!jobRoles.length) {
+      try {
+        const jobRolesData = await apiFetch<any[]>("/job-roles?order=name");
+        jobRoles = ensureArray(jobRolesData).map((role: any) => ({
+          id: String(role.id),
+          name: role.name || "Yrkesroll",
+          rate: 0,
+          unit: "h",
+        }));
+      } catch (error) {
+        console.warn("Job roles missing for offers:", error);
+      }
+    }
+
+    if (!materials.length) {
+      try {
+        const materialData = await apiFetch<any[]>("/material-types?order=name");
+        materials = ensureArray(materialData).map((material: any) => ({
+          id: String(material.id),
+          name: material.name || "Tillägg",
+          unit: material.unit || "st",
+          price: 0,
+        }));
+      } catch (error) {
+        console.warn("Material types missing for offers:", error);
+      }
+    }
+
+    setJobRoleOptions(jobRoles);
+    setMaterialOptions(materials);
   };
 
   const resetForm = () => {
@@ -208,11 +510,15 @@ export default function AdminOffers() {
       notes: "",
       include_vat: true,
     });
+    setOfferItems([]);
+    resetItemInputs();
     setEditingOffer(null);
   };
 
   const openEditDialog = (offer: Offer) => {
     setEditingOffer(offer);
+    setOfferItems(normalizeOfferItems(offer.line_items));
+    resetItemInputs();
     setFormData({
       customer_id: offer.customer_id || "",
       title: offer.title,
@@ -230,9 +536,116 @@ export default function AdminOffers() {
       estimated_hours: offer.estimated_hours?.toString() || "",
       terms: offer.terms || "",
       notes: offer.notes || "",
-      include_vat: offer.include_vat,
+      include_vat: offer.include_vat !== false,
     });
     setDialogOpen(true);
+  };
+
+  const handleSelectJobRole = (value: string) => {
+    setSelectedJobRoleId(value);
+    const role = jobRoleOptions.find((item) => item.id === value);
+    setJobRoleUnit(role?.unit || "h");
+    setJobRoleUnitPrice(role?.rate ? String(role.rate) : "");
+  };
+
+  const handleSelectMaterial = (value: string) => {
+    setSelectedMaterialId(value);
+    const material = materialOptions.find((item) => item.id === value);
+    setMaterialUnit(material?.unit || "st");
+    setMaterialUnitPrice(material?.price ? String(material.price) : "");
+  };
+
+  const addOfferItem = (item: Omit<OfferItem, "id">) => {
+    setOfferItems((prev) => [...prev, { ...item, id: createOfferItemId() }]);
+  };
+
+  const handleAddJobRole = () => {
+    if (!selectedJobRoleId) {
+      toast.error("Välj en yrkesroll.");
+      return;
+    }
+    const role = jobRoleOptions.find((item) => item.id === selectedJobRoleId);
+    if (!role) {
+      toast.error("Yrkesrollen hittades inte.");
+      return;
+    }
+    const quantity = parseNumber(jobRoleQuantity) || 1;
+    const unitPrice = parseNumber(jobRoleUnitPrice || role.rate);
+    const unit = jobRoleUnit.trim() || role.unit || "h";
+
+    addOfferItem({
+      source: "job_role",
+      source_id: role.id,
+      description: role.name,
+      quantity,
+      unit,
+      unit_price: unitPrice,
+    });
+
+    setSelectedJobRoleId("");
+    setJobRoleQuantity("1");
+    setJobRoleUnit("h");
+    setJobRoleUnitPrice("");
+  };
+
+  const handleAddMaterial = () => {
+    if (!selectedMaterialId) {
+      toast.error("Välj ett tillägg/material.");
+      return;
+    }
+    const material = materialOptions.find((item) => item.id === selectedMaterialId);
+    if (!material) {
+      toast.error("Materialet hittades inte.");
+      return;
+    }
+    const quantity = parseNumber(materialQuantity) || 1;
+    const unitPrice = parseNumber(materialUnitPrice || material.price);
+    const unit = materialUnit.trim() || material.unit || "st";
+
+    addOfferItem({
+      source: "material",
+      source_id: material.id,
+      description: material.name,
+      quantity,
+      unit,
+      unit_price: unitPrice,
+    });
+
+    setSelectedMaterialId("");
+    setMaterialQuantity("1");
+    setMaterialUnit("");
+    setMaterialUnitPrice("");
+  };
+
+  const handleAddCustomItem = () => {
+    if (!customItem.description.trim()) {
+      toast.error("Ange en beskrivning.");
+      return;
+    }
+    const quantity = parseNumber(customItem.quantity) || 1;
+    const unitPrice = parseNumber(customItem.unitPrice);
+    const unit = customItem.unit.trim() || "st";
+
+    addOfferItem({
+      source: "custom",
+      source_id: null,
+      description: customItem.description.trim(),
+      quantity,
+      unit,
+      unit_price: unitPrice,
+    });
+
+    setCustomItem({ description: "", quantity: "1", unit: "st", unitPrice: "" });
+  };
+
+  const updateOfferItem = (id: string, updates: Partial<OfferItem>) => {
+    setOfferItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+    );
+  };
+
+  const removeOfferItem = (id: string) => {
+    setOfferItems((prev) => prev.filter((item) => item.id !== id));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -242,42 +655,38 @@ export default function AdminOffers() {
 
     try {
       if (editingOffer) {
-        // Update existing offer
-        const { error } = await supabase
-          .from("offers")
-          .update({
-            customer_id: formData.customer_id || null,
-            title: formData.title,
-            description: formData.description || null,
-            valid_until: formData.valid_until || null,
-            pricing_type: formData.pricing_type,
-            fixed_price: formData.fixed_price ? parseFloat(formData.fixed_price) : null,
-            hourly_rate_day: formData.hourly_rate_day ? parseFloat(formData.hourly_rate_day) : null,
-            hourly_rate_evening: formData.hourly_rate_evening ? parseFloat(formData.hourly_rate_evening) : null,
-            hourly_rate_night: formData.hourly_rate_night ? parseFloat(formData.hourly_rate_night) : null,
-            hourly_rate_weekend: formData.hourly_rate_weekend ? parseFloat(formData.hourly_rate_weekend) : null,
-            travel_rate_per_km: formData.travel_rate_per_km ? parseFloat(formData.travel_rate_per_km) : null,
-            per_diem_full: formData.per_diem_full ? parseFloat(formData.per_diem_full) : null,
-            per_diem_half: formData.per_diem_half ? parseFloat(formData.per_diem_half) : null,
-            estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
-            terms: formData.terms || null,
-            notes: formData.notes || null,
-            include_vat: formData.include_vat,
-          })
-          .eq("id", editingOffer.id);
-
-        if (error) throw error;
+        const updatedOffers = offers.map((offer) =>
+          offer.id === editingOffer.id
+            ? {
+                ...offer,
+                customer_id: formData.customer_id || null,
+                title: formData.title,
+                description: formData.description || null,
+                valid_until: formData.valid_until || null,
+                pricing_type: formData.pricing_type,
+                fixed_price: formData.fixed_price ? parseFloat(formData.fixed_price) : null,
+                hourly_rate_day: formData.hourly_rate_day ? parseFloat(formData.hourly_rate_day) : null,
+                hourly_rate_evening: formData.hourly_rate_evening ? parseFloat(formData.hourly_rate_evening) : null,
+                hourly_rate_night: formData.hourly_rate_night ? parseFloat(formData.hourly_rate_night) : null,
+                hourly_rate_weekend: formData.hourly_rate_weekend ? parseFloat(formData.hourly_rate_weekend) : null,
+                travel_rate_per_km: formData.travel_rate_per_km ? parseFloat(formData.travel_rate_per_km) : null,
+                per_diem_full: formData.per_diem_full ? parseFloat(formData.per_diem_full) : null,
+                per_diem_half: formData.per_diem_half ? parseFloat(formData.per_diem_half) : null,
+                estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
+                terms: formData.terms || null,
+                notes: formData.notes || null,
+                include_vat: formData.include_vat !== false,
+                line_items: offerItems,
+              }
+            : offer
+        );
+        setOffers(updatedOffers);
+        saveOffersToStorage(companyId, updatedOffers);
         toast.success("Offert uppdaterad");
       } else {
-        // Generate offer number
-        const { data: offerNumber, error: numberError } = await supabase
-          .rpc("generate_offer_number", { p_company_id: companyId });
-
-        if (numberError) throw numberError;
-
-        // Create new offer
-        const { error } = await supabase.from("offers").insert({
-          company_id: companyId,
+        const offerNumber = generateOfferNumber(offers);
+        const newOffer: Offer = {
+          id: createOfferId(),
           offer_number: offerNumber,
           customer_id: formData.customer_id || null,
           title: formData.title,
@@ -295,18 +704,19 @@ export default function AdminOffers() {
           estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
           terms: formData.terms || null,
           notes: formData.notes || null,
-          created_by: user.id,
+          created_at: new Date().toISOString(),
           status: "draft",
-          include_vat: formData.include_vat,
-        });
-
-        if (error) throw error;
+          include_vat: formData.include_vat !== false,
+          line_items: offerItems,
+        };
+        const nextOffers = [newOffer, ...offers];
+        setOffers(nextOffers);
+        saveOffersToStorage(companyId, nextOffers);
         toast.success("Offert skapad");
       }
 
       setDialogOpen(false);
       resetForm();
-      fetchData();
     } catch (error: any) {
       console.error("Error saving offer:", error);
       toast.error("Kunde inte spara offert");
@@ -319,23 +729,19 @@ export default function AdminOffers() {
     if (!companyId) return;
 
     try {
-      const { data, error } = await supabase
-        .from("customers")
-        .insert({
-          company_id: companyId,
-          name: customerFormData.name,
-          org_number: customerFormData.org_number || null,
-          address: customerFormData.address || null,
-          postal_code: customerFormData.postal_code || null,
-          city: customerFormData.city || null,
-          contact_person: customerFormData.contact_person || null,
-          contact_email: customerFormData.contact_email || null,
-          contact_phone: customerFormData.contact_phone || null,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const payload = {
+        company_id: companyId,
+        name: customerFormData.name,
+        orgnr: customerFormData.org_number || null,
+        invoice_address1: customerFormData.address || null,
+        invoice_address2: null,
+        postal_code: customerFormData.postal_code || null,
+        city: customerFormData.city || null,
+        contact_name: customerFormData.contact_person || null,
+        contact_email: customerFormData.contact_email || null,
+        contact_phone: customerFormData.contact_phone || null,
+      };
+      const created = await apiFetch<ApiCustomer>("/customers", { method: "POST", json: payload });
 
       toast.success("Kund skapad");
       setCustomerDialogOpen(false);
@@ -351,8 +757,9 @@ export default function AdminOffers() {
       });
       
       // Add to customers list and select it
-      setCustomers([...customers, data]);
-      setFormData({ ...formData, customer_id: data.id });
+      const normalized = normalizeCustomer(created);
+      setCustomers([...customers, normalized]);
+      setFormData({ ...formData, customer_id: normalized.id });
     } catch (error: any) {
       console.error("Error creating customer:", error);
       toast.error("Kunde inte skapa kund");
@@ -361,14 +768,12 @@ export default function AdminOffers() {
 
   const updateOfferStatus = async (offerId: string, status: string) => {
     try {
-      const { error } = await supabase
-        .from("offers")
-        .update({ status })
-        .eq("id", offerId);
-
-      if (error) throw error;
+      const updatedOffers = offers.map((offer) =>
+        offer.id === offerId ? { ...offer, status } : offer
+      );
+      setOffers(updatedOffers);
+      saveOffersToStorage(companyId, updatedOffers);
       toast.success(`Offert markerad som ${statusLabels[status]?.toLowerCase()}`);
-      fetchData();
     } catch (error: any) {
       console.error("Error updating status:", error);
       toast.error("Kunde inte uppdatera status");
@@ -379,14 +784,10 @@ export default function AdminOffers() {
     if (!confirm("Är du säker på att du vill ta bort denna offert?")) return;
 
     try {
-      const { error } = await supabase
-        .from("offers")
-        .delete()
-        .eq("id", offerId);
-
-      if (error) throw error;
+      const updatedOffers = offers.filter((offer) => offer.id !== offerId);
+      setOffers(updatedOffers);
+      saveOffersToStorage(companyId, updatedOffers);
       toast.success("Offert borttagen");
-      fetchData();
     } catch (error: any) {
       console.error("Error deleting offer:", error);
       toast.error("Kunde inte ta bort offert");
@@ -405,11 +806,163 @@ export default function AdminOffers() {
     }
     const customer = getCustomerById(offer.customer_id);
     try {
-      await generateOfferPDF(offer, customer || null, company);
+      const normalizedOffer = { ...offer, include_vat: offer.include_vat !== false };
+      // Generate PDF using the `offert_test_with_vat2.pdf` template and trigger browser download.
+      await generateOfferPDF(normalizedOffer, customer || null, company, { download: true, templatePath: "/offert_test_with_vat2.pdf" });
       toast.success("Offert nedladdad");
     } catch (error) {
       console.error("Error generating PDF:", error);
       toast.error("Kunde inte generera PDF");
+    }
+  };
+
+  const buildOfferRows = (offer: Offer) => {
+    const rows: Array<{ Description: string; Price?: number; Quantity?: number; Unit?: string }> = [];
+    if (offer.line_items && offer.line_items.length > 0) {
+      offer.line_items.forEach((item) => {
+        rows.push({
+          Description: item.description || "Artikel",
+          Price: parseNumber(item.unit_price),
+          Quantity: parseNumber(item.quantity),
+          Unit: item.unit || "st",
+        });
+      });
+      if (offer.travel_rate_per_km) {
+        rows.push({
+          Description: "Reseersättning",
+          Price: Number(offer.travel_rate_per_km),
+          Quantity: 1,
+          Unit: "km",
+        });
+      }
+      if (offer.per_diem_full) {
+        rows.push({
+          Description: "Hel traktamente",
+          Price: Number(offer.per_diem_full),
+          Quantity: 1,
+          Unit: "dag",
+        });
+      }
+      if (offer.per_diem_half) {
+        rows.push({
+          Description: "Halv traktamente",
+          Price: Number(offer.per_diem_half),
+          Quantity: 1,
+          Unit: "dag",
+        });
+      }
+      return rows;
+    }
+    if (offer.fixed_price) {
+      rows.push({
+        Description: "Fast pris",
+        Price: Number(offer.fixed_price),
+        Quantity: 1,
+        Unit: "st",
+      });
+    }
+    const hourlyRows = [
+      { label: "Timpris dag", value: offer.hourly_rate_day },
+      { label: "Timpris kväll", value: offer.hourly_rate_evening },
+      { label: "Timpris natt", value: offer.hourly_rate_night },
+      { label: "Timpris helg", value: offer.hourly_rate_weekend },
+    ];
+    hourlyRows.forEach((row) => {
+      if (!row.value) return;
+      rows.push({
+        Description: row.label,
+        Price: Number(row.value),
+        Quantity: offer.estimated_hours ? Number(offer.estimated_hours) : 1,
+        Unit: "h",
+      });
+    });
+    if (offer.travel_rate_per_km) {
+      rows.push({
+        Description: "Reseersättning",
+        Price: Number(offer.travel_rate_per_km),
+        Quantity: 1,
+        Unit: "km",
+      });
+    }
+    if (offer.per_diem_full) {
+      rows.push({
+        Description: "Hel traktamente",
+        Price: Number(offer.per_diem_full),
+        Quantity: 1,
+        Unit: "dag",
+      });
+    }
+    if (offer.per_diem_half) {
+      rows.push({
+        Description: "Halv traktamente",
+        Price: Number(offer.per_diem_half),
+        Quantity: 1,
+        Unit: "dag",
+      });
+    }
+    if (!rows.length) {
+      rows.push({
+        Description: offer.title || "Offert",
+        Price: 0,
+        Quantity: 1,
+        Unit: "st",
+      });
+    }
+    return rows;
+  };
+
+  const handleSendToFortnox = async (offer: Offer) => {
+    if (!companyId) {
+      toast.error("Välj företag innan du skickar till Fortnox.");
+      return;
+    }
+    if (!company) {
+      toast.error("Företagsuppgifter saknas för PDF.");
+      return;
+    }
+    const customer = getCustomerById(offer.customer_id);
+    if (!customer) {
+      toast.error("Välj en kund för offerten.");
+      return;
+    }
+    if (!customer.customer_number) {
+      toast.error("Kunden saknar Fortnox kundnummer.");
+      return;
+    }
+    setSendingOfferId(offer.id);
+    try {
+      const offerDate = offer.created_at
+        ? format(new Date(offer.created_at), "yyyy-MM-dd")
+        : format(new Date(), "yyyy-MM-dd");
+      const payload = {
+        CustomerNumber: customer.customer_number,
+        OfferDate: offerDate,
+        Comments: offer.description || offer.title || "",
+        OurReference: user?.full_name || user?.email || "",
+        OfferRows: buildOfferRows(offer),
+      };
+      const normalizedOffer = { ...offer, include_vat: offer.include_vat !== false };
+      const pdfBytes = await generateOfferPDF(normalizedOffer, customer, company, { download: false });
+      const pdfBase64 = toBase64(pdfBytes);
+      const safeNumber = offer.offer_number.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const filename = `offert_${safeNumber || "offert"}.pdf`;
+      const result = await apiFetch<{ offer_forwarded?: boolean; pdf_forwarded?: boolean; message?: string }>(
+        "/admin/fortnox/push_offer",
+        {
+          method: "POST",
+          json: { company_id: companyId, offer: payload, pdf_base64: pdfBase64, filename },
+        }
+      );
+      if (result?.offer_forwarded || result?.pdf_forwarded) {
+        toast.success("Offert skickad till Fortnox.");
+      } else {
+        toast.success(result?.message || "Offert sparad lokalt (ingen Fortnox-token).");
+      }
+    } catch (error: any) {
+      console.error("Error sending offer to Fortnox:", error);
+      toast.error(error?.message || "Kunde inte skicka offert till Fortnox");
+    } finally {
+      setSendingOfferId(null);
     }
   };
 
@@ -712,6 +1265,272 @@ export default function AdminOffers() {
                   rows={3}
                 />
               </div>
+
+              <Card>
+                <CardHeader className="py-3">
+                  <CardTitle className="text-base">Artiklar</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Yrkesroller</p>
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                      <div className="space-y-1 md:col-span-2">
+                        <Label>Yrkesroll</Label>
+                        <Select value={selectedJobRoleId} onValueChange={handleSelectJobRole}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Välj yrkesroll..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {jobRoleOptions.map((role) => (
+                              <SelectItem key={role.id} value={role.id}>
+                                {role.name}
+                                {role.rate ? ` (${role.rate} SEK)` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Antal</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={jobRoleQuantity}
+                          onChange={(e) => setJobRoleQuantity(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Enhet</Label>
+                        <Input
+                          value={jobRoleUnit}
+                          onChange={(e) => setJobRoleUnit(e.target.value)}
+                          placeholder="h"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Á-pris</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={jobRoleUnitPrice}
+                          onChange={(e) => setJobRoleUnitPrice(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Button type="button" variant="secondary" onClick={handleAddJobRole}>
+                          Lägg till
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Tillägg & material</p>
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                      <div className="space-y-1 md:col-span-2">
+                        <Label>Tillägg</Label>
+                        <Select value={selectedMaterialId} onValueChange={handleSelectMaterial}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Välj tillägg..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {materialOptions.map((material) => (
+                              <SelectItem key={material.id} value={material.id}>
+                                {material.name}
+                                {material.unit ? ` (${material.unit})` : ""}
+                                {material.price ? ` • ${material.price} SEK` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Antal</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={materialQuantity}
+                          onChange={(e) => setMaterialQuantity(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Enhet</Label>
+                        <Input
+                          value={materialUnit}
+                          onChange={(e) => setMaterialUnit(e.target.value)}
+                          placeholder="st"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Á-pris</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={materialUnitPrice}
+                          onChange={(e) => setMaterialUnitPrice(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Button type="button" variant="secondary" onClick={handleAddMaterial}>
+                          Lägg till
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Egen artikel</p>
+                    <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                      <div className="space-y-1 md:col-span-2">
+                        <Label>Beskrivning</Label>
+                        <Input
+                          value={customItem.description}
+                          onChange={(e) =>
+                            setCustomItem({ ...customItem, description: e.target.value })
+                          }
+                          placeholder="t.ex. Specialarbete"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Antal</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={customItem.quantity}
+                          onChange={(e) =>
+                            setCustomItem({ ...customItem, quantity: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Enhet</Label>
+                        <Input
+                          value={customItem.unit}
+                          onChange={(e) =>
+                            setCustomItem({ ...customItem, unit: e.target.value })
+                          }
+                          placeholder="st"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Á-pris</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={customItem.unitPrice}
+                          onChange={(e) =>
+                            setCustomItem({ ...customItem, unitPrice: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Button type="button" variant="secondary" onClick={handleAddCustomItem}>
+                          Lägg till
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Tillagda artiklar</p>
+                    {offerItems.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Inga artiklar tillagda ännu.
+                      </p>
+                    ) : (
+                      <div className="border rounded-md overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Beskrivning</TableHead>
+                              <TableHead>Antal</TableHead>
+                              <TableHead>Enhet</TableHead>
+                              <TableHead>Á-pris</TableHead>
+                              <TableHead>Summa</TableHead>
+                              <TableHead className="text-right">Åtgärd</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {offerItems.map((item) => {
+                              const lineTotal = parseNumber(item.quantity) * parseNumber(item.unit_price);
+                              return (
+                                <TableRow key={item.id}>
+                                  <TableCell className="min-w-[220px]">
+                                    <Input
+                                      value={item.description}
+                                      onChange={(e) =>
+                                        updateOfferItem(item.id, { description: e.target.value })
+                                      }
+                                    />
+                                  </TableCell>
+                                  <TableCell className="w-28">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.1"
+                                      value={String(item.quantity)}
+                                      onChange={(e) =>
+                                        updateOfferItem(item.id, {
+                                          quantity: parseNumber(e.target.value),
+                                        })
+                                      }
+                                    />
+                                  </TableCell>
+                                  <TableCell className="w-24">
+                                    <Input
+                                      value={item.unit}
+                                      onChange={(e) =>
+                                        updateOfferItem(item.id, { unit: e.target.value })
+                                      }
+                                    />
+                                  </TableCell>
+                                  <TableCell className="w-32">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={String(item.unit_price)}
+                                      onChange={(e) =>
+                                        updateOfferItem(item.id, {
+                                          unit_price: parseNumber(e.target.value),
+                                        })
+                                      }
+                                    />
+                                  </TableCell>
+                                  <TableCell className="w-32">
+                                    {lineTotal
+                                      ? lineTotal.toLocaleString("sv-SE", {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })
+                                      : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => removeOfferItem(item.id)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
               <div className="space-y-2">
                 <Label>Pristyp</Label>
@@ -1113,6 +1932,50 @@ export default function AdminOffers() {
                 </CardContent>
               </Card>
 
+              {selectedOffer.line_items && selectedOffer.line_items.length > 0 && (
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-base">Artiklar</CardTitle>
+                  </CardHeader>
+                  <CardContent className="py-2">
+                    <div className="border rounded-md overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Beskrivning</TableHead>
+                            <TableHead>Antal</TableHead>
+                            <TableHead>Enhet</TableHead>
+                            <TableHead>Á-pris</TableHead>
+                            <TableHead>Summa</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedOffer.line_items.map((item, index) => {
+                            const lineTotal = parseNumber(item.quantity) * parseNumber(item.unit_price);
+                            return (
+                              <TableRow key={item.id || `${selectedOffer.id}-${index}`}>
+                                <TableCell className="font-medium">{item.description}</TableCell>
+                                <TableCell>{item.quantity}</TableCell>
+                                <TableCell>{item.unit}</TableCell>
+                                <TableCell>{item.unit_price}</TableCell>
+                                <TableCell>
+                                  {lineTotal
+                                    ? lineTotal.toLocaleString("sv-SE", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })
+                                    : "-"}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {(selectedOffer.travel_rate_per_km ||
                 selectedOffer.per_diem_full ||
                 selectedOffer.per_diem_half) && (
@@ -1193,6 +2056,14 @@ export default function AdminOffers() {
                   >
                     <Download className="mr-2 h-4 w-4" />
                     Ladda ner PDF
+                  </Button>
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => handleSendToFortnox(selectedOffer)}
+                    disabled={sendingOfferId === selectedOffer.id}
+                  >
+                    <Send className="mr-2 h-4 w-4" />
+                    Skicka till Fortnox
                   </Button>
                   {selectedOffer.status === "draft" && (
                     <Button

@@ -154,6 +154,15 @@ const SalaryOverview = () => {
     enabled: !!effectiveUserId,
   });
 
+  const { data: compTimeEntries = [] } = useQuery({
+    queryKey: ["comp-time-entries", effectiveUserId],
+    queryFn: async () => {
+      if (!effectiveUserId) return [];
+      return listTimeEntries({ user_id: effectiveUserId }).catch(() => []);
+    },
+    enabled: !!effectiveUserId,
+  });
+
   const { data: compTimeBalance } = useQuery({
     queryKey: ["comp-time-balance", effectiveUserId],
     queryFn: async () => {
@@ -332,8 +341,31 @@ const SalaryOverview = () => {
   };
 
   const salaryData = calculateSalaryData();
-  const compTimeBalanceHours = Number(compTimeBalance?.balance_hours || 0);
-  const compTimeSavedTotalHours = Number(compTimeBalance?.saved_hours || 0);
+  const compTimeTotals = useMemo(() => {
+    let saved = 0;
+    let taken = 0;
+    compTimeEntries.forEach((entry) => {
+      const overtimeWeekday = Number(entry.overtime_weekday_hours || 0);
+      const overtimeWeekend = Number(entry.overtime_weekend_hours || 0);
+      const totalOvertime = overtimeWeekday + overtimeWeekend;
+      const savedHoursRaw = Number(entry.comp_time_saved_hours || 0);
+      const savedHours = savedHoursRaw > 0 ? savedHoursRaw : entry.save_comp_time ? totalOvertime : 0;
+      const takenHours = Number(entry.comp_time_taken_hours || 0);
+      saved += savedHours;
+      taken += takenHours;
+    });
+    return { saved, taken, balance: saved - taken };
+  }, [compTimeEntries]);
+  const compTimeBalanceHours = useMemo(() => {
+    const apiBalance = Number(compTimeBalance?.balance_hours);
+    if (Number.isFinite(apiBalance) && apiBalance !== 0) return apiBalance;
+    const apiSaved = Number(compTimeBalance?.saved_hours);
+    const apiTaken = Number(compTimeBalance?.taken_hours);
+    if ((Number.isFinite(apiSaved) && apiSaved !== 0) || (Number.isFinite(apiTaken) && apiTaken !== 0)) {
+      return (Number.isFinite(apiSaved) ? apiSaved : 0) - (Number.isFinite(apiTaken) ? apiTaken : 0);
+    }
+    return compTimeTotals.balance;
+  }, [compTimeBalance, compTimeTotals.balance]);
   const monthlySalary = Number(profile?.monthly_salary || 0);
   const hourlyWage = Number(profile?.hourly_wage || 0);
   const showMonthlySalary = monthlySalary > 0;
@@ -748,17 +780,17 @@ const SalaryOverview = () => {
           </CardContent>
         </Card>
 
-        <Card className={compTimeSavedTotalHours !== 0 ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/30" : ""}>
+        <Card className={compTimeBalanceHours !== 0 ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/30" : ""}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sparad komptid</CardTitle>
             <Clock className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
-              {compTimeSavedTotalHours.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h
+              {compTimeBalanceHours.toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Totalt sparat (utan uttag)
+              Totalt sparat (saldo)
             </p>
             {salaryData.compTimeTakenHours > 0 && (
               <p className="text-xs text-muted-foreground mt-1">

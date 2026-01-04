@@ -307,7 +307,7 @@ const createStyles = (colors, headerTextColor, headerSubColor) => StyleSheet.cre
   },
   content: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.background,
   },
   overlay: {
     position: "absolute",
@@ -389,7 +389,7 @@ const createStyles = (colors, headerTextColor, headerSubColor) => StyleSheet.cre
     bottom: 0,
     right: 0,
     width: profileWidth,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.surface,
     padding: spacing.md,
     paddingTop: spacing.xl,
   },
