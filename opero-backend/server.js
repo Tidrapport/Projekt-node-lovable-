@@ -801,6 +801,19 @@ const DEFAULT_SHIFT_CONFIGS = [
 ];
 
 const DEFAULT_TRAVEL_RATE = 170;
+const DEFAULT_TIME_REPORT_SETTINGS = {
+  past_days: 60,
+  future_days: 90,
+  lock_days: 0,
+  extra_past_admin: 0,
+  extra_future_admin: 0,
+  extra_past_platschef: 0,
+  extra_future_platschef: 0,
+  extra_past_inhyrd: 0,
+  extra_future_inhyrd: 0,
+  extra_past_arbetsledare: 0,
+  extra_future_arbetsledare: 0
+};
 
 function ensureShiftConfigs(companyId, callback) {
   db.all(
@@ -835,6 +848,41 @@ function ensureCompensationSettings(companyId, callback) {
   db.run(
     "INSERT OR IGNORE INTO compensation_settings (company_id, travel_rate) VALUES (?, ?)",
     [companyId, DEFAULT_TRAVEL_RATE],
+    callback
+  );
+}
+
+function ensureTimeReportSettings(companyId, callback) {
+  db.run(
+    `INSERT OR IGNORE INTO time_report_settings (
+      company_id,
+      past_days,
+      future_days,
+      lock_days,
+      extra_past_admin,
+      extra_future_admin,
+      extra_past_platschef,
+      extra_future_platschef,
+      extra_past_inhyrd,
+      extra_future_inhyrd,
+      extra_past_arbetsledare,
+      extra_future_arbetsledare
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      companyId,
+      DEFAULT_TIME_REPORT_SETTINGS.past_days,
+      DEFAULT_TIME_REPORT_SETTINGS.future_days,
+      DEFAULT_TIME_REPORT_SETTINGS.lock_days,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_past_admin,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_future_admin,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_past_platschef,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_future_platschef,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_past_inhyrd,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_future_inhyrd,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_past_arbetsledare,
+      DEFAULT_TIME_REPORT_SETTINGS.extra_future_arbetsledare
+    ],
     callback
   );
 }
@@ -4834,7 +4882,7 @@ app.get("/me", requireAuth, (req, res) => {
 // Lovable /auth/me kompatibel route
 app.get("/auth/me", requireAuth, async (req, res) => {
   db.get(
-    `SELECT id, email, role, company_id, (first_name || ' ' || last_name) as full_name FROM users WHERE id = ?`,
+    `SELECT id, email, role, company_id, employee_type, (first_name || ' ' || last_name) as full_name FROM users WHERE id = ?`,
     [req.user.user_id || req.user.id],
     (err, user) => {
       if (err || !user) return res.status(404).json({ error: "User not found" });
@@ -6193,6 +6241,171 @@ app.post("/job-roles", requireAuth, requireAdmin, (req, res) => {
       });
     }
   );
+});
+
+// GET /admin/time-report-settings
+app.get("/admin/time-report-settings", requireAuth, (req, res) => {
+  const scopedCompanyId = getScopedCompanyId(req);
+  const allowAll = req.company_scope_all === true;
+  let companyId = scopedCompanyId;
+  if (!companyId && allowAll && req.query.company_id) companyId = req.query.company_id;
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  ensureTimeReportSettings(companyId, (seedErr) => {
+    if (seedErr) {
+      console.error("DB-fel vid seed time_report_settings:", seedErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+    db.get(
+      `SELECT past_days, future_days, lock_days,
+        extra_past_admin, extra_future_admin,
+        extra_past_platschef, extra_future_platschef,
+        extra_past_inhyrd, extra_future_inhyrd,
+        extra_past_arbetsledare, extra_future_arbetsledare
+       FROM time_report_settings
+       WHERE company_id = ?`,
+      [companyId],
+      (err, row) => {
+        if (err || !row) {
+          console.error("DB-fel vid GET /admin/time-report-settings:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        res.json(row);
+      }
+    );
+  });
+});
+
+// PATCH /admin/time-report-settings
+app.patch("/admin/time-report-settings", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const {
+    past_days,
+    future_days,
+    lock_days,
+    extra_past_admin,
+    extra_future_admin,
+    extra_past_platschef,
+    extra_future_platschef,
+    extra_past_inhyrd,
+    extra_future_inhyrd,
+    extra_past_arbetsledare,
+    extra_future_arbetsledare
+  } = req.body || {};
+  const pastDaysValue = Number(past_days);
+  const futureDaysValue = Number(future_days);
+  const lockDaysValue = Number(lock_days);
+  const extraPastAdminValue = Number.isFinite(Number(extra_past_admin)) ? Number(extra_past_admin) : 0;
+  const extraFutureAdminValue = Number.isFinite(Number(extra_future_admin)) ? Number(extra_future_admin) : 0;
+  const extraPastPlatschefValue = Number.isFinite(Number(extra_past_platschef)) ? Number(extra_past_platschef) : 0;
+  const extraFuturePlatschefValue = Number.isFinite(Number(extra_future_platschef)) ? Number(extra_future_platschef) : 0;
+  const extraPastInhyrdValue = Number.isFinite(Number(extra_past_inhyrd)) ? Number(extra_past_inhyrd) : 0;
+  const extraFutureInhyrdValue = Number.isFinite(Number(extra_future_inhyrd)) ? Number(extra_future_inhyrd) : 0;
+  const extraPastArbetsledareValue = Number.isFinite(Number(extra_past_arbetsledare)) ? Number(extra_past_arbetsledare) : 0;
+  const extraFutureArbetsledareValue = Number.isFinite(Number(extra_future_arbetsledare)) ? Number(extra_future_arbetsledare) : 0;
+  if (
+    !Number.isFinite(pastDaysValue) ||
+    !Number.isFinite(futureDaysValue) ||
+    !Number.isFinite(lockDaysValue)
+  ) {
+    return res.status(400).json({ error: "past_days, future_days, lock_days required" });
+  }
+  const allValues = [
+    pastDaysValue,
+    futureDaysValue,
+    lockDaysValue,
+    extraPastAdminValue,
+    extraFutureAdminValue,
+    extraPastPlatschefValue,
+    extraFuturePlatschefValue,
+    extraPastInhyrdValue,
+    extraFutureInhyrdValue,
+    extraPastArbetsledareValue,
+    extraFutureArbetsledareValue
+  ];
+  if (allValues.some((value) => value < 0)) {
+    return res.status(400).json({ error: "Values must be >= 0" });
+  }
+
+  ensureTimeReportSettings(companyId, (seedErr) => {
+    if (seedErr) {
+      console.error("DB-fel vid seed time_report_settings:", seedErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+    db.run(
+      `UPDATE time_report_settings
+       SET past_days = ?,
+           future_days = ?,
+           lock_days = ?,
+           extra_past_admin = ?,
+           extra_future_admin = ?,
+           extra_past_platschef = ?,
+           extra_future_platschef = ?,
+           extra_past_inhyrd = ?,
+           extra_future_inhyrd = ?,
+           extra_past_arbetsledare = ?,
+           extra_future_arbetsledare = ?
+       WHERE company_id = ?`,
+      [
+        pastDaysValue,
+        futureDaysValue,
+        lockDaysValue,
+        extraPastAdminValue,
+        extraFutureAdminValue,
+        extraPastPlatschefValue,
+        extraFuturePlatschefValue,
+        extraPastInhyrdValue,
+        extraFutureInhyrdValue,
+        extraPastArbetsledareValue,
+        extraFutureArbetsledareValue,
+        companyId
+      ],
+      function (err) {
+        if (err) {
+          console.error("DB-fel vid PATCH /admin/time-report-settings:", err);
+          return res.status(500).json({ error: "DB error" });
+        }
+        db.get(
+          `SELECT past_days, future_days, lock_days,
+            extra_past_admin, extra_future_admin,
+            extra_past_platschef, extra_future_platschef,
+            extra_past_inhyrd, extra_future_inhyrd,
+            extra_past_arbetsledare, extra_future_arbetsledare
+           FROM time_report_settings
+           WHERE company_id = ?`,
+          [companyId],
+          (e2, row) => {
+            if (e2 || !row) return res.status(500).json({ error: "DB error" });
+            logAudit({
+              req,
+              companyId,
+              actorUserId: getAuthUserId(req),
+              action: "SETTINGS_UPDATED",
+              entityType: "time_report_settings",
+              entityId: companyId,
+              metadata: {
+                past_days: pastDaysValue,
+                future_days: futureDaysValue,
+                lock_days: lockDaysValue,
+                extra_past_admin: extraPastAdminValue,
+                extra_future_admin: extraFutureAdminValue,
+                extra_past_platschef: extraPastPlatschefValue,
+                extra_future_platschef: extraFuturePlatschefValue,
+                extra_past_inhyrd: extraPastInhyrdValue,
+                extra_future_inhyrd: extraFutureInhyrdValue,
+                extra_past_arbetsledare: extraPastArbetsledareValue,
+                extra_future_arbetsledare: extraFutureArbetsledareValue
+              },
+              success: true
+            });
+            res.json(row);
+          }
+        );
+      }
+    );
+  });
 });
 
 // Ta bort yrkesroll (admin)

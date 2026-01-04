@@ -30,6 +30,7 @@ import AdminInvoiceSettings from "./pages/admin/InvoiceSettings";
 import AdminPriceList from "./pages/admin/PriceList";
 import AdminActivityLog from "./pages/admin/ActivityLog";
 import AdminDocuments from "./pages/admin/Documents";
+import AdminTimeReportSettings from "./pages/admin/TimeReportSettings";
 import AdminStatistics from "./pages/admin/Statistics";
 import AdminWorkOrders from "./pages/admin/WorkOrders";
 import AdminHub from "./pages/admin/AdminHub";
@@ -318,6 +319,16 @@ const App = () => (
                   <ProtectedRoute>
                     <Layout>
                       <AdminDocuments />
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/time-report-settings"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <AdminTimeReportSettings />
                     </Layout>
                   </ProtectedRoute>
                 }

@@ -41,6 +41,7 @@ const employeeTypes = [
   { value: "anställd", label: "Anställd" },
   { value: "inhyrd", label: "Inhyrd" },
   { value: "platschef", label: "Platschef" },
+  { value: "arbetsledare", label: "Arbetsledare" },
 ];
 
 const AdminUsers = () => {

@@ -145,8 +145,13 @@ export async function generateInvoicePdf(
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
   const clearArea = (x: number, y: number, width: number, height: number) => {
-    // Disabled: do not draw white rectangles. Clearing is turned off globally for invoices.
-    return;
+    page.drawRectangle({
+      x,
+      y,
+      width,
+      height,
+      color: rgb(1, 1, 1),
+    });
   };
 
   const clearTextArea = (x: number, y: number, width: number, size: number) => {

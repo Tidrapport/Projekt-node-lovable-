@@ -1357,6 +1357,49 @@ db.serialize(() => {
     )
   `);
 
+  // --- Time report settings ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS time_report_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL UNIQUE,
+      past_days INTEGER DEFAULT 60,
+      future_days INTEGER DEFAULT 90,
+      lock_days INTEGER DEFAULT 0,
+      extra_past_admin INTEGER DEFAULT 0,
+      extra_future_admin INTEGER DEFAULT 0,
+      extra_past_platschef INTEGER DEFAULT 0,
+      extra_future_platschef INTEGER DEFAULT 0,
+      extra_past_inhyrd INTEGER DEFAULT 0,
+      extra_future_inhyrd INTEGER DEFAULT 0,
+      extra_past_arbetsledare INTEGER DEFAULT 0,
+      extra_future_arbetsledare INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.all(`PRAGMA table_info(time_report_settings);`, (err, columns) => {
+    if (err || !columns) {
+      if (err) console.error("Kunde inte läsa time_report_settings kolumner:", err);
+      return;
+    }
+    const existing = new Set(columns.map((col) => col.name));
+    const addColumn = (name, definition) => {
+      if (existing.has(name)) return;
+      db.run(`ALTER TABLE time_report_settings ADD COLUMN ${name} ${definition};`, (alterErr) => {
+        if (alterErr) console.error(`Kunde inte lägga till ${name}:`, alterErr);
+      });
+    };
+
+    addColumn("extra_past_admin", "INTEGER DEFAULT 0");
+    addColumn("extra_future_admin", "INTEGER DEFAULT 0");
+    addColumn("extra_past_platschef", "INTEGER DEFAULT 0");
+    addColumn("extra_future_platschef", "INTEGER DEFAULT 0");
+    addColumn("extra_past_inhyrd", "INTEGER DEFAULT 0");
+    addColumn("extra_future_inhyrd", "INTEGER DEFAULT 0");
+    addColumn("extra_past_arbetsledare", "INTEGER DEFAULT 0");
+    addColumn("extra_future_arbetsledare", "INTEGER DEFAULT 0");
+  });
+
   // --- Projects ---
   db.run(`
     CREATE TABLE IF NOT EXISTS projects (

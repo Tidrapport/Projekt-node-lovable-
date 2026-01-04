@@ -84,6 +84,7 @@ const adminHubSubItems = [
   { title: "Integrationer", url: "/admin/invoice-settings", icon: FileText },
   { title: "Prislista", url: "/admin/price-list", icon: FileText },
   { title: "Dokument", url: "/admin/documents", icon: FileText },
+  { title: "Tidrapporteringsinställningar", url: "/admin/time-report-settings", icon: Clock },
   { title: "Aktivitetslogg", url: "/admin/activity-log", icon: ClipboardList },
 ];
 

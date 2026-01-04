@@ -6,6 +6,7 @@ export type AuthUser = {
   role: "user" | "admin" | "super_admin";
   company_id: number;
   full_name?: string;
+  employee_type?: string | null;
 };
 
 export type LoginResponse = {

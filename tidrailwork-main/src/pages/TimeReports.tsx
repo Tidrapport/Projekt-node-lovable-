@@ -25,7 +25,7 @@ import { useImpersonation } from "@/contexts/ImpersonationContext";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Clock, Plus, Trash2, X, Pencil, CheckCircle, CalendarDays, List, Copy } from "lucide-react";
-import { format } from "date-fns";
+import { addDays, format, isAfter, isBefore, parseISO, startOfDay, subDays } from "date-fns";
 import { sv } from "date-fns/locale";
 import { TimeReportsCalendarView } from "@/components/TimeReportsCalendarView";
 import { calculateOBDistributionWithOvertime, DEFAULT_SHIFT_WINDOWS, type ShiftWindowConfig } from "@/lib/obDistribution";
@@ -105,6 +105,19 @@ const TimeReports = () => {
   const [deviationDescription, setDeviationDescription] = useState("");
   const [deviationStatus, setDeviationStatus] = useState("none");
   const [shiftWindows, setShiftWindows] = useState<ShiftWindowConfig>(DEFAULT_SHIFT_WINDOWS);
+  const [timeReportSettings, setTimeReportSettings] = useState({
+    past_days: 60,
+    future_days: 90,
+    lock_days: 0,
+    extra_past_admin: 0,
+    extra_future_admin: 0,
+    extra_past_platschef: 0,
+    extra_future_platschef: 0,
+    extra_past_inhyrd: 0,
+    extra_future_inhyrd: 0,
+    extra_past_arbetsledare: 0,
+    extra_future_arbetsledare: 0,
+  });
 
   useEffect(() => {
     fetchData();
@@ -188,6 +201,77 @@ const TimeReports = () => {
     } catch (error) {
       console.error("Error fetching OB settings", error);
     }
+
+    try {
+      const settingsData = await apiFetch(`/admin/time-report-settings`);
+      if (settingsData) {
+        setTimeReportSettings({
+          past_days: Number(settingsData.past_days ?? 60),
+          future_days: Number(settingsData.future_days ?? 90),
+          lock_days: Number(settingsData.lock_days ?? 0),
+          extra_past_admin: Number(settingsData.extra_past_admin ?? 0),
+          extra_future_admin: Number(settingsData.extra_future_admin ?? 0),
+          extra_past_platschef: Number(settingsData.extra_past_platschef ?? 0),
+          extra_future_platschef: Number(settingsData.extra_future_platschef ?? 0),
+          extra_past_inhyrd: Number(settingsData.extra_past_inhyrd ?? 0),
+          extra_future_inhyrd: Number(settingsData.extra_future_inhyrd ?? 0),
+          extra_past_arbetsledare: Number(settingsData.extra_past_arbetsledare ?? 0),
+          extra_future_arbetsledare: Number(settingsData.extra_future_arbetsledare ?? 0),
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching time report settings", error);
+    }
+  };
+
+  const { minDateValue, maxDateValue, minDateObj, maxDateObj } = (() => {
+    const today = startOfDay(new Date());
+    const employeeType = String(user?.employee_type || "").toLowerCase();
+    const extraPast = isAdmin
+      ? Math.max(0, Number(timeReportSettings.extra_past_admin) || 0)
+      : employeeType === "platschef"
+      ? Math.max(0, Number(timeReportSettings.extra_past_platschef) || 0)
+      : employeeType === "inhyrd"
+      ? Math.max(0, Number(timeReportSettings.extra_past_inhyrd) || 0)
+      : employeeType === "arbetsledare"
+      ? Math.max(0, Number(timeReportSettings.extra_past_arbetsledare) || 0)
+      : 0;
+    const extraFuture = isAdmin
+      ? Math.max(0, Number(timeReportSettings.extra_future_admin) || 0)
+      : employeeType === "platschef"
+      ? Math.max(0, Number(timeReportSettings.extra_future_platschef) || 0)
+      : employeeType === "inhyrd"
+      ? Math.max(0, Number(timeReportSettings.extra_future_inhyrd) || 0)
+      : employeeType === "arbetsledare"
+      ? Math.max(0, Number(timeReportSettings.extra_future_arbetsledare) || 0)
+      : 0;
+    const pastDays = Math.max(0, Number(timeReportSettings.past_days) || 0) + extraPast;
+    const futureDays = Math.max(0, Number(timeReportSettings.future_days) || 0) + extraFuture;
+    const lockDays = Math.max(0, Number(timeReportSettings.lock_days) || 0);
+
+    let minDate = subDays(today, pastDays);
+    let maxDate = addDays(today, futureDays);
+    if (lockDays > 0) {
+      const lockMin = subDays(today, lockDays);
+      const lockMax = addDays(today, lockDays);
+      if (isAfter(lockMin, minDate)) minDate = lockMin;
+      if (isBefore(lockMax, maxDate)) maxDate = lockMax;
+    }
+
+    return {
+      minDateValue: format(minDate, "yyyy-MM-dd"),
+      maxDateValue: format(maxDate, "yyyy-MM-dd"),
+      minDateObj: minDate,
+      maxDateObj: maxDate,
+    };
+  })();
+
+  const isDateAllowed = (value: string) => {
+    if (!value) return false;
+    const target = startOfDay(parseISO(value));
+    if (isBefore(target, minDateObj)) return false;
+    if (isAfter(target, maxDateObj)) return false;
+    return true;
   };
 
   const fetchSubprojects = async (projectId: string) => {
@@ -287,6 +371,11 @@ const TimeReports = () => {
 
     setLoading(true);
     try {
+      if (!isDateAllowed(date)) {
+        toast.error(`Datumet måste ligga mellan ${minDateValue} och ${maxDateValue}.`);
+        setLoading(false);
+        return;
+      }
       let totalHours = calculateHours(startTime, endTime, parseInt(breakMinutes));
       if (totalHours <= 0 && editingEntry.total_hours > 0) {
         totalHours = editingEntry.total_hours;
@@ -417,6 +506,11 @@ const TimeReports = () => {
 
     setLoading(true);
     try {
+      if (!isDateAllowed(date)) {
+        toast.error(`Datumet måste ligga mellan ${minDateValue} och ${maxDateValue}.`);
+        setLoading(false);
+        return;
+      }
       const totalHours = calculateHours(startTime, endTime, parseInt(breakMinutes));
       const calculatedShiftType = determineShiftType(date, startTime, endTime);
       const overtimeWeekdayValue = Number(overtimeWeekdayHours) || 0;
@@ -796,8 +890,16 @@ const TimeReports = () => {
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
+                  min={minDateValue}
+                  max={maxDateValue}
                   required
                 />
+                <p className="text-xs text-muted-foreground">
+                  Tillåtet: {minDateValue} – {maxDateValue}
+                  {timeReportSettings.lock_days > 0
+                    ? ` (låst ±${timeReportSettings.lock_days} dagar)`
+                    : ""}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="break">Rast</Label>

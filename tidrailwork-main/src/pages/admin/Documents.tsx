@@ -123,6 +123,7 @@ const AdminDocuments = () => {
     }
   };
 
+
   useEffect(() => {
     loadDocs();
     loadUsers();
@@ -134,6 +135,7 @@ const AdminDocuments = () => {
     loadCertificates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [certFilterUser]);
+
 
   const resetDocDialog = () => {
     setDocName("");

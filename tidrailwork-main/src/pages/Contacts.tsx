@@ -13,7 +13,7 @@ interface Contact {
   phone: string | null;
   email: string | null;
   role?: string | null;
-  employee_type: 'anställd' | 'platschef' | 'inhyrd' | null;
+  employee_type: 'anställd' | 'platschef' | 'inhyrd' | 'arbetsledare' | null;
   isAdmin: boolean;
 }
 
@@ -21,6 +21,7 @@ const EMPLOYEE_TYPE_LABELS: Record<string, string> = {
   'anställd': 'Anställd',
   'platschef': 'Platschef',
   'inhyrd': 'Inhyrd',
+  'arbetsledare': 'Arbetsledare',
 };
 
 const Contacts = () => {
@@ -62,6 +63,8 @@ const Contacts = () => {
       case 'platschef':
         return 'default';
       case 'inhyrd':
+        return 'secondary';
+      case 'arbetsledare':
         return 'secondary';
       default:
         return 'outline';
