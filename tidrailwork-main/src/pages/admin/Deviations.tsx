@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 import { useAuth } from "@/contexts/AuthContext";
-import { Eye, FileDown } from "lucide-react";
+import { Eye, FileDown, Trash2 } from "lucide-react";
 
 type DeviationReport = {
   id: string;
@@ -23,6 +23,9 @@ type DeviationReport = {
   severity: string | null;
   status: string | null;
   created_at: string;
+  attested_at?: string | null;
+  attested_by?: string | null;
+  is_locked?: boolean;
   user_full_name?: string | null;
   user_email?: string | null;
   time_entry_date?: string | null;
@@ -43,10 +46,10 @@ const severityLabel = (s?: string | null) => {
 
 const statusLabel = (s?: string | null) => {
   switch (s) {
-    case "open": return "Öppen";
+    case "open": return "Registrerad";
     case "in_progress": return "Pågående";
-    case "resolved": return "Löst";
-    case "closed": return "Stängd";
+    case "resolved": return "Avslutad";
+    case "closed": return "Avslutad";
     default: return s || "Okänd";
   }
 };
@@ -62,6 +65,7 @@ export default function AdminDeviations() {
   const [viewOpen, setViewOpen] = useState(false);
   const [viewEntry, setViewEntry] = useState<DeviationReport | null>(null);
   const [images, setImages] = useState<Record<string, string[]>>({});
+  const [view, setView] = useState<"registered" | "closed">("registered");
 
   useEffect(() => {
     fetchDeviations();
@@ -74,6 +78,9 @@ export default function AdminDeviations() {
       const mapped = ensureArray(data).map((d) => ({
         ...d,
         id: String(d.id),
+        attested_at: d.attested_at || null,
+        attested_by: d.attested_by || null,
+        is_locked: Number(d.is_locked) === 1,
         images: d.images || [],
       }));
       const imgMap: Record<string, string[]> = {};
@@ -126,6 +133,47 @@ export default function AdminDeviations() {
   const openView = (d: DeviationReport) => {
     setViewEntry(d);
     setViewOpen(true);
+  };
+
+  const attestDeviation = async (d: DeviationReport) => {
+    if (!d?.id) return;
+    const confirmed = window.confirm("Attestera denna avvikelse? Den låses efter attestering.");
+    if (!confirmed) return;
+    if (d.status && !["resolved", "closed"].includes(String(d.status).toLowerCase())) {
+      toast.error("Avvikelsen måste vara avslutad innan attestering.");
+      return;
+    }
+    try {
+      await apiFetch(`/deviation-reports/${d.id}/attest`, { method: "POST" });
+      toast.success("Avvikelse attesterad");
+      fetchDeviations();
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte attestera avvikelse");
+    }
+  };
+
+  const toggleLock = async (d: DeviationReport) => {
+    if (!d?.id) return;
+    const endpoint = d.is_locked ? "unlock" : "lock";
+    try {
+      await apiFetch(`/deviation-reports/${d.id}/${endpoint}`, { method: "POST" });
+      toast.success(d.is_locked ? "Avvikelse upplåst" : "Avvikelse låst");
+      fetchDeviations();
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte ändra låsning");
+    }
+  };
+
+  const deleteDeviation = async (d: DeviationReport) => {
+    const confirmed = window.confirm("Vill du ta bort denna avvikelse? Detta kan inte ångras.");
+    if (!confirmed) return;
+    try {
+      await apiFetch(`/deviation-reports/${d.id}`, { method: "DELETE" });
+      toast.success("Avvikelse borttagen");
+      fetchDeviations();
+    } catch (e: any) {
+      toast.error(e.message || "Kunde inte ta bort avvikelse");
+    }
   };
 
   const safeFormat = (value?: string | null, fmt = "d MMM yyyy") => {
@@ -186,7 +234,24 @@ export default function AdminDeviations() {
       ) : deviations.length === 0 ? (
         <Card><CardContent className="py-6 text-muted-foreground">Inga avvikelser att visa.</CardContent></Card>
       ) : (
-        deviations.map((d) => (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={view === "registered" ? "default" : "outline"}
+              onClick={() => setView("registered")}
+            >
+              Registrerade
+            </Button>
+            <Button
+              variant={view === "closed" ? "default" : "outline"}
+              onClick={() => setView("closed")}
+            >
+              Avslutade
+            </Button>
+          </div>
+          {deviations
+            .filter((d) => (view === "closed" ? Boolean(d.attested_at) : !d.attested_at))
+            .map((d) => (
           <Card key={d.id} className="shadow-card">
             <CardHeader className="flex flex-row items-start justify-between">
               <div className="space-y-1">
@@ -205,16 +270,30 @@ export default function AdminDeviations() {
                 <div className="flex gap-2">
                   <Badge variant="outline">{severityLabel(d.severity)}</Badge>
                   <Badge variant="secondary">{statusLabel(d.status)}</Badge>
+                  {d.attested_at && <Badge variant="secondary">Attesterad</Badge>}
                 </div>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => openView(d)}><Eye className="h-4 w-4 mr-1" /> Visa</Button>
                 <Button size="sm" variant="outline" onClick={() => downloadPdf(d)}><FileDown className="h-4 w-4 mr-1" /> PDF</Button>
                 <Button size="sm" variant="secondary" onClick={() => openEdit(d)}>Redigera</Button>
+                <Button size="sm" variant="destructive" onClick={() => deleteDeviation(d)}>
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Ta bort
+                </Button>
+                {!d.attested_at && (
+                  <Button size="sm" onClick={() => attestDeviation(d)}>
+                    Attestera
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => toggleLock(d)}>
+                  {d.is_locked ? "Lås upp" : "Lås"}
+                </Button>
               </div>
             </CardHeader>
           </Card>
-        ))
+          ))}
+        </>
       )}
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -250,10 +329,10 @@ export default function AdminDeviations() {
                 <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
                   <SelectTrigger><SelectValue placeholder="Välj" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="open">Öppen</SelectItem>
+                    <SelectItem value="open">Registrerad</SelectItem>
                     <SelectItem value="in_progress">Pågående</SelectItem>
-                    <SelectItem value="resolved">Löst</SelectItem>
-                    <SelectItem value="closed">Stängd</SelectItem>
+                    <SelectItem value="resolved">Avslutad</SelectItem>
+                    <SelectItem value="closed">Avslutad</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

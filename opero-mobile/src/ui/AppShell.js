@@ -88,6 +88,7 @@ export default function AppShell({ children }) {
         title: "Timmar",
         items: [
           { label: "Registrera timmar", icon: "create-outline", route: "/(app)/time-new" },
+          { label: "Registrera avvikelse", icon: "alert-circle-outline", route: "/(app)/deviation-new" },
           { label: "Översikt timmar", icon: "time-outline", route: "/(app)/time" },
           { label: "Planering", icon: "calendar-outline", route: "/(app)/planning" },
         ],

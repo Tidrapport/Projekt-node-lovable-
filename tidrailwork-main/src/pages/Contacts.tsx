@@ -53,10 +53,18 @@ const Contacts = () => {
   };
 
   const filteredContacts = contacts.filter(contact =>
-    contact.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (contact.full_name || contact.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     contact.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     contact.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const getDisplayName = (contact: Contact) => {
+    const name = (contact.full_name || "").trim();
+    if (name) return name;
+    const email = (contact.email || "").trim();
+    if (email) return email;
+    return "Okänd";
+  };
 
   const getEmployeeTypeBadgeVariant = (type: string | null) => {
     switch (type) {
@@ -118,12 +126,12 @@ const Contacts = () => {
                 <div className="flex items-start gap-4">
                   <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <span className="text-lg font-semibold text-primary">
-                      {contact.full_name.charAt(0).toUpperCase()}
+                      {getDisplayName(contact).charAt(0).toUpperCase()}
                     </span>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <h3 className="font-semibold truncate">{contact.full_name}</h3>
+                      <h3 className="font-semibold truncate">{getDisplayName(contact)}</h3>
                       {contact.isAdmin && (
                         <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">
                           <Crown className="h-3 w-3 mr-1" />
@@ -134,32 +142,28 @@ const Contacts = () => {
                         {EMPLOYEE_TYPE_LABELS[contact.employee_type || 'anställd'] || 'Anställd'}
                       </Badge>
                     </div>
-                    
-                    {contact.phone && (
-                      <a 
-                        href={`tel:${contact.phone}`}
-                        className="text-sm text-muted-foreground hover:text-primary flex items-center gap-2 mt-2"
-                      >
-                        <Phone className="h-4 w-4" />
-                        {contact.phone}
-                      </a>
-                    )}
-                    
-                    {contact.email && (
-                      <a 
-                        href={`mailto:${contact.email}`}
-                        className="text-sm text-muted-foreground hover:text-primary flex items-center gap-2 mt-1"
-                      >
-                        <Mail className="h-4 w-4" />
-                        {contact.email}
-                      </a>
-                    )}
-                    
-                    {!contact.phone && !contact.email && (
-                      <p className="text-sm text-muted-foreground mt-2">
-                        Ingen kontaktinfo tillgänglig
-                      </p>
-                    )}
+
+                    <div className="text-sm text-muted-foreground flex items-center gap-2 mt-2">
+                      <Phone className="h-4 w-4" />
+                      {contact.phone ? (
+                        <a href={`tel:${contact.phone}`} className="hover:text-primary">
+                          {contact.phone}
+                        </a>
+                      ) : (
+                        <span>Saknas</span>
+                      )}
+                    </div>
+
+                    <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1">
+                      <Mail className="h-4 w-4" />
+                      {contact.email ? (
+                        <a href={`mailto:${contact.email}`} className="hover:text-primary">
+                          {contact.email}
+                        </a>
+                      ) : (
+                        <span>Saknas</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </CardContent>

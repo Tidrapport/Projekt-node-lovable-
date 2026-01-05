@@ -8512,13 +8512,22 @@ app.post("/deviation-reports", requireAuth, (req, res) => {
             console.error("DB-fel vid POST /deviation-reports:", insErr);
             return res.status(500).json({ error: "Kunde inte spara avvikelse" });
           }
-          db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [this.lastID], (selErr, deviation) => {
-            if (selErr) {
-              console.error("DB-fel vid SELECT ny avvikelse:", selErr);
-              return res.status(500).json({ error: "DB error" });
+          db.run(
+            `UPDATE time_reports
+             SET deviation_title = ?, deviation_description = ?, deviation_status = ?
+             WHERE id = ?`,
+            [title, description || null, status || null, time_entry_id],
+            (syncErr) => {
+              if (syncErr) console.error("DB-fel vid sync deviation till time_report:", syncErr);
+              db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [this.lastID], (selErr, deviation) => {
+                if (selErr) {
+                  console.error("DB-fel vid SELECT ny avvikelse:", selErr);
+                  return res.status(500).json({ error: "DB error" });
+                }
+                res.json(deviation);
+              });
             }
-            res.json(deviation);
-          });
+          );
         }
       );
     }
@@ -8547,11 +8556,16 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
         return res.status(500).json({ error: "DB error" });
       }
       if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
+      const locked = Number(row.is_locked) === 1 || !!row.attested_at;
+      if (!isAdmin && locked) {
+        return res.status(403).json({ error: "Avvikelsen är låst" });
+      }
       if (!isAdmin && String(row.user_id) !== String(req.user.user_id)) {
         return res.status(403).json({ error: "Ingen behörighet" });
       }
 
       function performUpdate(validatedTimeEntryId) {
+        const nextEntryId = validatedTimeEntryId ?? row.time_entry_id;
         db.run(
           `UPDATE deviation_reports
            SET time_entry_id = COALESCE(?, time_entry_id),
@@ -8563,7 +8577,7 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
                updated_at = datetime('now')
            WHERE id = ?`,
           [
-            validatedTimeEntryId ?? row.time_entry_id,
+            nextEntryId,
             title ?? null,
             description ?? null,
             severity ?? row.severity,
@@ -8576,13 +8590,58 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
               console.error("DB-fel vid UPDATE deviation:", updErr);
               return res.status(500).json({ error: "Kunde inte uppdatera" });
             }
-            db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [id], (selErr, updated) => {
-              if (selErr) {
-                console.error("DB-fel vid SELECT uppdaterad deviation:", selErr);
-                return res.status(500).json({ error: "DB error" });
-              }
-              res.json(updated);
-            });
+            const syncNew = () => {
+              db.run(
+                `UPDATE time_reports
+                 SET deviation_title = ?, deviation_description = ?, deviation_status = ?
+                 WHERE id = ?`,
+                [
+                  title ?? row.title,
+                  description ?? row.description,
+                  status ?? row.status,
+                  nextEntryId
+                ],
+                (syncErr) => {
+                  if (syncErr) console.error("DB-fel vid sync deviation till time_report:", syncErr);
+                  db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [id], (selErr, updated) => {
+                    if (selErr) {
+                      console.error("DB-fel vid SELECT uppdaterad deviation:", selErr);
+                      return res.status(500).json({ error: "DB error" });
+                    }
+                    res.json(updated);
+                  });
+                }
+              );
+            };
+
+            if (String(nextEntryId) !== String(row.time_entry_id)) {
+              db.get(
+                `SELECT COUNT(*) as count FROM deviation_reports WHERE time_entry_id = ? AND id != ?`,
+                [row.time_entry_id, id],
+                (countErr, countRow) => {
+                  if (countErr) {
+                    console.error("DB-fel vid SELECT deviation count:", countErr);
+                    return syncNew();
+                  }
+                  if (Number(countRow?.count || 0) === 0) {
+                    db.run(
+                      `UPDATE time_reports
+                       SET deviation_title = NULL, deviation_description = NULL, deviation_status = NULL
+                       WHERE id = ?`,
+                      [row.time_entry_id],
+                      (clearErr) => {
+                        if (clearErr) console.error("DB-fel vid clear deviation på time_report:", clearErr);
+                        syncNew();
+                      }
+                    );
+                  } else {
+                    syncNew();
+                  }
+                }
+              );
+            } else {
+              syncNew();
+            }
           }
         );
       }
@@ -8609,6 +8668,193 @@ app.put("/deviation-reports/:id", requireAuth, (req, res) => {
       } else {
         performUpdate(null);
       }
+    }
+  );
+});
+
+// DELETE /deviation-reports/:id
+app.delete("/deviation-reports/:id", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+  const id = req.params.id;
+  const isAdmin = (req.user?.role || "").toLowerCase() === "admin" || (req.user?.role || "").toLowerCase() === "super_admin";
+
+  db.get(
+    `SELECT dr.id, dr.user_id, dr.time_entry_id, dr.is_locked, dr.attested_at
+     FROM deviation_reports dr
+     WHERE dr.id = ? AND dr.company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid SELECT deviation for delete:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
+      const locked = Number(row.is_locked) === 1 || !!row.attested_at;
+      if (!isAdmin && locked) {
+        return res.status(403).json({ error: "Avvikelsen är låst" });
+      }
+      if (!isAdmin && String(row.user_id) !== String(req.user.user_id)) {
+        return res.status(403).json({ error: "Ingen behörighet" });
+      }
+
+      db.all(
+        `SELECT storage_path FROM deviation_images WHERE deviation_report_id = ?`,
+        [id],
+        (imgErr, imgs) => {
+          if (imgErr) console.error("DB-fel vid SELECT deviation_images for delete:", imgErr);
+
+          db.run(`DELETE FROM deviation_reports WHERE id = ?`, [id], function (delErr) {
+            if (delErr) {
+              console.error("DB-fel vid DELETE deviation_reports:", delErr);
+              return res.status(500).json({ error: "Kunde inte ta bort avvikelse" });
+            }
+
+            const timeEntryId = row.time_entry_id;
+            if (timeEntryId) {
+              db.get(
+                `SELECT title, description, status
+                 FROM deviation_reports
+                 WHERE time_entry_id = ?
+                 ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, id DESC
+                 LIMIT 1`,
+                [timeEntryId],
+                (selErr, latest) => {
+                  if (selErr) {
+                    console.error("DB-fel vid SELECT latest deviation after delete:", selErr);
+                  }
+                  const nextTitle = latest?.title || null;
+                  const nextDescription = latest?.description || null;
+                  const nextStatus = latest?.status || null;
+                  db.run(
+                    `UPDATE time_reports
+                     SET deviation_title = ?, deviation_description = ?, deviation_status = ?
+                     WHERE id = ?`,
+                    [nextTitle, nextDescription, nextStatus, timeEntryId],
+                    (syncErr) => {
+                      if (syncErr) console.error("DB-fel vid sync time_report efter delete:", syncErr);
+                      if (imgs && imgs.length) {
+                        imgs.forEach((img) => {
+                          const rawPath = String(img.storage_path || "");
+                          const safePath = rawPath.startsWith("/") ? rawPath.slice(1) : rawPath;
+                          const filePath = path.join(__dirname, safePath);
+                          try {
+                            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                          } catch (fileErr) {
+                            console.error("Kunde inte ta bort avvikelsebild:", fileErr);
+                          }
+                        });
+                      }
+                      res.json({ success: true });
+                    }
+                  );
+                }
+              );
+              return;
+            }
+
+            if (imgs && imgs.length) {
+              imgs.forEach((img) => {
+                const rawPath = String(img.storage_path || "");
+                const safePath = rawPath.startsWith("/") ? rawPath.slice(1) : rawPath;
+                const filePath = path.join(__dirname, safePath);
+                try {
+                  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                } catch (fileErr) {
+                  console.error("Kunde inte ta bort avvikelsebild:", fileErr);
+                }
+              });
+            }
+            res.json({ success: true });
+          });
+        }
+      );
+    }
+  );
+});
+
+// POST /deviation-reports/:id/attest
+app.post("/deviation-reports/:id/attest", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const id = req.params.id;
+
+  db.get(
+    `SELECT dr.id, dr.status
+     FROM deviation_reports dr
+     WHERE dr.id = ? AND dr.company_id = ?`,
+    [id, companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid SELECT deviation for attest:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      if (!row) return res.status(404).json({ error: "Avvikelse hittades inte" });
+      const statusValue = String(row.status || "").toLowerCase();
+      if (statusValue && statusValue !== "resolved" && statusValue !== "closed") {
+        return res.status(400).json({ error: "Avvikelsen måste vara avslutad innan attestering" });
+      }
+
+      db.run(
+        `UPDATE deviation_reports
+         SET attested_at = datetime('now'),
+             attested_by = ?,
+             is_locked = 1,
+             updated_at = datetime('now')
+         WHERE id = ?`,
+        [getAuthUserId(req), id],
+        function (updErr) {
+          if (updErr) {
+            console.error("DB-fel vid attest deviation:", updErr);
+            return res.status(500).json({ error: "DB error" });
+          }
+          db.get(`SELECT * FROM deviation_reports WHERE id = ?`, [id], (selErr, updated) => {
+            if (selErr || !updated) return res.status(500).json({ error: "DB error" });
+            res.json(updated);
+          });
+        }
+      );
+    }
+  );
+});
+
+// POST /deviation-reports/:id/lock
+app.post("/deviation-reports/:id/lock", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const id = req.params.id;
+  db.run(
+    `UPDATE deviation_reports
+     SET is_locked = 1, updated_at = datetime('now')
+     WHERE id = ? AND company_id = ?`,
+    [id, companyId],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid lock deviation:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.json({ success: true });
+    }
+  );
+});
+
+// POST /deviation-reports/:id/unlock
+app.post("/deviation-reports/:id/unlock", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  const id = req.params.id;
+  db.run(
+    `UPDATE deviation_reports
+     SET is_locked = 0, updated_at = datetime('now')
+     WHERE id = ? AND company_id = ?`,
+    [id, companyId],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid unlock deviation:", err);
+        return res.status(500).json({ error: "DB error" });
+      }
+      res.json({ success: true });
     }
   );
 });

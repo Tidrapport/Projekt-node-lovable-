@@ -62,6 +62,9 @@ export default function Dashboard() {
         <Pressable style={styles.primaryButton} onPress={() => router.push("/(app)/time-new")}>
           <Text style={styles.primaryButtonText}>Ny tidrapport</Text>
         </Pressable>
+        <Pressable style={styles.secondaryButton} onPress={() => router.push("/(app)/deviation-new")}>
+          <Text style={styles.secondaryButtonText}>Registrera avvikelse</Text>
+        </Pressable>
         <Pressable style={styles.secondaryButton} onPress={() => router.push("/(app)/time")}>
           <Text style={styles.secondaryButtonText}>Se tidrapporter</Text>
         </Pressable>

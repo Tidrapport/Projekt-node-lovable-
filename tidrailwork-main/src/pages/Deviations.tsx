@@ -13,7 +13,7 @@ import { login, getMe, logout } from "@/api/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffectiveUser } from "@/hooks/useEffectiveUser";
 import { toast } from "sonner";
-import { AlertTriangle, Plus, Upload, X, Pencil, CheckCircle } from "lucide-react";
+import { AlertTriangle, Plus, Upload, X, Pencil, CheckCircle, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 
@@ -24,6 +24,9 @@ interface Deviation {
   severity: string;
   status: string;
   resolved_at?: string | null;
+  attested_at?: string | null;
+  attested_by?: string | null;
+  is_locked?: boolean;
   created_at: string;
   time_entry_id?: string;
   time_entry: {
@@ -50,6 +53,7 @@ const Deviations = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
+  const [view, setView] = useState<"active" | "closed">("active");
 
   // Form state
   const [timeEntryId, setTimeEntryId] = useState("");
@@ -58,6 +62,7 @@ const Deviations = () => {
   const [severity, setSeverity] = useState("medium");
   const [status, setStatus] = useState("open");
   const [resolvedAt, setResolvedAt] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -77,6 +82,9 @@ const Deviations = () => {
           severity: d.severity || "medium",
           status: d.status || "open",
           resolved_at: d.resolved_at || null,
+          attested_at: d.attested_at || null,
+          attested_by: d.attested_by || null,
+          is_locked: Number(d.is_locked) === 1,
           created_at: d.created_at || "",
           time_entry_id: d.time_entry_id ? String(d.time_entry_id) : undefined,
           time_entry: {
@@ -92,18 +100,24 @@ const Deviations = () => {
 
     // Fetch time entries for dropdown (för aktuell användare)
     try {
-      const entriesData = await apiFetch(`/time-entries?limit=30`);
+      const params = new URLSearchParams();
+      params.set("limit", "100");
+      if (effectiveUserId) params.set("user_id", String(effectiveUserId));
+      const entriesData = await apiFetch(`/time-entries?${params.toString()}`);
       if (entriesData) {
         const mapped = ensureArray(entriesData)
           .filter((e: any) => e.datum || e.date)
           .map((e: any) => ({
             id: String(e.id),
+            user_id: String(e.user_id || ""),
             date: e.datum || e.date,
             project: { name: e.project?.name || e.project_name || "Projekt" },
             start_time: e.start_time || e.starttid || null,
             end_time: e.end_time || e.sluttid || null,
           }));
-        setTimeEntries(mapped);
+        const scoped =
+          effectiveUserId ? mapped.filter((entry) => entry.user_id === String(effectiveUserId)) : mapped;
+        setTimeEntries(scoped);
       }
     } catch (err: any) {
       toast.error(err.message || "Kunde inte hämta tidrapporter");
@@ -214,6 +228,22 @@ const Deviations = () => {
     setResolvedAt(today);
   };
 
+  const handleDelete = async (deviation: Deviation) => {
+    if (!deviation?.id) return;
+    const confirmed = window.confirm("Vill du ta bort denna avvikelse? Detta kan inte ångras.");
+    if (!confirmed) return;
+    setDeletingId(deviation.id);
+    try {
+      await apiFetch(`/deviation-reports/${deviation.id}`, { method: "DELETE" });
+      toast.success("Avvikelsen borttagen");
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Kunde inte ta bort avvikelse");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "critical": return "bg-destructive";
@@ -246,13 +276,18 @@ const Deviations = () => {
 
   const statusLabel = (value: string) => {
     switch (value) {
-      case "open": return "Öppen";
-      case "in_progress": return "Pågår";
-      case "resolved": return "Åtgärdad";
-      case "closed": return "Stängd";
+      case "open": return "Registrerad";
+      case "in_progress": return "Pågående";
+      case "resolved": return "Avslutad";
+      case "closed": return "Avslutad";
       default: return value;
     }
   };
+
+  const filteredDeviations = deviations.filter((deviation) => {
+    const isClosed = Boolean(deviation.attested_at);
+    return view === "closed" ? isClosed : !isClosed;
+  });
 
   return (
     <div className="container mx-auto p-6">
@@ -279,8 +314,23 @@ const Deviations = () => {
         )}
       </div>
 
+      <div className="flex flex-wrap gap-2 mb-6">
+        <Button
+          variant={view === "active" ? "default" : "outline"}
+          onClick={() => setView("active")}
+        >
+          Aktiva
+        </Button>
+        <Button
+          variant={view === "closed" ? "default" : "outline"}
+          onClick={() => setView("closed")}
+        >
+          Avslutade
+        </Button>
+      </div>
+
       <div className="space-y-4">
-        {deviations.length === 0 ? (
+        {filteredDeviations.length === 0 ? (
           <Card className="shadow-card">
             <CardContent className="pt-6">
               <div className="text-center text-muted-foreground py-8">
@@ -290,7 +340,9 @@ const Deviations = () => {
             </CardContent>
           </Card>
         ) : (
-          deviations.map((deviation) => (
+          filteredDeviations.map((deviation) => {
+            const locked = deviation.is_locked || Boolean(deviation.attested_at);
+            return (
             <Card key={deviation.id} className="shadow-card hover:shadow-elevated transition-shadow">
               <CardContent className="pt-6">
                 <div className="space-y-3">
@@ -308,6 +360,9 @@ const Deviations = () => {
                       <Badge className={getStatusColor(deviation.status)}>
                         {statusLabel(deviation.status)}
                       </Badge>
+                      {deviation.attested_at && (
+                        <Badge variant="secondary">Attesterad</Badge>
+                      )}
                     </div>
                   </div>
                   <p className="text-sm">{deviation.description}</p>
@@ -321,7 +376,7 @@ const Deviations = () => {
                       Åtgärdad: {safeFormat(deviation.resolved_at, "d MMM yyyy")}
                     </div>
                   )}
-                  {!isImpersonating && (
+                  {!isImpersonating && !locked && (
                     <div className="flex gap-2 pt-2">
                       <Button variant="outline" size="sm" onClick={() => openEditDialog(deviation)}>
                         <Pencil className="h-4 w-4 mr-2" />
@@ -331,12 +386,27 @@ const Deviations = () => {
                         <CheckCircle className="h-4 w-4 mr-2" />
                         Markera åtgärdad
                       </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDelete(deviation)}
+                        disabled={deletingId === deviation.id}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Ta bort
+                      </Button>
+                    </div>
+                  )}
+                  {!isImpersonating && locked && (
+                    <div className="text-sm text-muted-foreground">
+                      Avvikelsen är låst efter attestering.
                     </div>
                   )}
                 </div>
               </CardContent>
             </Card>
-          ))
+          );
+          })
         )}
       </div>
 
@@ -401,17 +471,17 @@ const Deviations = () => {
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
               <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger id="status">
-                  <SelectValue placeholder="Välj status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="open">Öppen</SelectItem>
-                  <SelectItem value="in_progress">Pågår</SelectItem>
-                  <SelectItem value="resolved">Åtgärdad</SelectItem>
-                  <SelectItem value="closed">Stängd</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              <SelectTrigger id="status">
+                <SelectValue placeholder="Välj status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="open">Registrerad</SelectItem>
+                <SelectItem value="in_progress">Pågående</SelectItem>
+                <SelectItem value="resolved">Avslutad</SelectItem>
+                <SelectItem value="closed">Avslutad</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
             <div className="space-y-2">
               <Label htmlFor="resolvedAt">Åtgärdad datum (om åtgärdad)</Label>

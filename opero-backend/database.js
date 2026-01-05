@@ -1012,6 +1012,9 @@ db.serialize(() => {
       severity TEXT,
       status TEXT,
       resolved_at TEXT,
+      attested_at TEXT,
+      attested_by INTEGER,
+      is_locked INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (company_id) REFERENCES companies(id),
@@ -1028,6 +1031,9 @@ db.serialize(() => {
     const hasSeverity = cols.some((c) => c.name === "severity");
     const hasStatus = cols.some((c) => c.name === "status");
     const hasResolvedAt = cols.some((c) => c.name === "resolved_at");
+    const hasAttestedAt = cols.some((c) => c.name === "attested_at");
+    const hasAttestedBy = cols.some((c) => c.name === "attested_by");
+    const hasLocked = cols.some((c) => c.name === "is_locked");
     const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
     if (!hasSeverity) {
       db.run(`ALTER TABLE deviation_reports ADD COLUMN severity TEXT;`, (e) => {
@@ -1042,6 +1048,21 @@ db.serialize(() => {
     if (!hasResolvedAt) {
       db.run(`ALTER TABLE deviation_reports ADD COLUMN resolved_at TEXT;`, (e) => {
         if (e) console.error("Kunde inte lägga till resolved_at i deviation_reports:", e);
+      });
+    }
+    if (!hasAttestedAt) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN attested_at TEXT;`, (e) => {
+        if (e) console.error("Kunde inte lägga till attested_at i deviation_reports:", e);
+      });
+    }
+    if (!hasAttestedBy) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN attested_by INTEGER;`, (e) => {
+        if (e) console.error("Kunde inte lägga till attested_by i deviation_reports:", e);
+      });
+    }
+    if (!hasLocked) {
+      db.run(`ALTER TABLE deviation_reports ADD COLUMN is_locked INTEGER DEFAULT 0;`, (e) => {
+        if (e) console.error("Kunde inte lägga till is_locked i deviation_reports:", e);
       });
     }
     if (!hasUpdatedAt) {
