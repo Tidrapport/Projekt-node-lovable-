@@ -2,6 +2,22 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
+const isDocumentRequest = (req: { headers?: Record<string, string | string[] | undefined> }) => {
+  const headers = req.headers || {};
+  const accept = String(headers.accept || "");
+  const secFetchDest = String(headers["sec-fetch-dest"] || "");
+  return accept.includes("text/html") || secFetchDest === "document";
+};
+
+const shouldServeSpa = (req: { url?: string; headers?: Record<string, string | string[] | undefined> }) => {
+  if (!isDocumentRequest(req)) return false;
+  const url = req.url || "/";
+  if (url.startsWith("/uploads")) return false;
+  if (url.startsWith("/fortnox")) return false;
+  if (path.extname(url)) return false;
+  return true;
+};
+
 export default defineConfig({
   server: {
     port: 5174,
@@ -10,19 +26,7 @@ export default defineConfig({
     allowedHosts: true,
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
-        const accept = req.headers.accept || "";
-        if (req.method !== "GET" || !accept.includes("text/html")) return next();
-        const url = req.url || "/";
-        if (
-          url.startsWith("/api") ||
-          url.startsWith("/auth") ||
-          url.startsWith("/fortnox") ||
-          url.startsWith("/help") ||
-          url.startsWith("/uploads")
-        ) {
-          return next();
-        }
-        if (path.extname(url)) return next();
+        if (req.method !== "GET" || !shouldServeSpa(req)) return next();
         req.url = "/";
         next();
       });
@@ -30,7 +34,11 @@ export default defineConfig({
 
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: true },
-      "/admin": { target: "http://localhost:3000", changeOrigin: true },
+      "/admin": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+        bypass: (req) => (shouldServeSpa(req) ? "/" : undefined),
+      },
       // Note: we keep an explicit proxy for `/admin` API endpoints so
       // frontend requests like `fetch('/admin/ob-settings')` reach the
       // backend. The middleware above rewrites browser navigation requests
