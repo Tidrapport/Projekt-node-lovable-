@@ -1190,6 +1190,14 @@ app.get("/plan-settings", requireAuth, requireSuperAdmin, (req, res) => {
   });
 });
 
+// Hämta planinställningar (alla inloggade, read-only)
+app.get("/plan-settings/public", requireAuth, (req, res) => {
+  refreshPlanSettings((err) => {
+    if (err) return res.status(500).json({ error: "Kunde inte hämta planinställningar" });
+    res.json(getPlanSettingsSnapshot());
+  });
+});
+
 // Uppdatera planinställningar (superadmin)
 app.put("/plan-settings/:plan", requireAuth, requireSuperAdmin, (req, res) => {
   const normalizedPlan = normalizePlanInput(req.params.plan);
@@ -1227,6 +1235,192 @@ app.put("/plan-settings/:plan", requireAuth, requireSuperAdmin, (req, res) => {
         return;
       }
       finish();
+    }
+  );
+});
+
+// Skapa planändringsbegäran (admin)
+app.post("/plan-change-requests", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "company_id krävs" });
+  const requestedPlan = normalizePlanInput(req.body?.requested_plan);
+  if (!requestedPlan) return res.status(400).json({ error: "Ogiltigt planval" });
+  const userId = getAuthUserId(req);
+
+  db.get(`SELECT id, plan FROM companies WHERE id = ?`, [companyId], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid GET company for plan request:", err);
+      return res.status(500).json({ error: "Kunde inte hämta företag" });
+    }
+    if (!row) return res.status(404).json({ error: "Företag hittades inte" });
+    const currentPlan = normalizePlanInput(row.plan) || "Bas";
+    if (currentPlan === requestedPlan) {
+      return res.status(400).json({ error: "Planen är redan aktiv" });
+    }
+    db.get(
+      `SELECT id FROM plan_change_requests WHERE company_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+      [companyId],
+      (pendingErr, pendingRow) => {
+        if (pendingErr) {
+          console.error("DB-fel vid GET plan_change_requests:", pendingErr);
+          return res.status(500).json({ error: "Kunde inte skapa begäran" });
+        }
+        if (pendingRow) {
+          return res.status(409).json({ error: "Det finns redan en väntande begäran" });
+        }
+        db.run(
+          `INSERT INTO plan_change_requests (company_id, requested_by, current_plan, requested_plan, status)
+           VALUES (?, ?, ?, ?, 'pending')`,
+          [companyId, userId, currentPlan, requestedPlan],
+          function (insertErr) {
+            if (insertErr) {
+              console.error("DB-fel vid INSERT plan_change_requests:", insertErr);
+              return res.status(500).json({ error: "Kunde inte skapa begäran" });
+            }
+            res.json({
+              id: this.lastID,
+              company_id: companyId,
+              current_plan: currentPlan,
+              requested_plan: requestedPlan,
+              status: "pending"
+            });
+          }
+        );
+      }
+    );
+  });
+});
+
+// Hämta planändringsbegäran (superadmin eller admin scoped)
+app.get("/plan-change-requests", requireAuth, requireAdmin, (req, res) => {
+  const role = (req.user.role || "").toLowerCase();
+  const isSuper = role === "super_admin";
+  const status = String(req.query.status || "").toLowerCase();
+  const allowedStatuses = new Set(["pending", "approved", "rejected"]);
+
+  let companyId = null;
+  if (isSuper && req.query.company_id) {
+    companyId = req.query.company_id;
+  } else if (!isSuper) {
+    companyId = getScopedCompanyId(req);
+    if (!companyId) return res.status(400).json({ error: "company_id krävs" });
+  }
+
+  const where = [];
+  const params = [];
+  if (companyId) {
+    where.push("pcr.company_id = ?");
+    params.push(companyId);
+  }
+  if (status) {
+    if (!allowedStatuses.has(status)) {
+      return res.status(400).json({ error: "Ogiltig status" });
+    }
+    where.push("pcr.status = ?");
+    params.push(status);
+  }
+  const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  db.all(
+    `
+      SELECT
+        pcr.id,
+        pcr.company_id,
+        pcr.requested_by,
+        pcr.current_plan,
+        pcr.requested_plan,
+        pcr.status,
+        pcr.created_at,
+        pcr.reviewed_at,
+        pcr.reviewer_id,
+        c.name AS company_name,
+        u.email AS requested_by_email,
+        COALESCE(u.first_name || ' ' || u.last_name, u.email) AS requested_by_name,
+        r.email AS reviewer_email
+      FROM plan_change_requests pcr
+      LEFT JOIN companies c ON c.id = pcr.company_id
+      LEFT JOIN users u ON u.id = pcr.requested_by
+      LEFT JOIN users r ON r.id = pcr.reviewer_id
+      ${whereClause}
+      ORDER BY pcr.created_at DESC
+    `,
+    params,
+    (err, rows) => {
+      if (err) {
+        console.error("DB-fel vid GET plan_change_requests:", err);
+        return res.status(500).json({ error: "Kunde inte hämta planändringar" });
+      }
+      res.json(rows || []);
+    }
+  );
+});
+
+// Godkänn planändring (superadmin)
+app.put("/plan-change-requests/:id/approve", requireAuth, requireSuperAdmin, (req, res) => {
+  const id = req.params.id;
+  const reviewerId = getAuthUserId(req);
+
+  db.get(
+    `SELECT id, company_id, requested_plan, status FROM plan_change_requests WHERE id = ?`,
+    [id],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid GET plan_change_request:", err);
+        return res.status(500).json({ error: "Kunde inte hämta begäran" });
+      }
+      if (!row) return res.status(404).json({ error: "Begäran hittades inte" });
+      if (row.status !== "pending") {
+        return res.status(400).json({ error: "Begäran är redan hanterad" });
+      }
+      const requestedPlan = normalizePlanInput(row.requested_plan);
+      if (!requestedPlan) return res.status(400).json({ error: "Ogiltigt planval" });
+
+      db.run(
+        `UPDATE plan_change_requests
+         SET status = 'approved', reviewed_at = datetime('now'), reviewer_id = ?
+         WHERE id = ? AND status = 'pending'`,
+        [reviewerId, id],
+        function (updateErr) {
+          if (updateErr) {
+            console.error("DB-fel vid UPDATE plan_change_requests:", updateErr);
+            return res.status(500).json({ error: "Kunde inte godkänna begäran" });
+          }
+          if (this.changes === 0) {
+            return res.status(409).json({ error: "Begäran kunde inte uppdateras" });
+          }
+          db.run(
+            `UPDATE companies SET plan = ?, features = NULL WHERE id = ?`,
+            [requestedPlan, row.company_id],
+            (companyErr) => {
+              if (companyErr) {
+                console.error("DB-fel vid UPDATE companies plan:", companyErr);
+                return res.status(500).json({ error: "Kunde inte uppdatera plan" });
+              }
+              res.json({ success: true });
+            }
+          );
+        }
+      );
+    }
+  );
+});
+
+// Avslå planändring (superadmin)
+app.put("/plan-change-requests/:id/reject", requireAuth, requireSuperAdmin, (req, res) => {
+  const id = req.params.id;
+  const reviewerId = getAuthUserId(req);
+  db.run(
+    `UPDATE plan_change_requests
+     SET status = 'rejected', reviewed_at = datetime('now'), reviewer_id = ?
+     WHERE id = ? AND status = 'pending'`,
+    [reviewerId, id],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid REJECT plan_change_requests:", err);
+        return res.status(500).json({ error: "Kunde inte avslå begäran" });
+      }
+      if (this.changes === 0) return res.status(404).json({ error: "Begäran hittades inte" });
+      res.json({ success: true });
     }
   );
 });

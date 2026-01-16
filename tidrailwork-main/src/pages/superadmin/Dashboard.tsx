@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
 import { ensureArray } from "@/lib/ensureArray";
+import { FEATURE_OPTIONS } from "@/lib/featureLabels";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
 import { toast } from "sonner";
 import { Building2, Copy, Eye, FileText, Plus, Trash2, Users } from "lucide-react";
@@ -68,12 +69,31 @@ type PlanSetting = {
   features: string[];
 };
 
+type PlanChangeRequest = {
+  id: string | number;
+  company_id: string | number;
+  company_name?: string | null;
+  requested_by?: string | number | null;
+  requested_by_name?: string | null;
+  requested_by_email?: string | null;
+  current_plan?: string | null;
+  requested_plan?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
 const parseSqlDate = (value?: string | null) => {
   if (!value) return null;
   const normalized = value.includes("T") ? value : value.replace(" ", "T");
   const date = new Date(normalized);
   if (Number.isNaN(date.valueOf())) return null;
   return date;
+};
+
+const buildPlanDeadline = (value?: string | null) => {
+  const created = parseSqlDate(value);
+  if (!created) return null;
+  return addDays(created, 1);
 };
 
 const MAX_DATE = new Date(8640000000000000);
@@ -141,36 +161,6 @@ const PLAN_OPTIONS = [
   { value: "Entreprise", label: "Entreprise" },
 ];
 
-const FEATURE_OPTIONS = [
-  { key: "dashboard", label: "Översikt" },
-  { key: "time_reports", label: "Tidrapporter" },
-  { key: "work_orders", label: "Arbetsordrar" },
-  { key: "planning", label: "Planering" },
-  { key: "deviations", label: "Avvikelser" },
-  { key: "welding_reports", label: "Svetsrapporter" },
-  { key: "salary_overview", label: "Lönöversikt" },
-  { key: "contacts", label: "Kontakter" },
-  { key: "documents", label: "Dokument & intyg" },
-  { key: "statistics", label: "Statistik" },
-  { key: "projects", label: "Projekt" },
-  { key: "customers", label: "Kunder" },
-  { key: "offers", label: "Offerter" },
-  { key: "attestation", label: "Attestering" },
-  { key: "billing", label: "Fakturering" },
-  { key: "invoice_marking", label: "Fakturering markera" },
-  { key: "salaries", label: "Löner" },
-  { key: "admin_users", label: "Användare" },
-  { key: "job_roles", label: "Yrkesroller" },
-  { key: "material_types", label: "Tillägg" },
-  { key: "ob_settings", label: "OB-inställningar" },
-  { key: "invoice_settings", label: "Integrationer" },
-  { key: "price_list", label: "Prislista" },
-  { key: "time_report_settings", label: "Tidrapporteringsinställningar" },
-  { key: "menu_settings", label: "Meny inställning" },
-  { key: "activity_log", label: "Aktivitetslogg" },
-  { key: "admin_hub", label: "AdminHub (Mitt Företag)" },
-];
-
 const SuperAdminDashboard = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -212,6 +202,9 @@ const SuperAdminDashboard = () => {
   const [billingUsers, setBillingUsers] = useState<BillingUser[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState(monthOptions[0].value);
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null);
+  const [planRequests, setPlanRequests] = useState<PlanChangeRequest[]>([]);
+  const [planRequestsLoading, setPlanRequestsLoading] = useState(false);
+  const [planRequestActionId, setPlanRequestActionId] = useState<string | null>(null);
 
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -224,6 +217,10 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchPlanSettings();
+  }, []);
+
+  useEffect(() => {
+    fetchPlanChangeRequests();
   }, []);
 
   useEffect(() => {
@@ -280,6 +277,33 @@ const SuperAdminDashboard = () => {
       toast.error(err.message || "Kunde inte hämta planinställningar");
     } finally {
       setPlanSettingsLoading(false);
+    }
+  };
+
+  const fetchPlanChangeRequests = async () => {
+    setPlanRequestsLoading(true);
+    try {
+      const data = await apiFetch<PlanChangeRequest[]>(`/plan-change-requests?status=pending`);
+      setPlanRequests(ensureArray<PlanChangeRequest>(data));
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte hämta planändringar");
+      setPlanRequests([]);
+    } finally {
+      setPlanRequestsLoading(false);
+    }
+  };
+
+  const handlePlanRequestAction = async (requestId: string | number, action: "approve" | "reject") => {
+    setPlanRequestActionId(String(requestId));
+    try {
+      await apiFetch(`/plan-change-requests/${requestId}/${action}`, { method: "PUT" });
+      toast.success(action === "approve" ? "Plan uppdaterad" : "Begäran avslagen");
+      fetchPlanChangeRequests();
+      fetchCompanies();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte uppdatera plan");
+    } finally {
+      setPlanRequestActionId(null);
     }
   };
 
@@ -1052,6 +1076,72 @@ const SuperAdminDashboard = () => {
                   );
                 })}
               </Tabs>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100">
+          <CardHeader>
+            <CardTitle>Planändringar</CardTitle>
+            <CardDescription className="text-slate-400">
+              Godkänn eller avslå uppgraderingar och nedgraderingar inom 24 timmar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {planRequestsLoading ? (
+              <p className="text-sm text-slate-400">Laddar planändringar...</p>
+            ) : planRequests.length ? (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-slate-800">
+                    <TableHead>Företag</TableHead>
+                    <TableHead>Nuvarande plan</TableHead>
+                    <TableHead>Begärd plan</TableHead>
+                    <TableHead>Inskickad</TableHead>
+                    <TableHead>Deadline</TableHead>
+                    <TableHead>Begärt av</TableHead>
+                    <TableHead className="text-right">Åtgärd</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {planRequests.map((request) => {
+                    const createdAt = parseSqlDate(request.created_at || null);
+                    const deadline = buildPlanDeadline(request.created_at || null);
+                    const isProcessing = planRequestActionId === String(request.id);
+                    return (
+                      <TableRow key={request.id} className="border-slate-800">
+                        <TableCell className="font-medium">{request.company_name || request.company_id}</TableCell>
+                        <TableCell>{request.current_plan || "–"}</TableCell>
+                        <TableCell>{request.requested_plan || "–"}</TableCell>
+                        <TableCell>{createdAt ? format(createdAt, "yyyy-MM-dd HH:mm") : "–"}</TableCell>
+                        <TableCell>{deadline ? format(deadline, "yyyy-MM-dd HH:mm") : "–"}</TableCell>
+                        <TableCell>{request.requested_by_name || request.requested_by_email || "–"}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handlePlanRequestAction(request.id, "approve")}
+                              disabled={isProcessing}
+                            >
+                              Godkänn
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handlePlanRequestAction(request.id, "reject")}
+                              disabled={isProcessing}
+                            >
+                              Avslå
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-sm text-slate-400">Inga väntande planändringar.</p>
             )}
           </CardContent>
         </Card>

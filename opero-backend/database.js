@@ -81,6 +81,22 @@ db.serialize(() => {
     );
   `);
 
+  // --- Plan change requests ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS plan_change_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      requested_by INTEGER,
+      current_plan TEXT,
+      requested_plan TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at TEXT,
+      reviewer_id INTEGER,
+      FOREIGN KEY (company_id) REFERENCES companies(id)
+    );
+  `);
+
   Object.entries(DEFAULT_PLAN_FEATURES).forEach(([plan, features]) => {
     db.run(
       `INSERT OR IGNORE INTO plan_settings (plan, features) VALUES (?, ?)`,

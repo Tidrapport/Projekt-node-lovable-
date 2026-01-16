@@ -21,6 +21,7 @@ import { UserImpersonationSelector } from "./UserImpersonationSelector";
 import { SuperAdminCompanySwitcher } from "./SuperAdminCompanySwitcher";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ADMIN_HUB_ITEMS, ADMIN_MAIN_ITEMS, applyMenuOrder, USER_MENU_ITEMS } from "@/lib/menuConfig";
+import { PlanUpgradeDialog } from "@/components/PlanUpgradeDialog";
 
 const superAdminItems = [
   { title: "Super Admin", url: "/superadmin", icon: Crown },
@@ -29,7 +30,7 @@ const superAdminItems = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isImpersonated, hasFeature, signOut, menuSettings } = useAuth();
+  const { isAdmin, isSuperAdmin, isImpersonated, hasFeature, signOut, menuSettings, companyPlan } = useAuth();
   const currentPath = location.pathname;
 
   const isActive = (path: string) => currentPath === path;
@@ -40,6 +41,7 @@ export function AppSidebar() {
   const filteredAdminMainItems = applyMenuOrder(ADMIN_MAIN_ITEMS.filter(allowItem), menuSettings?.admin_main);
   const filteredAdminHubItems = applyMenuOrder(ADMIN_HUB_ITEMS.filter(allowItem), menuSettings?.admin_hub);
   const showAdminHub = filteredAdminHubItems.length > 0;
+  const showUpgrade = isAdmin && !isSuperAdmin && (companyPlan === "Bas" || companyPlan === "Pro");
 
   return (
     <Sidebar collapsible="icon">
@@ -142,12 +144,9 @@ export function AppSidebar() {
         )}
 
         {!isCollapsed && (
-          <div className="mt-auto p-4">
-            <Button 
-              variant="outline" 
-              className="w-full" 
-              onClick={signOut}
-            >
+          <div className="mt-auto p-4 space-y-2">
+            {showUpgrade && <PlanUpgradeDialog currentPlan={companyPlan} />}
+            <Button variant="outline" className="w-full" onClick={signOut}>
               <LogOut className="mr-2 h-4 w-4" />
               Logga ut
             </Button>
