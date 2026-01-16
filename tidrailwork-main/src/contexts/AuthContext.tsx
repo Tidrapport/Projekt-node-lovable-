@@ -57,18 +57,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const loadMenuSettings = useCallback(async (targetCompanyId: number | null, allow: boolean) => {
-    if (!allow || !targetCompanyId) {
-      setMenuSettings(null);
-      return;
-    }
-    try {
-      const data = await apiFetch<{ menu_settings?: MenuSettings }>("/admin/menu-settings");
-      setMenuSettings(data?.menu_settings ?? null);
-    } catch {
-      setMenuSettings(null);
-    }
-  }, []);
+  const loadMenuSettings = useCallback(
+    async (targetCompanyId: number | null, fallbackCompanyId: number | null, allow: boolean) => {
+      if (!allow) {
+        setMenuSettings(null);
+        return;
+      }
+      const scopedCompanyId = targetCompanyId ?? fallbackCompanyId ?? null;
+      if (!scopedCompanyId) {
+        setMenuSettings(null);
+        return;
+      }
+      try {
+        const path = `/admin/menu-settings?company_id=${encodeURIComponent(scopedCompanyId)}`;
+        const data = await apiFetch<{ menu_settings?: MenuSettings }>(path);
+        setMenuSettings(data?.menu_settings ?? null);
+      } catch {
+        setMenuSettings(null);
+      }
+    },
+    []
+  );
 
   const refresh = useCallback(async () => {
     const token = getToken();
@@ -89,14 +98,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(me.user);
     const effectiveCompanyId = me.company_id ?? null;
     setCompanyId(effectiveCompanyId);
-    setHomeCompanyId(me.home_company_id ?? me.company_id ?? null);
+    const resolvedHomeCompanyId = me.home_company_id ?? me.company_id ?? null;
+    setHomeCompanyId(resolvedHomeCompanyId);
     setCompany(effectiveCompanyId ? { id: effectiveCompanyId } : null);
     setIsAdmin(me.is_admin);
     setIsSuperAdmin(me.is_super_admin);
     setIsImpersonated(!!me.impersonated);
     await loadCompanyFeatures(effectiveCompanyId);
-    const allowMenuSettings = (me.is_admin || me.is_super_admin) && !!effectiveCompanyId;
-    await loadMenuSettings(effectiveCompanyId, allowMenuSettings);
+    const allowMenuSettings = me.is_admin || me.is_super_admin;
+    await loadMenuSettings(effectiveCompanyId, resolvedHomeCompanyId, allowMenuSettings);
   }, [loadCompanyFeatures, loadMenuSettings]);
 
   useEffect(() => {

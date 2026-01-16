@@ -8,7 +8,15 @@ import { MENU_SECTIONS, applyMenuOrder, buildMenuOrderIds, MenuSectionKey, MenuS
 import { toast } from "sonner";
 
 const MenuSettingsPage = () => {
-  const { menuSettings, updateMenuSettings, hasFeature, isSuperAdmin, isImpersonated } = useAuth();
+  const {
+    menuSettings,
+    updateMenuSettings,
+    hasFeature,
+    isSuperAdmin,
+    isImpersonated,
+    companyId,
+    homeCompanyId,
+  } = useAuth();
   const [localSettings, setLocalSettings] = useState<MenuSettings>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,9 +57,15 @@ const MenuSettingsPage = () => {
   };
 
   const saveSettings = async () => {
+    const scopedCompanyId = companyId ?? homeCompanyId ?? null;
+    if (!scopedCompanyId) {
+      toast.error("Välj företag innan du sparar.");
+      return;
+    }
     setSaving(true);
     try {
-      await apiFetch("/admin/menu-settings", {
+      const path = `/admin/menu-settings?company_id=${encodeURIComponent(scopedCompanyId)}`;
+      await apiFetch(path, {
         method: "PUT",
         json: { menu_settings: localSettings },
       });
