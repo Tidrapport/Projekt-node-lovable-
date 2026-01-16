@@ -114,6 +114,212 @@ function generateCompanyCode() {
   return code;
 }
 
+const DEFAULT_PLAN_FEATURES = {
+  Bas: ["dashboard", "time_reports", "work_orders"],
+  Pro: ["dashboard", "time_reports", "work_orders", "welding_reports", "offers"],
+  Entreprise: [
+    "dashboard",
+    "time_reports",
+    "work_orders",
+    "welding_reports",
+    "offers",
+    "planning",
+    "deviations",
+    "salary_overview",
+    "contacts",
+    "projects",
+    "admin_users",
+    "attestation",
+    "billing",
+    "job_roles",
+    "material_types",
+    "ob_settings",
+    "statistics",
+    "customers",
+    "documents",
+    "invoice_settings",
+    "invoice_marking",
+    "price_list",
+    "time_report_settings",
+    "menu_settings",
+    "activity_log",
+    "admin_hub",
+    "salaries"
+  ]
+};
+const AVAILABLE_FEATURES = [
+  "dashboard",
+  "time_reports",
+  "work_orders",
+  "welding_reports",
+  "offers",
+  "planning",
+  "deviations",
+  "salary_overview",
+  "contacts",
+  "projects",
+  "admin_users",
+  "attestation",
+  "billing",
+  "job_roles",
+  "material_types",
+  "ob_settings",
+  "statistics",
+  "customers",
+  "documents",
+  "invoice_settings",
+  "invoice_marking",
+  "price_list",
+  "time_report_settings",
+  "menu_settings",
+  "activity_log",
+  "admin_hub",
+  "salaries"
+];
+const PLAN_ORDER = ["Bas", "Pro", "Entreprise"];
+const VALID_PLANS = new Set(PLAN_ORDER);
+const ALL_FEATURES = new Set(AVAILABLE_FEATURES);
+const planSettingsCache = new Map();
+
+function normalizePlanInput(plan) {
+  if (plan === null || plan === undefined) return null;
+  const raw = String(plan).trim().toLowerCase();
+  if (raw === "bas") return "Bas";
+  if (raw === "pro") return "Pro";
+  if (raw === "entreprise" || raw === "enterprise") return "Entreprise";
+  return null;
+}
+
+function parseCompanyFeatures(raw) {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function sanitizeFeatureList(list) {
+  if (!Array.isArray(list)) return null;
+  const cleaned = [];
+  list.forEach((item) => {
+    const key = String(item || "").trim();
+    if (!key || !ALL_FEATURES.has(key)) return;
+    if (!cleaned.includes(key)) cleaned.push(key);
+  });
+  return cleaned;
+}
+
+function validateFeatureInput(list) {
+  if (!Array.isArray(list)) return { ok: false, error: "features måste vara en array" };
+  const cleaned = [];
+  const unknown = [];
+  list.forEach((item) => {
+    const key = String(item || "").trim();
+    if (!key) return;
+    if (!ALL_FEATURES.has(key)) {
+      unknown.push(key);
+      return;
+    }
+    if (!cleaned.includes(key)) cleaned.push(key);
+  });
+  if (unknown.length) {
+    return { ok: false, error: `Okända features: ${unknown.join(", ")}` };
+  }
+  return { ok: true, value: cleaned };
+}
+
+const MENU_SECTION_KEYS = ["user", "admin_main", "admin_hub"];
+
+function normalizeMenuSettings(input) {
+  if (!input || typeof input !== "object") return null;
+  const normalized = {};
+  MENU_SECTION_KEYS.forEach((section) => {
+    const raw = input[section];
+    if (!Array.isArray(raw)) return;
+    const cleaned = [];
+    raw.forEach((item) => {
+      const key = String(item || "").trim();
+      if (!key || cleaned.includes(key)) return;
+      cleaned.push(key);
+    });
+    normalized[section] = cleaned;
+  });
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function parseMenuSettings(raw) {
+  if (!raw) return null;
+  if (typeof raw === "object") return normalizeMenuSettings(raw);
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeMenuSettings(parsed);
+  } catch (e) {
+    return null;
+  }
+}
+
+function buildPlanSettingsCache(rows) {
+  planSettingsCache.clear();
+  PLAN_ORDER.forEach((plan) => {
+    planSettingsCache.set(plan, DEFAULT_PLAN_FEATURES[plan] || []);
+  });
+  (rows || []).forEach((row) => {
+    const normalized = normalizePlanInput(row?.plan);
+    if (!normalized || !VALID_PLANS.has(normalized)) return;
+    const parsed = parseCompanyFeatures(row?.features);
+    const cleaned = sanitizeFeatureList(parsed);
+    if (cleaned !== null) {
+      planSettingsCache.set(normalized, cleaned);
+    }
+  });
+}
+
+function refreshPlanSettings(callback) {
+  db.all(`SELECT plan, features FROM plan_settings`, [], (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET plan_settings:", err);
+      buildPlanSettingsCache([]);
+      if (callback) return callback(err);
+      return;
+    }
+    buildPlanSettingsCache(rows || []);
+    if (callback) callback(null);
+  });
+}
+
+function getPlanFeaturesForPlan(plan) {
+  const normalized = normalizePlanInput(plan) || "Bas";
+  if (planSettingsCache.has(normalized)) {
+    return planSettingsCache.get(normalized) || [];
+  }
+  return DEFAULT_PLAN_FEATURES[normalized] || [];
+}
+
+function getPlanSettingsSnapshot() {
+  return PLAN_ORDER.map((plan) => ({
+    plan,
+    features: getPlanFeaturesForPlan(plan)
+  }));
+}
+
+function resolveCompanyPlanAndFeatures(row) {
+  const plan = normalizePlanInput(row?.plan) || "Bas";
+  const parsed = parseCompanyFeatures(row?.features);
+  const cleaned = sanitizeFeatureList(parsed);
+  return { plan, features: cleaned !== null ? cleaned : getPlanFeaturesForPlan(plan) };
+}
+
+function mapCompanyRow(row) {
+  if (!row) return row;
+  const resolved = resolveCompanyPlanAndFeatures(row);
+  return { ...row, plan: resolved.plan, features: resolved.features };
+}
+
+refreshPlanSettings();
+
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
@@ -917,7 +1123,7 @@ app.get("/companies", requireAuth, (req, res) => {
   const role = (req.user.role || "").toLowerCase();
   if (role === "super_admin") {
     db.all(
-      `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
+      `SELECT id, name, code, plan, features, billing_email, address_line1, address_line2, postal_code, city, country, phone,
               bankgiro, bic_number, iban_number, logo_url, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
               invoice_late_interest, created_at
        FROM companies ORDER BY name`,
@@ -927,12 +1133,12 @@ app.get("/companies", requireAuth, (req, res) => {
           console.error("DB-fel vid /companies:", err);
           return res.status(500).json({ error: "DB error" });
         }
-        res.json(rows || []);
+        res.json((rows || []).map(mapCompanyRow));
       }
     );
   } else {
     db.all(
-      `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
+      `SELECT id, name, code, plan, features, billing_email, address_line1, address_line2, postal_code, city, country, phone,
               bankgiro, bic_number, iban_number, logo_url, org_number, vat_number, f_skatt, invoice_payment_terms, invoice_our_reference,
               invoice_late_interest, created_at
        FROM companies WHERE id = ?`,
@@ -942,7 +1148,7 @@ app.get("/companies", requireAuth, (req, res) => {
           console.error("DB-fel vid /companies:", err);
           return res.status(500).json({ error: "DB error" });
         }
-        res.json(rows || []);
+        res.json((rows || []).map(mapCompanyRow));
       }
     );
   }
@@ -959,7 +1165,7 @@ app.get("/companies/:id", requireAuth, (req, res) => {
   }
 
   db.get(
-    `SELECT id, name, code, billing_email, address_line1, address_line2, postal_code, city, country, phone,
+    `SELECT id, name, code, plan, features, billing_email, address_line1, address_line2, postal_code, city, country, phone,
             bankgiro, bic_number, iban_number, logo_url, org_number, vat_number, f_skatt, invoice_payment_terms,
             invoice_our_reference, invoice_late_interest, created_at
      FROM companies
@@ -971,7 +1177,111 @@ app.get("/companies/:id", requireAuth, (req, res) => {
         return res.status(500).json({ error: "DB error" });
       }
       if (!row) return res.status(404).json({ error: "Not found" });
-      res.json(row);
+      res.json(mapCompanyRow(row));
+    }
+  );
+});
+
+// Hämta planinställningar (superadmin)
+app.get("/plan-settings", requireAuth, requireSuperAdmin, (req, res) => {
+  refreshPlanSettings((err) => {
+    if (err) return res.status(500).json({ error: "Kunde inte hämta planinställningar" });
+    res.json(getPlanSettingsSnapshot());
+  });
+});
+
+// Uppdatera planinställningar (superadmin)
+app.put("/plan-settings/:plan", requireAuth, requireSuperAdmin, (req, res) => {
+  const normalizedPlan = normalizePlanInput(req.params.plan);
+  if (!normalizedPlan) return res.status(400).json({ error: "Ogiltigt planval" });
+  const { features } = req.body || {};
+  const check = validateFeatureInput(features);
+  if (!check.ok) return res.status(400).json({ error: check.error });
+
+  const serialized = JSON.stringify(check.value || []);
+  db.run(
+    `UPDATE plan_settings SET features = ?, updated_at = datetime('now') WHERE plan = ?`,
+    [serialized, normalizedPlan],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid UPDATE plan_settings:", err);
+        return res.status(500).json({ error: "Kunde inte spara planinställningar" });
+      }
+      const finish = () => {
+        refreshPlanSettings(() =>
+          res.json({ success: true, plan: normalizedPlan, features: check.value || [] })
+        );
+      };
+      if (this.changes === 0) {
+        db.run(
+          `INSERT INTO plan_settings (plan, features, updated_at) VALUES (?, ?, datetime('now'))`,
+          [normalizedPlan, serialized],
+          (insertErr) => {
+            if (insertErr) {
+              console.error("DB-fel vid INSERT plan_settings:", insertErr);
+              return res.status(500).json({ error: "Kunde inte spara planinställningar" });
+            }
+            finish();
+          }
+        );
+        return;
+      }
+      finish();
+    }
+  );
+});
+
+// Hämta menyinställningar (admin)
+app.get("/admin/menu-settings", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "company_id krävs" });
+  db.get(
+    `SELECT menu_settings FROM companies WHERE id = ?`,
+    [companyId],
+    (err, row) => {
+      if (err) {
+        console.error("DB-fel vid GET /admin/menu-settings:", err);
+        return res.status(500).json({ error: "Kunde inte hämta menyinställningar" });
+      }
+      if (!row) return res.status(404).json({ error: "Företag hittades inte" });
+      const settings = parseMenuSettings(row.menu_settings) || {};
+      res.json({ menu_settings: settings });
+    }
+  );
+});
+
+// Uppdatera menyinställningar (admin)
+app.put("/admin/menu-settings", requireAuth, requireAdmin, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "company_id krävs" });
+  const { menu_settings } = req.body || {};
+  if (menu_settings === null || menu_settings === undefined) {
+    db.run(
+      `UPDATE companies SET menu_settings = NULL WHERE id = ?`,
+      [companyId],
+      function (err) {
+        if (err) {
+          console.error("DB-fel vid PUT /admin/menu-settings:", err);
+          return res.status(500).json({ error: "Kunde inte spara menyinställningar" });
+        }
+        if (this.changes === 0) return res.status(404).json({ error: "Företag hittades inte" });
+        return res.json({ success: true, menu_settings: null });
+      }
+    );
+    return;
+  }
+  const normalized = normalizeMenuSettings(menu_settings);
+  if (!normalized) return res.status(400).json({ error: "Ogiltiga menyinställningar" });
+  db.run(
+    `UPDATE companies SET menu_settings = ? WHERE id = ?`,
+    [JSON.stringify(normalized), companyId],
+    function (err) {
+      if (err) {
+        console.error("DB-fel vid PUT /admin/menu-settings:", err);
+        return res.status(500).json({ error: "Kunde inte spara menyinställningar" });
+      }
+      if (this.changes === 0) return res.status(404).json({ error: "Företag hittades inte" });
+      res.json({ success: true, menu_settings: normalized });
     }
   );
 });
@@ -994,15 +1304,31 @@ app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
     admin_last_name,
     admin_email,
     admin_password,
+    plan,
+    features,
   } = req.body || {};
   if (!name) return res.status(400).json({ error: "name required" });
   const companyCode = code || generateCompanyCode();
   const clean = (value) => (value ? String(value).trim() : null);
+  const normalizedPlan = plan !== undefined ? normalizePlanInput(plan) : "Bas";
+  if (plan !== undefined && !normalizedPlan) {
+    return res.status(400).json({ error: "Ogiltigt planval" });
+  }
+  let featuresValue = null;
+  let responseFeatures = getPlanFeaturesForPlan(normalizedPlan || "Bas");
+  if (features !== undefined && features !== null) {
+    const check = validateFeatureInput(features);
+    if (!check.ok) return res.status(400).json({ error: check.error });
+    featuresValue = JSON.stringify(check.value);
+    responseFeatures = check.value;
+  }
 
   db.run(
     `INSERT INTO companies (
       name,
       code,
+      plan,
+      features,
       billing_email,
       address_line1,
       address_line2,
@@ -1012,10 +1338,12 @@ app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
       phone,
       org_number,
       vat_number
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       String(name).trim(),
       companyCode.trim(),
+      normalizedPlan || "Bas",
+      featuresValue,
       clean(billing_email),
       clean(address_line1),
       clean(address_line2),
@@ -1033,7 +1361,14 @@ app.post("/companies", requireAuth, requireSuperAdmin, (req, res) => {
       }
 
       const companyId = this.lastID;
-      const result = { id: companyId, name: name.trim(), code: companyCode.trim(), billing_email: billing_email || null };
+      const result = {
+        id: companyId,
+        name: name.trim(),
+        code: companyCode.trim(),
+        billing_email: billing_email || null,
+        plan: normalizedPlan || "Bas",
+        features: responseFeatures
+      };
 
       // Skapa admin-user om data finns
       if (admin_first_name && admin_last_name && admin_email && admin_password) {
@@ -1088,6 +1423,8 @@ app.put("/companies/:id", requireAuth, (req, res) => {
     invoice_payment_terms,
     invoice_our_reference,
     invoice_late_interest,
+    plan,
+    features,
   } = req.body || {};
   const role = (req.user.role || "").toLowerCase();
   const isSuper = role === "super_admin";
@@ -1182,6 +1519,33 @@ app.put("/companies/:id", requireAuth, (req, res) => {
   if (invoice_late_interest !== undefined) {
     fields.push("invoice_late_interest = ?");
     params.push(invoice_late_interest ? String(invoice_late_interest).trim() : null);
+  }
+  if (plan !== undefined) {
+    if (!isSuper) {
+      return res.status(403).json({ error: "Endast superadmin kan ändra plan" });
+    }
+    const normalizedPlan = normalizePlanInput(plan);
+    if (!normalizedPlan) {
+      return res.status(400).json({ error: "Ogiltigt planval" });
+    }
+    fields.push("plan = ?");
+    params.push(normalizedPlan);
+    if (features === undefined) {
+      fields.push("features = NULL");
+    }
+  }
+  if (features !== undefined) {
+    if (!isSuper) {
+      return res.status(403).json({ error: "Endast superadmin kan ändra funktioner" });
+    }
+    if (features === null) {
+      fields.push("features = NULL");
+    } else {
+      const check = validateFeatureInput(features);
+      if (!check.ok) return res.status(400).json({ error: check.error });
+      fields.push("features = ?");
+      params.push(JSON.stringify(check.value));
+    }
   }
 
   if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
@@ -3996,6 +4360,65 @@ app.delete("/admin/certificates/:id", requireAuth, requireAdmin, (req, res) => {
         success: true
       });
       res.json({ success: true });
+    });
+  });
+});
+
+// ======================
+//   USER: CERTIFICATES
+// ======================
+app.get("/certificates", requireAuth, (req, res) => {
+  const userId = getAuthUserId(req);
+  const companyId = req.user?.company_id || null;
+  if (!userId || !companyId) return res.status(400).json({ error: "Company not found" });
+
+  const sql = `
+    SELECT id, title, issuer, certificate_number, valid_from, valid_to, notes, updated_at, file_url
+    FROM employee_certificates
+    WHERE company_id = ? AND user_id = ?
+    ORDER BY datetime(valid_to) ASC, datetime(created_at) DESC
+  `;
+
+  db.all(sql, [companyId, userId], (err, rows) => {
+    if (err) {
+      console.error("DB-fel vid GET /certificates:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    const mapped = (rows || []).map((row) => ({
+      ...row,
+      view_url: row.file_url ? `/certificates/${row.id}/file` : null,
+      file_url: null
+    }));
+    res.json(mapped);
+  });
+});
+
+app.get("/certificates/:id/file", requireAuth, (req, res) => {
+  const { id } = req.params;
+  const userId = getAuthUserId(req);
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+  db.get("SELECT * FROM employee_certificates WHERE id = ?", [id], (err, row) => {
+    if (err) {
+      console.error("DB-fel vid GET /certificates/:id/file:", err);
+      return res.status(500).json({ error: "DB error" });
+    }
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (String(row.user_id) !== String(userId)) return res.status(403).json({ error: "Forbidden" });
+    if (!row.file_url) return res.status(404).json({ error: "No file" });
+
+    const baseDir = path.join(__dirname, "uploads", "certificates", String(row.company_id));
+    const filePath = path.normalize(path.join(__dirname, row.file_url));
+    if (!filePath.startsWith(baseDir)) return res.status(400).json({ error: "Invalid file path" });
+
+    fs.access(filePath, fs.constants.R_OK, (accessErr) => {
+      if (accessErr) return res.status(404).json({ error: "File not found" });
+      const fileName = path.basename(filePath);
+      res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "sandbox");
+      res.sendFile(filePath);
     });
   });
 });

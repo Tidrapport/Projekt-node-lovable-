@@ -17,7 +17,7 @@ import ChangePassword from "./pages/ChangePassword";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Contacts from "./pages/Contacts";
-import TdokAi from "./pages/TdokAi";
+import Documents from "./pages/Documents";
 import AdminProjects from "./pages/admin/Projects";
 import AdminUsers from "./pages/admin/Users";
 import AdminJobRoles from "./pages/admin/JobRoles";
@@ -31,6 +31,7 @@ import AdminPriceList from "./pages/admin/PriceList";
 import AdminActivityLog from "./pages/admin/ActivityLog";
 import AdminDocuments from "./pages/admin/Documents";
 import AdminTimeReportSettings from "./pages/admin/TimeReportSettings";
+import AdminMenuSettings from "./pages/admin/MenuSettings";
 import AdminStatistics from "./pages/admin/Statistics";
 import AdminWorkOrders from "./pages/admin/WorkOrders";
 import AdminHub from "./pages/admin/AdminHub";
@@ -62,6 +63,23 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const FeatureRoute = ({ feature, children }: { feature?: string; children: React.ReactNode }) => {
+  const { hasFeature, isSuperAdmin, isImpersonated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  const shouldFilter = !isSuperAdmin || isImpersonated;
+  if (!feature || !shouldFilter) return <>{children}</>;
+  if (!hasFeature(feature)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -87,9 +105,11 @@ const App = () => (
                 path="/time-reports"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <TimeReports />
-                    </Layout>
+                    <FeatureRoute feature="time_reports">
+                      <Layout>
+                        <TimeReports />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -97,9 +117,11 @@ const App = () => (
                 path="/work-orders"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <WorkOrders />
-                    </Layout>
+                    <FeatureRoute feature="work_orders">
+                      <Layout>
+                        <WorkOrders />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -107,9 +129,11 @@ const App = () => (
                 path="/planning"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <Planning />
-                    </Layout>
+                    <FeatureRoute feature="planning">
+                      <Layout>
+                        <Planning />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -117,9 +141,11 @@ const App = () => (
                 path="/deviations"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <Deviations />
-                    </Layout>
+                    <FeatureRoute feature="deviations">
+                      <Layout>
+                        <Deviations />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -127,9 +153,11 @@ const App = () => (
                 path="/salary-overview"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <SalaryOverview />
-                    </Layout>
+                    <FeatureRoute feature="salary_overview">
+                      <Layout>
+                        <SalaryOverview />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -147,19 +175,23 @@ const App = () => (
                 path="/contacts"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <Contacts />
-                    </Layout>
+                    <FeatureRoute feature="contacts">
+                      <Layout>
+                        <Contacts />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
               <Route
-                path="/tdok-ai"
+                path="/documents"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <TdokAi />
-                    </Layout>
+                    <FeatureRoute feature="documents">
+                      <Layout>
+                        <Documents />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -167,9 +199,11 @@ const App = () => (
                 path="/welding-report"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <WeldingReport />
-                    </Layout>
+                    <FeatureRoute feature="welding_reports">
+                      <Layout>
+                        <WeldingReport />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -177,9 +211,11 @@ const App = () => (
                 path="/admin/welding-reports"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminWeldingReports />
-                    </Layout>
+                    <FeatureRoute feature="welding_reports">
+                      <Layout>
+                        <AdminWeldingReports />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -187,9 +223,11 @@ const App = () => (
                 path="/admin/customers"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminCustomers />
-                    </Layout>
+                    <FeatureRoute feature="customers">
+                      <Layout>
+                        <AdminCustomers />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -197,9 +235,11 @@ const App = () => (
                 path="/admin/projects"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminProjects />
-                    </Layout>
+                    <FeatureRoute feature="projects">
+                      <Layout>
+                        <AdminProjects />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -207,9 +247,11 @@ const App = () => (
                 path="/admin/users"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminUsers />
-                    </Layout>
+                    <FeatureRoute feature="admin_users">
+                      <Layout>
+                        <AdminUsers />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -217,9 +259,11 @@ const App = () => (
                 path="/admin/job-roles"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminJobRoles />
-                    </Layout>
+                    <FeatureRoute feature="job_roles">
+                      <Layout>
+                        <AdminJobRoles />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -227,9 +271,11 @@ const App = () => (
                 path="/admin/material-types"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminMaterialTypes />
-                    </Layout>
+                    <FeatureRoute feature="material_types">
+                      <Layout>
+                        <AdminMaterialTypes />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -237,9 +283,11 @@ const App = () => (
                 path="/admin/planning"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminPlanning />
-                    </Layout>
+                    <FeatureRoute feature="planning">
+                      <Layout>
+                        <AdminPlanning />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -247,9 +295,11 @@ const App = () => (
                 path="/admin/attestations"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminTimeAttestations />
-                    </Layout>
+                    <FeatureRoute feature="attestation">
+                      <Layout>
+                        <AdminTimeAttestations />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -257,9 +307,11 @@ const App = () => (
                 path="/admin/billing"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminBilling />
-                    </Layout>
+                    <FeatureRoute feature="billing">
+                      <Layout>
+                        <AdminBilling />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -267,9 +319,11 @@ const App = () => (
                 path="/admin/invoice-marking"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminInvoiceMarking />
-                    </Layout>
+                    <FeatureRoute feature="invoice_marking">
+                      <Layout>
+                        <AdminInvoiceMarking />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -277,9 +331,11 @@ const App = () => (
                 path="/admin/deviations"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminDeviations />
-                    </Layout>
+                    <FeatureRoute feature="deviations">
+                      <Layout>
+                        <AdminDeviations />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -287,9 +343,11 @@ const App = () => (
                 path="/admin/ob-settings"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminOBSettings />
-                    </Layout>
+                    <FeatureRoute feature="ob_settings">
+                      <Layout>
+                        <AdminOBSettings />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -297,9 +355,11 @@ const App = () => (
                 path="/admin/invoice-settings"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminInvoiceSettings />
-                    </Layout>
+                    <FeatureRoute feature="invoice_settings">
+                      <Layout>
+                        <AdminInvoiceSettings />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -307,9 +367,11 @@ const App = () => (
                 path="/admin/price-list"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminPriceList />
-                    </Layout>
+                    <FeatureRoute feature="price_list">
+                      <Layout>
+                        <AdminPriceList />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -317,9 +379,11 @@ const App = () => (
                 path="/admin/documents"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminDocuments />
-                    </Layout>
+                    <FeatureRoute feature="documents">
+                      <Layout>
+                        <AdminDocuments />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -327,9 +391,11 @@ const App = () => (
                 path="/admin/time-report-settings"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminTimeReportSettings />
-                    </Layout>
+                    <FeatureRoute feature="time_report_settings">
+                      <Layout>
+                        <AdminTimeReportSettings />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -337,9 +403,23 @@ const App = () => (
                 path="/admin/activity-log"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminActivityLog />
-                    </Layout>
+                    <FeatureRoute feature="activity_log">
+                      <Layout>
+                        <AdminActivityLog />
+                      </Layout>
+                    </FeatureRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/menu-settings"
+                element={
+                  <ProtectedRoute>
+                    <FeatureRoute feature="menu_settings">
+                      <Layout>
+                        <AdminMenuSettings />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -347,9 +427,11 @@ const App = () => (
                 path="/admin/statistics"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminStatistics />
-                    </Layout>
+                    <FeatureRoute feature="statistics">
+                      <Layout>
+                        <AdminStatistics />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -357,9 +439,11 @@ const App = () => (
                 path="/admin/work-orders"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminWorkOrders />
-                    </Layout>
+                    <FeatureRoute feature="work_orders">
+                      <Layout>
+                        <AdminWorkOrders />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -367,9 +451,11 @@ const App = () => (
                 path="/admin/hub"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminHub />
-                    </Layout>
+                    <FeatureRoute feature="admin_hub">
+                      <Layout>
+                        <AdminHub />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -377,9 +463,11 @@ const App = () => (
                 path="/admin/offers"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminOffers />
-                    </Layout>
+                    <FeatureRoute feature="offers">
+                      <Layout>
+                        <AdminOffers />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />
@@ -387,9 +475,11 @@ const App = () => (
                 path="/admin/salaries"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <AdminSalaries />
-                    </Layout>
+                    <FeatureRoute feature="salaries">
+                      <Layout>
+                        <AdminSalaries />
+                      </Layout>
+                    </FeatureRoute>
                   </ProtectedRoute>
                 }
               />

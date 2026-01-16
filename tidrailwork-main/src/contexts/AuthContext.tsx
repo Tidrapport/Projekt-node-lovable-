@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { clearToken, getToken, setToken } from "@/api/client";
+import { apiFetch, clearToken, getToken, setToken } from "@/api/client";
 import * as authApi from "@/api/auth";
+import { ensureArray } from "@/lib/ensureArray";
+import type { MenuSettings } from "@/lib/menuConfig";
 
 type AuthContextType = {
   user: authApi.AuthUser | null;
@@ -11,10 +13,15 @@ type AuthContextType = {
   companyId: number | null;
   homeCompanyId: number | null;
   company: { id: number; name?: string } | null;
+  companyPlan: string | null;
+  companyFeatures: string[] | null;
+  menuSettings: MenuSettings | null;
+  hasFeature: (feature: string) => boolean;
   login: (email: string, password: string, company_id?: number) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
   signOut: () => void;
+  updateMenuSettings: (settings: MenuSettings | null) => void;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,10 +31,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [homeCompanyId, setHomeCompanyId] = useState<number | null>(null);
   const [company, setCompany] = useState<{ id: number; name?: string } | null>(null);
+  const [companyPlan, setCompanyPlan] = useState<string | null>(null);
+  const [companyFeatures, setCompanyFeatures] = useState<string[] | null>(null);
+  const [menuSettings, setMenuSettings] = useState<MenuSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isImpersonated, setIsImpersonated] = useState(false);
+
+  const loadCompanyFeatures = useCallback(async (targetCompanyId: number | null) => {
+    if (!targetCompanyId) {
+      setCompanyPlan(null);
+      setCompanyFeatures(null);
+      return;
+    }
+    try {
+      const data = await apiFetch<any[]>("/companies");
+      const list = ensureArray<any>(data);
+      const match = list.find((c) => String(c.id) === String(targetCompanyId));
+      setCompanyPlan(match?.plan ? String(match.plan) : null);
+      setCompanyFeatures(Array.isArray(match?.features) ? match.features : null);
+    } catch {
+      setCompanyPlan(null);
+      setCompanyFeatures(null);
+    }
+  }, []);
+
+  const loadMenuSettings = useCallback(async (targetCompanyId: number | null, allow: boolean) => {
+    if (!allow || !targetCompanyId) {
+      setMenuSettings(null);
+      return;
+    }
+    try {
+      const data = await apiFetch<{ menu_settings?: MenuSettings }>("/admin/menu-settings");
+      setMenuSettings(data?.menu_settings ?? null);
+    } catch {
+      setMenuSettings(null);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     const token = getToken();
@@ -36,6 +77,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCompanyId(null);
       setHomeCompanyId(null);
       setCompany(null);
+      setCompanyPlan(null);
+      setCompanyFeatures(null);
+      setMenuSettings(null);
       setIsAdmin(false);
       setIsSuperAdmin(false);
       setIsImpersonated(false);
@@ -43,13 +87,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     const me = await authApi.me();
     setUser(me.user);
-    setCompanyId(me.company_id ?? null);
+    const effectiveCompanyId = me.company_id ?? null;
+    setCompanyId(effectiveCompanyId);
     setHomeCompanyId(me.home_company_id ?? me.company_id ?? null);
-    setCompany(me.company_id ? { id: me.company_id } : null);
+    setCompany(effectiveCompanyId ? { id: effectiveCompanyId } : null);
     setIsAdmin(me.is_admin);
     setIsSuperAdmin(me.is_super_admin);
     setIsImpersonated(!!me.impersonated);
-  }, []);
+    await loadCompanyFeatures(effectiveCompanyId);
+    const allowMenuSettings = (me.is_admin || me.is_super_admin) && !!effectiveCompanyId;
+    await loadMenuSettings(effectiveCompanyId, allowMenuSettings);
+  }, [loadCompanyFeatures, loadMenuSettings]);
 
   useEffect(() => {
     (async () => {
@@ -60,12 +108,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setCompanyId(null);
         setHomeCompanyId(null);
-        setCompany(null);
-        setIsAdmin(false);
-        setIsSuperAdmin(false);
-        setIsImpersonated(false);
-      } finally {
-        setLoading(false);
+      setCompany(null);
+      setCompanyPlan(null);
+      setCompanyFeatures(null);
+      setMenuSettings(null);
+      setIsAdmin(false);
+      setIsSuperAdmin(false);
+      setIsImpersonated(false);
+    } finally {
+      setLoading(false);
       }
     })();
   }, [refresh]);
@@ -90,10 +141,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCompanyId(null);
     setHomeCompanyId(null);
     setCompany(null);
+    setCompanyPlan(null);
+    setCompanyFeatures(null);
+    setMenuSettings(null);
     setIsAdmin(false);
     setIsSuperAdmin(false);
     setIsImpersonated(false);
   }, []);
+
+  const hasFeature = useCallback(
+    (feature: string) => {
+      if (!feature) return true;
+      if (companyFeatures === null) return true;
+      return companyFeatures.includes(feature);
+    },
+    [companyFeatures]
+  );
 
   const value = useMemo(
     () => ({
@@ -105,12 +168,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       companyId,
       homeCompanyId,
       company,
+      companyPlan,
+      companyFeatures,
+      menuSettings,
+      hasFeature,
       login,
       logout,
       refresh,
       signOut: logout,
+      updateMenuSettings: setMenuSettings,
     }),
-    [user, loading, isAdmin, isSuperAdmin, isImpersonated, companyId, homeCompanyId, company, login, logout, refresh]
+    [
+      user,
+      loading,
+      isAdmin,
+      isSuperAdmin,
+      isImpersonated,
+      companyId,
+      homeCompanyId,
+      company,
+      companyPlan,
+      companyFeatures,
+      menuSettings,
+      hasFeature,
+      login,
+      logout,
+      refresh,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

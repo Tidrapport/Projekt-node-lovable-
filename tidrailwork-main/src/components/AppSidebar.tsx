@@ -1,28 +1,4 @@
-import { 
-  Home, 
-  Clock, 
-  AlertTriangle, 
-  FolderKanban, 
-  Users, 
-  Briefcase,
-  Package,
-  LogOut,
-  CheckSquare,
-  AlertCircle,
-  Percent,
-  DollarSign,
-  BarChart3,
-  Calendar,
-  Building2,
-  Crown,
-  Key,
-  Contact,
-  ChevronRight,
-  FileText,
-  Wallet,
-  ClipboardList,
-  BadgeCheck
-} from "lucide-react";
+import { LogOut, Building2, Crown, ChevronRight } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -37,7 +13,6 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/AuthContext";
@@ -45,48 +20,7 @@ import { Button } from "@/components/ui/button";
 import { UserImpersonationSelector } from "./UserImpersonationSelector";
 import { SuperAdminCompanySwitcher } from "./SuperAdminCompanySwitcher";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-
-const userItems = [
-  { title: "Översikt", url: "/", icon: Home },
-  { title: "Tidrapporter", url: "/time-reports", icon: Clock },
-  { title: "Arbetsordrar", url: "/work-orders", icon: ClipboardList },
-  { title: "Svetsrapport", url: "/welding-report", icon: Briefcase },
-  { title: "Planering", url: "/planning", icon: Calendar },
-  { title: "Avvikelser", url: "/deviations", icon: AlertTriangle },
-  { title: "Lönöversikt", url: "/salary-overview", icon: DollarSign },
-  { title: "Kontakter", url: "/contacts", icon: Contact },
-  { title: "TDOK AI", url: "/tdok-ai", icon: FileText },
-  { title: "Byt lösenord", url: "/change-password", icon: Key },
-];
-
-// Main admin items (not under AdminHub)
-const adminMainItems = [
-  { title: "Statistik", url: "/admin/statistics", icon: BarChart3 },
-  { title: "Arbetsorder", url: "/admin/work-orders", icon: ClipboardList },
-  { title: "Attestering", url: "/admin/attestations", icon: CheckSquare },
-  { title: "Fakturering", url: "/admin/billing", icon: FileText },
-  { title: "Fakturering markera", url: "/admin/invoice-marking", icon: BadgeCheck },
-  { title: "Löner", url: "/admin/salaries", icon: Wallet },
-  { title: "Svetsrapporter", url: "/admin/welding-reports", icon: Briefcase },
-  { title: "Resursplanering", url: "/admin/planning", icon: Calendar },
-  { title: "Avvikelser", url: "/admin/deviations", icon: AlertCircle },
-  { title: "Kunder", url: "/admin/customers", icon: Users },
-  { title: "Offerter", url: "/admin/offers", icon: FileText },
-  { title: "Projekt", url: "/admin/projects", icon: FolderKanban },
-];
-
-// Sub-items under AdminHub
-const adminHubSubItems = [
-  { title: "Användare", url: "/admin/users", icon: Users },
-  { title: "Yrkesroller", url: "/admin/job-roles", icon: Briefcase },
-  { title: "Tillägg", url: "/admin/material-types", icon: Package },
-  { title: "OB-inställningar", url: "/admin/ob-settings", icon: Percent },
-  { title: "Integrationer", url: "/admin/invoice-settings", icon: FileText },
-  { title: "Prislista", url: "/admin/price-list", icon: FileText },
-  { title: "Dokument", url: "/admin/documents", icon: FileText },
-  { title: "Tidrapporteringsinställningar", url: "/admin/time-report-settings", icon: Clock },
-  { title: "Aktivitetslogg", url: "/admin/activity-log", icon: ClipboardList },
-];
+import { ADMIN_HUB_ITEMS, ADMIN_MAIN_ITEMS, applyMenuOrder, USER_MENU_ITEMS } from "@/lib/menuConfig";
 
 const superAdminItems = [
   { title: "Super Admin", url: "/superadmin", icon: Crown },
@@ -95,11 +29,17 @@ const superAdminItems = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, signOut } = useAuth();
+  const { isAdmin, isSuperAdmin, isImpersonated, hasFeature, signOut, menuSettings } = useAuth();
   const currentPath = location.pathname;
 
   const isActive = (path: string) => currentPath === path;
   const isCollapsed = state === "collapsed";
+  const shouldFilter = !isSuperAdmin || isImpersonated;
+  const allowItem = (item: { feature?: string }) => !shouldFilter || !item.feature || hasFeature(item.feature);
+  const filteredUserItems = applyMenuOrder(USER_MENU_ITEMS.filter(allowItem), menuSettings?.user);
+  const filteredAdminMainItems = applyMenuOrder(ADMIN_MAIN_ITEMS.filter(allowItem), menuSettings?.admin_main);
+  const filteredAdminHubItems = applyMenuOrder(ADMIN_HUB_ITEMS.filter(allowItem), menuSettings?.admin_hub);
+  const showAdminHub = filteredAdminHubItems.length > 0;
 
   return (
     <Sidebar collapsible="icon">
@@ -108,7 +48,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Användare</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {userItems.map((item) => (
+              {filteredUserItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <NavLink to={item.url} end>
@@ -127,7 +67,7 @@ export function AppSidebar() {
             <SidebarGroupLabel>Administration</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {adminMainItems.map((item) => (
+                {filteredAdminMainItems.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild isActive={isActive(item.url)}>
                       <NavLink to={item.url}>
@@ -139,40 +79,35 @@ export function AppSidebar() {
                 ))}
                 
                 {/* AdminHub with sub-items */}
-                <Collapsible
-                  defaultOpen={adminHubSubItems.some(item => isActive(item.url))}
-                  className="group/collapsible"
-                >
-                  <SidebarMenuItem>
-                    <CollapsibleTrigger asChild>
-                      <SidebarMenuButton isActive={isActive("/admin/hub") || adminHubSubItems.some(item => isActive(item.url))}>
-                        <Building2 />
-                        <span>AdminHub</span>
-                        <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                      </SidebarMenuButton>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <SidebarMenuSub>
-                        <SidebarMenuSubItem>
-                          <SidebarMenuSubButton asChild isActive={isActive("/admin/hub")}>
-                            <NavLink to="/admin/hub">
-                              <span>Mitt Företag</span>
-                            </NavLink>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                        {adminHubSubItems.map((item) => (
-                          <SidebarMenuSubItem key={item.title}>
-                            <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
-                              <NavLink to={item.url}>
-                                <span>{item.title}</span>
-                              </NavLink>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))}
-                      </SidebarMenuSub>
-                    </CollapsibleContent>
-                  </SidebarMenuItem>
-                </Collapsible>
+                {showAdminHub && (
+                  <Collapsible
+                    defaultOpen={filteredAdminHubItems.some((item) => isActive(item.url))}
+                    className="group/collapsible"
+                  >
+                    <SidebarMenuItem>
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton isActive={filteredAdminHubItems.some((item) => isActive(item.url))}>
+                          <Building2 />
+                          <span>AdminHub</span>
+                          <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {filteredAdminHubItems.map((item) => (
+                            <SidebarMenuSubItem key={item.title}>
+                              <SidebarMenuSubButton asChild isActive={isActive(item.url)}>
+                                <NavLink to={item.url}>
+                                  <span>{item.title}</span>
+                                </NavLink>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </SidebarMenuItem>
+                  </Collapsible>
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

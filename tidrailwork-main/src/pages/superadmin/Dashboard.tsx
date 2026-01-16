@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/api/client";
 import { ensureArray } from "@/lib/ensureArray";
 import { generateInvoicePdf, InvoiceLine, InvoiceMeta, InvoiceTotals, CompanyFooter } from "@/lib/invoicePdf";
@@ -20,6 +22,8 @@ type Company = {
   id: string;
   name: string;
   code?: string | null;
+  plan?: string | null;
+  features?: string[] | null;
   billing_email?: string | null;
   address_line1?: string | null;
   address_line2?: string | null;
@@ -57,6 +61,11 @@ type BillingUser = {
   is_active?: number | null;
   deactivated_at?: string | null;
   reactivated_at?: string | null;
+};
+
+type PlanSetting = {
+  plan: string;
+  features: string[];
 };
 
 const parseSqlDate = (value?: string | null) => {
@@ -126,6 +135,42 @@ const monthOptions = Array.from({ length: 12 }, (_, i) => {
   };
 });
 
+const PLAN_OPTIONS = [
+  { value: "Bas", label: "Bas" },
+  { value: "Pro", label: "Pro" },
+  { value: "Entreprise", label: "Entreprise" },
+];
+
+const FEATURE_OPTIONS = [
+  { key: "dashboard", label: "Översikt" },
+  { key: "time_reports", label: "Tidrapporter" },
+  { key: "work_orders", label: "Arbetsordrar" },
+  { key: "planning", label: "Planering" },
+  { key: "deviations", label: "Avvikelser" },
+  { key: "welding_reports", label: "Svetsrapporter" },
+  { key: "salary_overview", label: "Lönöversikt" },
+  { key: "contacts", label: "Kontakter" },
+  { key: "documents", label: "Dokument & intyg" },
+  { key: "statistics", label: "Statistik" },
+  { key: "projects", label: "Projekt" },
+  { key: "customers", label: "Kunder" },
+  { key: "offers", label: "Offerter" },
+  { key: "attestation", label: "Attestering" },
+  { key: "billing", label: "Fakturering" },
+  { key: "invoice_marking", label: "Fakturering markera" },
+  { key: "salaries", label: "Löner" },
+  { key: "admin_users", label: "Användare" },
+  { key: "job_roles", label: "Yrkesroller" },
+  { key: "material_types", label: "Tillägg" },
+  { key: "ob_settings", label: "OB-inställningar" },
+  { key: "invoice_settings", label: "Integrationer" },
+  { key: "price_list", label: "Prislista" },
+  { key: "time_report_settings", label: "Tidrapporteringsinställningar" },
+  { key: "menu_settings", label: "Meny inställning" },
+  { key: "activity_log", label: "Aktivitetslogg" },
+  { key: "admin_hub", label: "AdminHub (Mitt Företag)" },
+];
+
 const SuperAdminDashboard = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,10 +187,15 @@ const SuperAdminDashboard = () => {
   const [newCompanyCity, setNewCompanyCity] = useState("");
   const [newCompanyCountry, setNewCompanyCountry] = useState("");
   const [newCompanyPhone, setNewCompanyPhone] = useState("");
+  const [newCompanyPlan, setNewCompanyPlan] = useState("Bas");
   const [adminFirstName, setAdminFirstName] = useState("");
   const [adminLastName, setAdminLastName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
+  const [planSettings, setPlanSettings] = useState<Record<string, string[]>>({});
+  const [planSettingsLoading, setPlanSettingsLoading] = useState(false);
+  const [planSettingsSaving, setPlanSettingsSaving] = useState<Record<string, boolean>>({});
+  const [activePlanTab, setActivePlanTab] = useState("Bas");
 
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -170,6 +220,10 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchCompanies();
+  }, []);
+
+  useEffect(() => {
+    fetchPlanSettings();
   }, []);
 
   useEffect(() => {
@@ -205,6 +259,55 @@ const SuperAdminDashboard = () => {
       toast.error("Kunde inte hämta företag");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPlanSettings = async () => {
+    setPlanSettingsLoading(true);
+    try {
+      const data = await apiFetch<PlanSetting[]>(`/plan-settings`);
+      const items = ensureArray<PlanSetting>(data);
+      const map: Record<string, string[]> = {};
+      items.forEach((item) => {
+        map[item.plan] = Array.isArray(item.features) ? item.features : [];
+      });
+      PLAN_OPTIONS.forEach((plan) => {
+        if (!map[plan.value]) map[plan.value] = [];
+      });
+      setPlanSettings(map);
+    } catch (err: any) {
+      console.error("Error fetching plan settings:", err);
+      toast.error(err.message || "Kunde inte hämta planinställningar");
+    } finally {
+      setPlanSettingsLoading(false);
+    }
+  };
+
+  const togglePlanFeature = (plan: string, feature: string) => {
+    setPlanSettings((prev) => {
+      const current = new Set(prev[plan] || []);
+      if (current.has(feature)) {
+        current.delete(feature);
+      } else {
+        current.add(feature);
+      }
+      return { ...prev, [plan]: Array.from(current) };
+    });
+  };
+
+  const savePlanSettings = async (plan: string) => {
+    setPlanSettingsSaving((prev) => ({ ...prev, [plan]: true }));
+    try {
+      await apiFetch(`/plan-settings/${encodeURIComponent(plan)}`, {
+        method: "PUT",
+        json: { features: planSettings[plan] || [] },
+      });
+      toast.success(`Plan ${plan} uppdaterad`);
+      fetchPlanSettings();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte spara planinställningar");
+    } finally {
+      setPlanSettingsSaving((prev) => ({ ...prev, [plan]: false }));
     }
   };
 
@@ -287,6 +390,7 @@ const SuperAdminDashboard = () => {
           city: newCompanyCity || null,
           country: newCompanyCountry || null,
           phone: newCompanyPhone || null,
+          plan: newCompanyPlan,
           admin_first_name: adminFirstName,
           admin_last_name: adminLastName,
           admin_email: adminEmail,
@@ -305,6 +409,7 @@ const SuperAdminDashboard = () => {
       setNewCompanyCity("");
       setNewCompanyCountry("");
       setNewCompanyPhone("");
+      setNewCompanyPlan("Bas");
       setAdminFirstName("");
       setAdminLastName("");
       setAdminEmail("");
@@ -328,6 +433,7 @@ const SuperAdminDashboard = () => {
           name: editingCompany.name,
           billing_email: editingCompany.billing_email,
           code: editingCompany.code,
+          plan: editingCompany.plan || "Bas",
         },
       });
       toast.success("Företag uppdaterat");
@@ -693,6 +799,21 @@ const SuperAdminDashboard = () => {
                   className="text-slate-900 placeholder:text-slate-400"
                 />
               </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Plan</Label>
+                <Select value={newCompanyPlan} onValueChange={setNewCompanyPlan}>
+                  <SelectTrigger className="border-slate-800 bg-slate-950/70 text-slate-100">
+                    <SelectValue placeholder="Välj plan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PLAN_OPTIONS.map((plan) => (
+                      <SelectItem key={plan.value} value={plan.value}>
+                        {plan.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label className="text-blue-200">Organisationsnr</Label>
@@ -823,7 +944,7 @@ const SuperAdminDashboard = () => {
           </Dialog>
         </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100 shadow-[0_20px_60px_-40px_rgba(14,165,233,0.6)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-slate-400">Totalt antal företag</CardTitle>
@@ -875,6 +996,65 @@ const SuperAdminDashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100">
+          <CardHeader>
+            <CardTitle>Planinställningar</CardTitle>
+            <CardDescription className="text-slate-400">
+              Välj vilka sidor och funktioner som ingår i varje paket.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {planSettingsLoading ? (
+              <p className="text-sm text-slate-400">Laddar planinställningar...</p>
+            ) : (
+              <Tabs value={activePlanTab} onValueChange={setActivePlanTab} className="space-y-4">
+                <TabsList className="bg-slate-950/70 border border-slate-800">
+                  {PLAN_OPTIONS.map((plan) => (
+                    <TabsTrigger key={plan.value} value={plan.value}>
+                      {plan.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+                {PLAN_OPTIONS.map((plan) => {
+                  const selected = planSettings[plan.value] || [];
+                  return (
+                    <TabsContent key={plan.value} value={plan.value} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {FEATURE_OPTIONS.map((feature) => {
+                          const id = `${plan.value}-${feature.key}`;
+                          return (
+                            <label
+                              key={id}
+                              htmlFor={id}
+                              className="flex items-start gap-3 rounded-xl border border-slate-800/70 bg-slate-950/60 p-3 text-sm"
+                            >
+                              <Checkbox
+                                id={id}
+                                checked={selected.includes(feature.key)}
+                                onCheckedChange={() => togglePlanFeature(plan.value, feature.key)}
+                              />
+                              <span className="text-slate-200">{feature.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="flex flex-col gap-2 text-xs text-slate-500 md:flex-row md:items-center md:justify-between">
+                        <span>Valda funktioner: {selected.length}</span>
+                        <Button
+                          onClick={() => savePlanSettings(plan.value)}
+                          disabled={planSettingsSaving[plan.value]}
+                        >
+                          {planSettingsSaving[plan.value] ? "Sparar..." : "Spara plan"}
+                        </Button>
+                      </div>
+                    </TabsContent>
+                  );
+                })}
+              </Tabs>
+            )}
+          </CardContent>
+        </Card>
 
         <Card className="border-slate-800/80 bg-slate-900/70 text-slate-100">
           <CardHeader className="space-y-4">
@@ -1006,6 +1186,7 @@ const SuperAdminDashboard = () => {
                 <TableRow className="border-slate-800">
                   <TableHead className="text-slate-400">Företag</TableHead>
                   <TableHead className="text-slate-400">Faktura-email</TableHead>
+                  <TableHead className="text-slate-400">Plan</TableHead>
                   <TableHead className="text-slate-400">Kod</TableHead>
                   <TableHead className="text-slate-400">Användare</TableHead>
                   <TableHead className="text-slate-400">Skapat</TableHead>
@@ -1017,6 +1198,7 @@ const SuperAdminDashboard = () => {
                   <TableRow key={company.id} className="border-slate-800">
                     <TableCell className="font-medium">{company.name}</TableCell>
                     <TableCell className="text-sm text-slate-400">{company.billing_email || "-"}</TableCell>
+                    <TableCell className="text-sm text-slate-300">{company.plan || "Bas"}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <code className="bg-slate-800/70 px-2 py-1 rounded text-slate-200">{company.code || "—"}</code>
@@ -1078,6 +1260,24 @@ const SuperAdminDashboard = () => {
                   placeholder="t.ex. ABC123"
                   className="text-slate-900 placeholder:text-slate-400"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Plan</Label>
+                <Select
+                  value={editingCompany.plan || "Bas"}
+                  onValueChange={(value) => setEditingCompany({ ...editingCompany, plan: value })}
+                >
+                  <SelectTrigger className="border-slate-800 bg-slate-950/70 text-slate-100">
+                    <SelectValue placeholder="Välj plan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PLAN_OPTIONS.map((plan) => (
+                      <SelectItem key={plan.value} value={plan.value}>
+                        {plan.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label className="text-blue-200">Företagsadmin</Label>

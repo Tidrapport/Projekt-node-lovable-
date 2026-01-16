@@ -4,6 +4,40 @@ const bcrypt = require("bcryptjs");
 
 const db = new sqlite3.Database("./opero.db");
 
+const DEFAULT_PLAN_FEATURES = {
+  Bas: ["dashboard", "time_reports", "work_orders"],
+  Pro: ["dashboard", "time_reports", "work_orders", "welding_reports", "offers"],
+  Entreprise: [
+    "dashboard",
+    "time_reports",
+    "work_orders",
+    "welding_reports",
+    "offers",
+    "planning",
+    "deviations",
+    "salary_overview",
+    "contacts",
+    "projects",
+    "admin_users",
+    "attestation",
+    "billing",
+    "job_roles",
+    "material_types",
+    "ob_settings",
+    "statistics",
+    "customers",
+    "documents",
+    "invoice_settings",
+    "invoice_marking",
+    "price_list",
+    "time_report_settings",
+    "menu_settings",
+    "activity_log",
+    "admin_hub",
+    "salaries"
+  ]
+};
+
 db.serialize(() => {
   // Slå på foreign keys (bra vana)
   db.run(`PRAGMA foreign_keys = ON;`);
@@ -14,6 +48,8 @@ db.serialize(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       code TEXT UNIQUE,
+      plan TEXT DEFAULT 'Bas',
+      features TEXT,
       billing_email TEXT,
       address_line1 TEXT,
       address_line2 TEXT,
@@ -31,15 +67,45 @@ db.serialize(() => {
       invoice_payment_terms TEXT,
       invoice_our_reference TEXT,
       invoice_late_interest TEXT,
+      menu_settings TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // --- Plan settings ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS plan_settings (
+      plan TEXT PRIMARY KEY,
+      features TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  Object.entries(DEFAULT_PLAN_FEATURES).forEach(([plan, features]) => {
+    db.run(
+      `INSERT OR IGNORE INTO plan_settings (plan, features) VALUES (?, ?)`,
+      [plan, JSON.stringify(features || [])]
+    );
+  });
 
   // Lägg till ev. saknade kolumner i companies
   db.all(`PRAGMA table_info(companies);`, (err, columns) => {
     if (err) {
       console.error("Kunde inte läsa schema för companies:", err);
       return;
+    }
+    const hasPlan = columns.some((col) => col.name === "plan");
+    if (!hasPlan) {
+      db.run(`ALTER TABLE companies ADD COLUMN plan TEXT DEFAULT 'Bas';`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till plan:", alterErr);
+        else db.run(`UPDATE companies SET plan = 'Bas' WHERE plan IS NULL;`);
+      });
+    }
+    const hasFeatures = columns.some((col) => col.name === "features");
+    if (!hasFeatures) {
+      db.run(`ALTER TABLE companies ADD COLUMN features TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till features:", alterErr);
+      });
     }
     const hasBilling = columns.some((col) => col.name === "billing_email");
     if (!hasBilling) {
@@ -142,6 +208,12 @@ db.serialize(() => {
     if (!hasInvoiceLateInterest) {
       db.run(`ALTER TABLE companies ADD COLUMN invoice_late_interest TEXT;`, (alterErr) => {
         if (alterErr) console.error("Kunde inte lägga till invoice_late_interest:", alterErr);
+      });
+    }
+    const hasMenuSettings = columns.some((col) => col.name === "menu_settings");
+    if (!hasMenuSettings) {
+      db.run(`ALTER TABLE companies ADD COLUMN menu_settings TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till menu_settings:", alterErr);
       });
     }
     const hasCreatedAt = columns.some((col) => col.name === "created_at");
