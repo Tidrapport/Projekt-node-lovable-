@@ -262,6 +262,7 @@ db.serialize(() => {
       emergency_contact TEXT,
       employee_type TEXT,
       employee_number TEXT,
+      fortnox_employee_id TEXT,
       tax_table INTEGER,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (company_id) REFERENCES companies(id)
@@ -326,6 +327,13 @@ db.serialize(() => {
       db.run(`ALTER TABLE users ADD COLUMN employee_number TEXT;`, (alterErr) => {
         if (alterErr) console.error("Kunde inte lägga till employee_number:", alterErr);
         else console.log('Kolumnen "employee_number" har lagts till i users.');
+      });
+    }
+    const hasFortnoxEmployeeId = columns.some((col) => col.name === "fortnox_employee_id");
+    if (!hasFortnoxEmployeeId) {
+      db.run(`ALTER TABLE users ADD COLUMN fortnox_employee_id TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till fortnox_employee_id:", alterErr);
+        else console.log('Kolumnen "fortnox_employee_id" har lagts till i users.');
       });
     }
     const hasTaxTable = columns.some((col) => col.name === "tax_table");

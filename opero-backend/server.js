@@ -726,12 +726,16 @@ async function fetchFortnoxEmployees(accessToken) {
 
   return collected
     .map((employee) => {
-      const employeeNumber =
+      const employeeNumber = normalizeIdentifier(
+        employee?.EmployeeNumber ??
+          employee?.EmployeeNo ??
+          employee?.EmployeeNr ??
+          employee?.EmployeeCode
+      );
+      const fortnoxEmployeeId =
         normalizeIdentifier(
-          employee?.EmployeeNumber ??
-            employee?.EmployeeId ??
+          employee?.EmployeeId ??
             employee?.EmployeeID ??
-            employee?.EmployeeNo ??
             employee?.Id
         ) ||
         normalizeIdentifier(
@@ -741,20 +745,29 @@ async function fetchFortnoxEmployees(accessToken) {
               employee?.URL ??
               employee?.Url
           )
-        );
+        ) ||
+        employeeNumber;
       const firstName = toText(employee?.FirstName ?? employee?.GivenName ?? employee?.First);
       const lastName = toText(employee?.LastName ?? employee?.Surname ?? employee?.Last);
       const fullName = toText(employee?.Name ?? employee?.FullName);
       const nameParts = fullName ? splitName(fullName) : { first: null, last: null };
       return {
         employee_number: employeeNumber,
+        fortnox_employee_id: fortnoxEmployeeId,
         first_name: firstName || nameParts.first,
         last_name: lastName || nameParts.last,
         email: toText(employee?.Email ?? employee?.EmailAddress),
         phone: toText(employee?.Phone1 ?? employee?.Phone ?? employee?.Mobile ?? employee?.Cellphone ?? employee?.CellPhone),
       };
     })
-    .filter((employee) => employee.employee_number || employee.email || employee.first_name || employee.last_name);
+    .filter(
+      (employee) =>
+        employee.employee_number ||
+        employee.fortnox_employee_id ||
+        employee.email ||
+        employee.first_name ||
+        employee.last_name
+    );
 }
 
 function hasFortnoxConnection(companyId) {
@@ -6031,7 +6044,7 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
 
     const existingRows = await new Promise((resolve, reject) => {
       db.all(
-        "SELECT id, email, employee_number FROM users WHERE company_id = ?",
+        "SELECT id, email, employee_number, fortnox_employee_id FROM users WHERE company_id = ?",
         [targetCompanyId],
         (err, rows) => {
           if (err) return reject(err);
@@ -6041,11 +6054,14 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
     });
     const existingByEmail = new Map();
     const existingByEmployeeNumber = new Map();
+    const existingByFortnoxId = new Map();
     existingRows.forEach((row) => {
       const email = String(row?.email || "").trim().toLowerCase();
       const employeeNumber = String(row?.employee_number || "").trim();
+      const fortnoxEmployeeId = String(row?.fortnox_employee_id || "").trim();
       if (email) existingByEmail.set(email, row.id);
       if (employeeNumber) existingByEmployeeNumber.set(employeeNumber, row.id);
+      if (fortnoxEmployeeId) existingByFortnoxId.set(fortnoxEmployeeId, row.id);
     });
 
     const runAsync = (sql, params = []) =>
@@ -6067,9 +6083,10 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
       const trimmed = String(value || "").trim();
       return trimmed || null;
     };
-    const buildFallbackEmail = (employeeNumber) => {
-      if (!employeeNumber) return null;
-      const token = String(employeeNumber).trim().replace(/[^a-zA-Z0-9._-]/g, "-");
+    const buildFallbackEmail = (employeeNumber, fortnoxEmployeeId) => {
+      const base = employeeNumber || fortnoxEmployeeId;
+      if (!base) return null;
+      const token = String(base).trim().replace(/[^a-zA-Z0-9._-]/g, "-");
       return token ? `fortnox-${targetCompanyId}-${token}@opero.local` : null;
     };
 
@@ -6084,11 +6101,13 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
       for (const employee of employees) {
         const email = employee.email ? String(employee.email).trim().toLowerCase() : null;
         const employeeNumber = employee.employee_number ? String(employee.employee_number).trim() : null;
-        const fallbackEmail = buildFallbackEmail(employeeNumber);
+        const fortnoxEmployeeId = employee.fortnox_employee_id ? String(employee.fortnox_employee_id).trim() : null;
+        const fallbackEmail = buildFallbackEmail(employeeNumber, fortnoxEmployeeId);
         const effectiveEmail = email || fallbackEmail;
         const existingId =
           (email && existingByEmail.get(email)) ||
           (employeeNumber && existingByEmployeeNumber.get(employeeNumber)) ||
+          (fortnoxEmployeeId && existingByFortnoxId.get(fortnoxEmployeeId)) ||
           null;
 
         if (existingId) {
@@ -6097,13 +6116,15 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
              SET first_name = COALESCE(?, first_name),
                  last_name = COALESCE(?, last_name),
                  phone = COALESCE(?, phone),
-                 employee_number = COALESCE(?, employee_number)
+                 employee_number = COALESCE(?, employee_number),
+                 fortnox_employee_id = COALESCE(?, fortnox_employee_id)
              WHERE id = ? AND company_id = ?`,
             [
               safeName(employee.first_name),
               safeName(employee.last_name),
               safeName(employee.phone),
               employeeNumber,
+              fortnoxEmployeeId,
               existingId,
               targetCompanyId,
             ]
@@ -6112,7 +6133,7 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
           continue;
         }
 
-        if (!effectiveEmail && !employeeNumber) {
+        if (!effectiveEmail && !employeeNumber && !fortnoxEmployeeId) {
           skipped += 1;
           skippedMissingIdentifier += 1;
           continue;
@@ -6123,8 +6144,8 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
         try {
           const result = await runAsync(
             `INSERT INTO users
-              (username, email, password, role, company_id, first_name, last_name, phone, employee_number)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (username, email, password, role, company_id, first_name, last_name, phone, employee_number, fortnox_employee_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               effectiveEmail,
               effectiveEmail,
@@ -6135,11 +6156,13 @@ app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) 
               safeName(employee.last_name) || "-",
               safeName(employee.phone),
               employeeNumber,
+              fortnoxEmployeeId,
             ]
           );
           imported += 1;
           if (effectiveEmail) existingByEmail.set(effectiveEmail, result.lastID);
           if (employeeNumber) existingByEmployeeNumber.set(employeeNumber, result.lastID);
+          if (fortnoxEmployeeId) existingByFortnoxId.set(fortnoxEmployeeId, result.lastID);
         } catch (err) {
           const message = String(err?.message || "");
           if (message.includes("UNIQUE")) {

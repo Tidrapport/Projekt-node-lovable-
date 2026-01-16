@@ -141,19 +141,23 @@ const AdminUsers = () => {
       const skippedDuplicate = Number(data?.skipped_duplicate ?? 0);
       const totalValue = Number(data?.total);
       const total = Number.isFinite(totalValue) ? totalValue : imported + updated + skipped;
-      if (!imported && !updated) {
-        toast.error("Inga Fortnox-anställda hittades.");
-      } else {
-        const detailParts = [`Skapade ${imported}`, `uppdaterade ${updated}`];
-        if (skipped) {
-          if (skippedMissingIdentifier) {
-            detailParts.push(`hoppade över ${skippedMissingIdentifier} utan e-post/anställningsnummer`);
-          } else if (skippedDuplicate) {
-            detailParts.push(`hoppade över ${skippedDuplicate} dubletter`);
-          } else {
-            detailParts.push(`hoppade över ${skipped}`);
-          }
+      const detailParts = [`Skapade ${imported}`, `uppdaterade ${updated}`];
+      if (skipped) {
+        if (skippedMissingIdentifier) {
+          detailParts.push(`hoppade över ${skippedMissingIdentifier} utan e-post/anställningsnummer`);
+        } else if (skippedDuplicate) {
+          detailParts.push(`hoppade över ${skippedDuplicate} dubletter`);
+        } else {
+          detailParts.push(`hoppade över ${skipped}`);
         }
+      }
+      if (!imported && !updated) {
+        if (total > 0) {
+          toast.success(data?.message || `Hämtade ${total} anställda från Fortnox. Inga nya användare. ${detailParts.join(", ")}.`);
+        } else {
+          toast.error("Inga Fortnox-anställda hittades.");
+        }
+      } else {
         toast.success(data?.message || `Hämtade ${total} anställda från Fortnox. ${detailParts.join(", ")}.`);
       }
       await fetchUsers();
