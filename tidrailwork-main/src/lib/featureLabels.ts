@@ -4,6 +4,7 @@ export const FEATURE_OPTIONS = [
   { key: "work_orders", label: "Arbetsordrar" },
   { key: "planning", label: "Planering" },
   { key: "deviations", label: "Avvikelser" },
+  { key: "self_checks", label: "Egenkontroll" },
   { key: "welding_reports", label: "Svetsrapporter" },
   { key: "salary_overview", label: "Lönöversikt" },
   { key: "contacts", label: "Kontakter" },

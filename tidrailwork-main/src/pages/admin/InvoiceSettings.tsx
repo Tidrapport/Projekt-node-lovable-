@@ -25,6 +25,7 @@ const InvoiceSettings = () => {
   const [disconnecting, setDisconnecting] = useState(false);
   const [showConnectedBanner, setShowConnectedBanner] = useState(false);
   const [allowedScopes, setAllowedScopes] = useState<string[]>([]);
+  const [availableScopes, setAvailableScopes] = useState<string[]>([]);
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [showScopePicker, setShowScopePicker] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
@@ -58,6 +59,12 @@ const InvoiceSettings = () => {
   }, [showConnectedBanner, navigate]);
 
   const scopeLabels: Record<string, string> = {
+    asset: "Anläggningsregister",
+    employee: "Anställda",
+    employer: "Arbetsgivare",
+    supplierinvoice: "Leverantörsfakturor",
+    supplier: "Leverantörer",
+    profile: "Profil",
     customer: "Kund",
     invoice: "Faktura",
     offer: "Offert",
@@ -65,13 +72,52 @@ const InvoiceSettings = () => {
     article: "Artikel",
     salary: "Lön",
     archive: "Arkivplats",
+    project: "Projekt",
     time: "Tid",
+    price: "Pris",
+    file: "Koppla filer",
+    settings: "Inställningar",
+    inbox: "Inbox",
+    payment: "Betalningar",
   };
+  const optionalScopes = new Set([
+    "asset",
+    "supplierinvoice",
+    "supplier",
+    "employer",
+    "time",
+    "price",
+    "file",
+    "settings",
+    "inbox",
+    "payment",
+  ]);
   const scopeSource = status?.scope
     ? status.scope.split(" ")
     : allowedScopes.length
       ? allowedScopes
-      : ["customer", "invoice", "offer", "order", "article", "salary", "archive"];
+      : [
+          "profile",
+          "customer",
+          "invoice",
+          "offer",
+          "order",
+          "article",
+          "salary",
+          "archive",
+          "project",
+          "employee",
+          "employer",
+          "asset",
+          "supplierinvoice",
+          "supplier",
+          "time",
+          "price",
+          "file",
+          "settings",
+          "inbox",
+          "payment",
+        ];
   const connectedScopes = scopeSource
     .map((scope) => scopeLabels[scope])
     .filter(Boolean);
@@ -185,12 +231,15 @@ const InvoiceSettings = () => {
       const query = isSuperAdmin && companyId ? `?company_id=${companyId}` : "";
       const [data, scopesData] = await Promise.all([
         apiFetch<FortnoxStatus>(`/admin/fortnox/status${query}`),
-        apiFetch<{ allowed: string[] }>("/admin/fortnox/scopes"),
+        apiFetch<{ allowed: string[]; available?: string[] }>("/admin/fortnox/scopes"),
       ]);
       setStatus(data || { connected: false });
       const nextAllowed = scopesData?.allowed || [];
+      const nextAvailable = scopesData?.available || nextAllowed;
       setAllowedScopes(nextAllowed);
-      setSelectedScopes((prev) => (prev.length ? prev : nextAllowed));
+      setAvailableScopes(nextAvailable);
+      const defaultSelection = nextAllowed.filter((scope) => !optionalScopes.has(scope));
+      setSelectedScopes((prev) => (prev.length ? prev : defaultSelection));
     } catch (err: any) {
       console.error("Kunde inte läsa Fortnox-status:", err);
       toast.error(err.message || "Kunde inte läsa Fortnox-status");
@@ -314,20 +363,32 @@ const InvoiceSettings = () => {
                 </div>
                 {showScopePicker && (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {allowedScopes.map((scope) => (
-                      <label key={scope} className="flex items-center gap-2 text-sm">
+                    {(availableScopes.length ? availableScopes : allowedScopes).map((scope) => {
+                      const isAllowed = allowedScopes.includes(scope);
+                      return (
+                        <label key={scope} className="flex items-center gap-2 text-sm">
                         <Checkbox
+                          disabled={!isAllowed}
                           checked={selectedScopes.includes(scope)}
                           onCheckedChange={(checked) => {
+                            if (!isAllowed) return;
                             setSelectedScopes((prev) => {
                               if (checked) return Array.from(new Set([...prev, scope]));
                               return prev.filter((value) => value !== scope);
                             });
                           }}
                         />
-                        <span>{scopeLabels[scope] || scope}</span>
-                      </label>
-                    ))}
+                        <span className={!isAllowed ? "text-muted-foreground" : ""}>
+                          {scopeLabels[scope] || scope}
+                        </span>
+                        </label>
+                      );
+                    })}
+                    {availableScopes.some((scope) => !allowedScopes.includes(scope)) && (
+                      <p className="col-span-full text-xs text-muted-foreground">
+                        Vissa behörigheter är inaktiva tills de är aktiverade i Fortnox och i serverns scope-lista.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

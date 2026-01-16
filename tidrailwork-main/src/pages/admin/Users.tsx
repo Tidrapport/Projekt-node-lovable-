@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiFetch } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Users as UsersIcon, Shield, User, Phone, UserPlus, Pencil, Trash2, Key } from "lucide-react";
+import { Users as UsersIcon, Shield, User, Phone, UserPlus, Pencil, Trash2, Key, Download } from "lucide-react";
 import { format } from "date-fns";
 import { sv } from "date-fns/locale";
 
@@ -48,6 +48,7 @@ const AdminUsers = () => {
   const { companyId, isAdmin, isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncingEmployees, setSyncingEmployees] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
@@ -114,6 +115,52 @@ const AdminUsers = () => {
       toast.error(err.message || "Kunde inte hämta användare");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const syncEmployeesFromFortnox = async () => {
+    if (!targetCompanyId) {
+      toast.error("Välj ett företag först");
+      return;
+    }
+    setSyncingEmployees(true);
+    try {
+      const query = isSuperAdmin ? `?company_id=${targetCompanyId}` : "";
+      const data = await apiFetch<{
+        imported?: number;
+        updated?: number;
+        skipped?: number;
+        skipped_missing_email?: number;
+        total?: number;
+        message?: string;
+      }>(`/admin/fortnox/employees${query}`);
+      const imported = Number(data?.imported ?? 0);
+      const updated = Number(data?.updated ?? 0);
+      const skipped = Number(data?.skipped ?? 0);
+      const skippedMissingIdentifier = Number(data?.skipped_missing_identifier ?? data?.skipped_missing_email ?? 0);
+      const skippedDuplicate = Number(data?.skipped_duplicate ?? 0);
+      const totalValue = Number(data?.total);
+      const total = Number.isFinite(totalValue) ? totalValue : imported + updated + skipped;
+      if (!imported && !updated) {
+        toast.error("Inga Fortnox-anställda hittades.");
+      } else {
+        const detailParts = [`Skapade ${imported}`, `uppdaterade ${updated}`];
+        if (skipped) {
+          if (skippedMissingIdentifier) {
+            detailParts.push(`hoppade över ${skippedMissingIdentifier} utan e-post/anställningsnummer`);
+          } else if (skippedDuplicate) {
+            detailParts.push(`hoppade över ${skippedDuplicate} dubletter`);
+          } else {
+            detailParts.push(`hoppade över ${skipped}`);
+          }
+        }
+        toast.success(data?.message || `Hämtade ${total} anställda från Fortnox. ${detailParts.join(", ")}.`);
+      }
+      await fetchUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte hämta anställda från Fortnox");
+    } finally {
+      setSyncingEmployees(false);
     }
   };
 
@@ -276,6 +323,19 @@ const AdminUsers = () => {
     }
   };
 
+  const handleHardDelete = async (user: UserRow) => {
+    const label = user.full_name || user.email || "användaren";
+    const confirmed = window.confirm(`Ta bort ${label} permanent? Detta kan inte ångras.`);
+    if (!confirmed) return;
+    try {
+      await apiFetch(`/admin/users/${user.id}?hard=1`, { method: "DELETE" });
+      toast.success("Användare borttagen permanent");
+      fetchUsers();
+    } catch (err: any) {
+      toast.error(err.message || "Kunde inte ta bort användare permanent");
+    }
+  };
+
   const handleReactivate = async (userId: string | number) => {
     try {
       await apiFetch(`/admin/users/${userId}/reactivate`, { method: "POST" });
@@ -337,13 +397,22 @@ const AdminUsers = () => {
               </Select>
             </div>
           )}
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2">
-                <UserPlus className="h-4 w-4" />
-                Lägg till användare
-              </Button>
-            </DialogTrigger>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <Button
+              className="gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+              onClick={syncEmployeesFromFortnox}
+              disabled={syncingEmployees || loading}
+            >
+              <Download className="h-4 w-4" />
+              {syncingEmployees ? "Hämtar..." : "Hämta från Fortnox"}
+            </Button>
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="gap-2">
+                  <UserPlus className="h-4 w-4" />
+                  Lägg till användare
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Ny användare</DialogTitle>
@@ -433,7 +502,8 @@ const AdminUsers = () => {
                 </Button>
               </div>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
         </div>
       </div>
 
@@ -528,9 +598,19 @@ const AdminUsers = () => {
                             Återställ lösenord
                           </Button>
                           {inactive ? (
-                            <Button variant="outline" size="sm" onClick={() => handleReactivate(user.id)}>
-                              Aktivera
-                            </Button>
+                            <>
+                              <Button variant="outline" size="sm" onClick={() => handleReactivate(user.id)}>
+                                Aktivera
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleHardDelete(user)}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Ta bort permanent
+                              </Button>
+                            </>
                           ) : (
                             <Button
                               variant="outline"

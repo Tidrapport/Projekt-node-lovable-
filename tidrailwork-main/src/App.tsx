@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import TimeReports from "./pages/TimeReports";
 import Planning from "./pages/Planning";
 import Deviations from "./pages/Deviations";
+import SelfChecks from "./pages/SelfChecks";
 import SalaryOverview from "./pages/SalaryOverview";
 import WorkOrders from "./pages/WorkOrders";
 import ChangePassword from "./pages/ChangePassword";
@@ -25,6 +26,7 @@ import AdminMaterialTypes from "./pages/admin/MaterialTypes";
 import AdminPlanning from "./pages/admin/Planning";
 import AdminTimeAttestations from "./pages/admin/TimeAttestations";
 import AdminDeviations from "./pages/admin/Deviations";
+import AdminSelfChecks from "./pages/admin/SelfChecks";
 import AdminOBSettings from "./pages/admin/OBSettings";
 import AdminInvoiceSettings from "./pages/admin/InvoiceSettings";
 import AdminPriceList from "./pages/admin/PriceList";
@@ -144,6 +146,18 @@ const App = () => (
                     <FeatureRoute feature="deviations">
                       <Layout>
                         <Deviations />
+                      </Layout>
+                    </FeatureRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/self-checks"
+                element={
+                  <ProtectedRoute>
+                    <FeatureRoute feature="self_checks">
+                      <Layout>
+                        <SelfChecks />
                       </Layout>
                     </FeatureRoute>
                   </ProtectedRoute>
@@ -334,6 +348,18 @@ const App = () => (
                     <FeatureRoute feature="deviations">
                       <Layout>
                         <AdminDeviations />
+                      </Layout>
+                    </FeatureRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/self-checks"
+                element={
+                  <ProtectedRoute>
+                    <FeatureRoute feature="self_checks">
+                      <Layout>
+                        <AdminSelfChecks />
                       </Layout>
                     </FeatureRoute>
                   </ProtectedRoute>

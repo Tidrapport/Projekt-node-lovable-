@@ -1538,6 +1538,55 @@ db.serialize(() => {
     )
   `);
 
+  // --- Self-check requirements & submissions ---
+  db.run(`
+    CREATE TABLE IF NOT EXISTS self_check_requirements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      project_id INTEGER NOT NULL,
+      subproject_id INTEGER,
+      required INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(company_id, project_id, subproject_id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS self_check_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      project_id INTEGER,
+      subproject_id INTEGER,
+      label TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS self_check_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      project_id INTEGER NOT NULL,
+      subproject_id INTEGER,
+      user_id INTEGER NOT NULL,
+      notes TEXT,
+      submitted_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS self_check_submission_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      submission_id INTEGER NOT NULL,
+      item_id INTEGER,
+      label TEXT,
+      checked INTEGER DEFAULT 0,
+      comment TEXT
+    )
+  `);
+
   // --- Fortnox salary codes & mappings ---
   db.run(`
     CREATE TABLE IF NOT EXISTS fortnox_salary_codes (

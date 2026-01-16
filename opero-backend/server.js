@@ -75,7 +75,22 @@ const FORTNOX_SCOPE = process.env.FORTNOX_SCOPE || "";
 const FORTNOX_SUCCESS_REDIRECT = process.env.FORTNOX_SUCCESS_REDIRECT;
 const FORTNOX_PAYROLL_PATH = process.env.FORTNOX_PAYROLL_PATH || "/archive";
 const FORTNOX_REQUIRED_SCOPES = ["customer", "offer", "archive"];
+const FORTNOX_RECOMMENDED_SCOPES = ["profile", "project"];
+const FORTNOX_OPTIONAL_SCOPES = [
+  "asset",
+  "employee",
+  "employer",
+  "supplierinvoice",
+  "supplier",
+  "time",
+  "price",
+  "file",
+  "settings",
+  "inbox",
+  "payment",
+];
 const FORTNOX_CUSTOMER_SCOPE_ALIASES = ["customer", "customers"];
+const FORTNOX_EMPLOYEE_SCOPE_ALIASES = ["employee", "employees", "salary", "payroll"];
 
 console.log("Fortnox config:", {
   authUrl: FORTNOX_AUTH_URL,
@@ -115,8 +130,8 @@ function generateCompanyCode() {
 }
 
 const DEFAULT_PLAN_FEATURES = {
-  Bas: ["dashboard", "time_reports", "work_orders"],
-  Pro: ["dashboard", "time_reports", "work_orders", "welding_reports", "offers"],
+  Bas: ["dashboard", "time_reports", "work_orders", "self_checks"],
+  Pro: ["dashboard", "time_reports", "work_orders", "welding_reports", "offers", "self_checks"],
   Entreprise: [
     "dashboard",
     "time_reports",
@@ -125,6 +140,7 @@ const DEFAULT_PLAN_FEATURES = {
     "offers",
     "planning",
     "deviations",
+    "self_checks",
     "salary_overview",
     "contacts",
     "projects",
@@ -155,6 +171,7 @@ const AVAILABLE_FEATURES = [
   "offers",
   "planning",
   "deviations",
+  "self_checks",
   "salary_overview",
   "contacts",
   "projects",
@@ -362,15 +379,43 @@ function getFortnoxCredentials() {
   };
 }
 
-function getAllowedFortnoxScopes() {
-  const scopes = String(FORTNOX_SCOPE || "")
+function parseFortnoxScopeEnv() {
+  return String(FORTNOX_SCOPE || "")
     .split(/\s+/)
     .map((scope) => scope.trim())
     .filter(Boolean);
+}
+
+function getFortnoxDefaultScopes() {
+  const scopes = [];
   FORTNOX_REQUIRED_SCOPES.forEach((required) => {
     if (!scopes.includes(required)) scopes.push(required);
   });
+  FORTNOX_RECOMMENDED_SCOPES.forEach((recommended) => {
+    if (!scopes.includes(recommended)) scopes.push(recommended);
+  });
+  FORTNOX_OPTIONAL_SCOPES.forEach((optional) => {
+    if (!scopes.includes(optional)) scopes.push(optional);
+  });
   return scopes;
+}
+
+function getFortnoxScopeConfig() {
+  const envScopes = parseFortnoxScopeEnv();
+  const defaultScopes = getFortnoxDefaultScopes();
+  const allowedScopes = envScopes.length ? envScopes : defaultScopes;
+  const availableScopes = envScopes.length
+    ? Array.from(new Set([...defaultScopes, ...envScopes]))
+    : defaultScopes;
+  return { allowedScopes, availableScopes };
+}
+
+function getAllowedFortnoxScopes() {
+  return getFortnoxScopeConfig().allowedScopes;
+}
+
+function getAvailableFortnoxScopes() {
+  return getFortnoxScopeConfig().availableScopes;
 }
 
 function buildFortnoxAuthUrl({ clientId, redirectUri, state, scope }) {
@@ -616,6 +661,102 @@ async function fetchFortnoxCustomers(accessToken) {
     .filter((customer) => customer.customer_number || customer.name);
 }
 
+async function fetchFortnoxEmployees(accessToken) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
+  };
+  const parseMetaNumber = (value) => {
+    const numeric = Number(String(value || "").replace(/[^0-9]/g, ""));
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+  const toText = (value) => {
+    const textValue = String(value ?? "").trim();
+    return textValue ? textValue : null;
+  };
+  const normalizeIdentifier = (value) => {
+    const textValue = String(value ?? "").trim();
+    if (!textValue || textValue === "0") return null;
+    return textValue;
+  };
+  const extractIdFromUrl = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return null;
+    const match = text.match(/\/employees\/([^/?#]+)$/i) || text.match(/\/employees\/([^/?#]+)/i);
+    return match ? match[1] : null;
+  };
+  const splitName = (name) => {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return { first: null, last: null };
+    if (parts.length === 1) return { first: parts[0], last: null };
+    return { first: parts[0], last: parts.slice(1).join(" ") };
+  };
+  let page = 1;
+  let totalPages = 1;
+  const collected = [];
+
+  while (page <= totalPages) {
+    const url = new URL(`${FORTNOX_API_BASE}/employees`);
+    url.searchParams.set("page", String(page));
+    const response = await fetch(url.toString(), { headers });
+    const text = await response.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+    if (!response.ok) {
+      const message =
+        data?.ErrorInformation?.Message ||
+        data?.ErrorInformation?.message ||
+        data?.error ||
+        text ||
+        "Fortnox error";
+      throw new Error(message);
+    }
+    const batch = Array.isArray(data?.Employees) ? data.Employees : [];
+    collected.push(...batch);
+    const meta = data?.MetaInformation || {};
+    const parsedTotal = parseMetaNumber(meta["@TotalPages"] ?? meta.TotalPages ?? meta.totalPages);
+    if (parsedTotal) totalPages = parsedTotal;
+    if (!parsedTotal && batch.length === 0) break;
+    page += 1;
+  }
+
+  return collected
+    .map((employee) => {
+      const employeeNumber =
+        normalizeIdentifier(
+          employee?.EmployeeNumber ??
+            employee?.EmployeeId ??
+            employee?.EmployeeID ??
+            employee?.EmployeeNo ??
+            employee?.Id
+        ) ||
+        normalizeIdentifier(
+          extractIdFromUrl(
+            employee?.["@url"] ??
+              employee?.url ??
+              employee?.URL ??
+              employee?.Url
+          )
+        );
+      const firstName = toText(employee?.FirstName ?? employee?.GivenName ?? employee?.First);
+      const lastName = toText(employee?.LastName ?? employee?.Surname ?? employee?.Last);
+      const fullName = toText(employee?.Name ?? employee?.FullName);
+      const nameParts = fullName ? splitName(fullName) : { first: null, last: null };
+      return {
+        employee_number: employeeNumber,
+        first_name: firstName || nameParts.first,
+        last_name: lastName || nameParts.last,
+        email: toText(employee?.Email ?? employee?.EmailAddress),
+        phone: toText(employee?.Phone1 ?? employee?.Phone ?? employee?.Mobile ?? employee?.Cellphone ?? employee?.CellPhone),
+      };
+    })
+    .filter((employee) => employee.employee_number || employee.email || employee.first_name || employee.last_name);
+}
+
 function hasFortnoxConnection(companyId) {
   return new Promise((resolve) => {
     db.get(
@@ -651,6 +792,11 @@ function normalizeFortnoxScopeList(scopeValue) {
 function hasFortnoxCustomerScope(scopeValue) {
   const scopes = normalizeFortnoxScopeList(scopeValue);
   return FORTNOX_CUSTOMER_SCOPE_ALIASES.some((alias) => scopes.includes(alias));
+}
+
+function hasFortnoxEmployeeScope(scopeValue) {
+  const scopes = normalizeFortnoxScopeList(scopeValue);
+  return FORTNOX_EMPLOYEE_SCOPE_ALIASES.some((alias) => scopes.includes(alias));
 }
 
 /**
@@ -2409,6 +2555,432 @@ app.delete("/subprojects/:id", requireAuth, requireAdmin, (req, res) => {
 });
 
 // ======================
+// SELF CHECKS (Egenkontroll)
+// ======================
+const runDb = (sql, params = []) =>
+  new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+const getDb = (sql, params = []) =>
+  new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row || null);
+    });
+  });
+const allDb = (sql, params = []) =>
+  new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows || []);
+    });
+  });
+
+app.get("/admin/self-check/requirements", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const requirements = await allDb(
+      `SELECT r.id, r.project_id, r.subproject_id, r.required
+       FROM self_check_requirements r
+       WHERE r.company_id = ?
+         AND r.id IN (
+           SELECT MAX(id)
+           FROM self_check_requirements
+           WHERE company_id = ?
+           GROUP BY project_id, subproject_id
+         )`,
+      [targetCompanyId, targetCompanyId]
+    );
+    res.json({ requirements });
+  } catch (err) {
+    console.error("DB-fel vid GET /admin/self-check/requirements:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.post("/admin/self-check/requirements", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const { project_id, subproject_id, required } = req.body || {};
+    if (!project_id) return res.status(400).json({ error: "project_id required" });
+    const requiredValue = required === false || Number(required) === 0 ? 0 : 1;
+
+    const project = await getDb("SELECT id FROM projects WHERE id = ? AND company_id = ?", [
+      project_id,
+      targetCompanyId,
+    ]);
+    if (!project) return res.status(400).json({ error: "Invalid project_id" });
+
+    if (subproject_id) {
+      const subproject = await getDb(
+        "SELECT id, project_id FROM subprojects WHERE id = ? AND company_id = ?",
+        [subproject_id, targetCompanyId]
+      );
+      if (!subproject) return res.status(400).json({ error: "Invalid subproject_id" });
+      if (String(subproject.project_id) !== String(project_id)) {
+        return res.status(400).json({ error: "Subproject does not belong to project" });
+      }
+    }
+
+    const subprojectValue = subproject_id ? Number(subproject_id) : null;
+    const updateSql = subprojectValue
+      ? "UPDATE self_check_requirements SET required = ? WHERE company_id = ? AND project_id = ? AND subproject_id = ?"
+      : "UPDATE self_check_requirements SET required = ? WHERE company_id = ? AND project_id = ? AND subproject_id IS NULL";
+    const updateParams = subprojectValue
+      ? [requiredValue, targetCompanyId, project_id, subprojectValue]
+      : [requiredValue, targetCompanyId, project_id];
+
+    const updateResult = await runDb(updateSql, updateParams);
+    if (updateResult?.changes) {
+      return res.json({ success: true, updated: true });
+    }
+
+    await runDb(
+      `INSERT INTO self_check_requirements (company_id, project_id, subproject_id, required)
+       VALUES (?, ?, ?, ?)`,
+      [targetCompanyId, project_id, subprojectValue, requiredValue]
+    );
+    return res.json({ success: true, created: true });
+  } catch (err) {
+    console.error("DB-fel vid POST /admin/self-check/requirements:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.get("/admin/self-check/items", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const items = await allDb(
+      "SELECT id, project_id, subproject_id, label, sort_order, is_active FROM self_check_items WHERE company_id = ? ORDER BY sort_order, id",
+      [targetCompanyId]
+    );
+    res.json({ items });
+  } catch (err) {
+    console.error("DB-fel vid GET /admin/self-check/items:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.post("/admin/self-check/items", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const { label, project_id, subproject_id, sort_order } = req.body || {};
+    if (!label || !String(label).trim()) return res.status(400).json({ error: "label required" });
+
+    let resolvedProjectId = project_id || null;
+    if (subproject_id) {
+      const subproject = await getDb(
+        "SELECT id, project_id FROM subprojects WHERE id = ? AND company_id = ?",
+        [subproject_id, targetCompanyId]
+      );
+      if (!subproject) return res.status(400).json({ error: "Invalid subproject_id" });
+      if (resolvedProjectId && String(subproject.project_id) !== String(resolvedProjectId)) {
+        return res.status(400).json({ error: "Subproject does not belong to project" });
+      }
+      resolvedProjectId = resolvedProjectId || subproject.project_id;
+    }
+    if (resolvedProjectId) {
+      const project = await getDb("SELECT id FROM projects WHERE id = ? AND company_id = ?", [
+        resolvedProjectId,
+        targetCompanyId,
+      ]);
+      if (!project) return res.status(400).json({ error: "Invalid project_id" });
+    }
+
+    const result = await runDb(
+      `INSERT INTO self_check_items (company_id, project_id, subproject_id, label, sort_order, is_active)
+       VALUES (?, ?, ?, ?, ?, 1)`,
+      [
+        targetCompanyId,
+        resolvedProjectId || null,
+        subproject_id || null,
+        String(label).trim(),
+        Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0,
+      ]
+    );
+    res.json({ id: result?.lastID });
+  } catch (err) {
+    console.error("DB-fel vid POST /admin/self-check/items:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.put("/admin/self-check/items/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const { label, project_id, subproject_id, sort_order, is_active } = req.body || {};
+    const itemId = req.params.id;
+
+    const existing = await getDb(
+      "SELECT id FROM self_check_items WHERE id = ? AND company_id = ?",
+      [itemId, targetCompanyId]
+    );
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    let resolvedProjectId = project_id ?? null;
+    if (subproject_id) {
+      const subproject = await getDb(
+        "SELECT id, project_id FROM subprojects WHERE id = ? AND company_id = ?",
+        [subproject_id, targetCompanyId]
+      );
+      if (!subproject) return res.status(400).json({ error: "Invalid subproject_id" });
+      if (resolvedProjectId && String(subproject.project_id) !== String(resolvedProjectId)) {
+        return res.status(400).json({ error: "Subproject does not belong to project" });
+      }
+      resolvedProjectId = resolvedProjectId || subproject.project_id;
+    }
+    if (resolvedProjectId) {
+      const project = await getDb("SELECT id FROM projects WHERE id = ? AND company_id = ?", [
+        resolvedProjectId,
+        targetCompanyId,
+      ]);
+      if (!project) return res.status(400).json({ error: "Invalid project_id" });
+    }
+
+    await runDb(
+      `UPDATE self_check_items
+       SET label = COALESCE(?, label),
+           project_id = ?,
+           subproject_id = ?,
+           sort_order = COALESCE(?, sort_order),
+           is_active = COALESCE(?, is_active)
+       WHERE id = ? AND company_id = ?`,
+      [
+        label ? String(label).trim() : null,
+        resolvedProjectId || null,
+        subproject_id || null,
+        Number.isFinite(Number(sort_order)) ? Number(sort_order) : null,
+        typeof is_active === "number" ? is_active : null,
+        itemId,
+        targetCompanyId,
+      ]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DB-fel vid PUT /admin/self-check/items:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.delete("/admin/self-check/items/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const itemId = req.params.id;
+    const result = await runDb(
+      "DELETE FROM self_check_items WHERE id = ? AND company_id = ?",
+      [itemId, targetCompanyId]
+    );
+    if (!result?.changes) return res.status(404).json({ error: "Not found" });
+    res.status(204).end();
+  } catch (err) {
+    console.error("DB-fel vid DELETE /admin/self-check/items:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.get("/self-check/assignments", requireAuth, async (req, res) => {
+  try {
+    const companyId = req.user?.company_id;
+    if (!companyId) return res.status(400).json({ error: "Company not found" });
+
+    const projects = await allDb("SELECT id, name FROM projects WHERE company_id = ?", [companyId]);
+    if (!projects.length) return res.json({ assignments: [] });
+    const projectIds = projects.map((p) => p.id);
+    const projectPlaceholders = projectIds.map(() => "?").join(",");
+    const requirementParams = [...projectIds, ...projectIds];
+    const requirements = await allDb(
+      `SELECT r.project_id, r.subproject_id, r.required
+       FROM self_check_requirements r
+       WHERE r.project_id IN (${projectPlaceholders})
+         AND r.id IN (
+           SELECT MAX(id)
+           FROM self_check_requirements
+           WHERE project_id IN (${projectPlaceholders})
+           GROUP BY project_id, subproject_id
+         )
+         AND r.required = 1`,
+      requirementParams
+    );
+    if (!requirements.length) return res.json({ assignments: [] });
+
+    const [subprojects, items, submissions] = await Promise.all([
+      allDb("SELECT id, project_id, name FROM subprojects WHERE company_id = ?", [companyId]),
+      allDb(
+        `SELECT id, project_id, subproject_id, label, sort_order
+         FROM self_check_items
+         WHERE is_active = 1
+           AND (company_id = ? OR project_id IN (${projectPlaceholders}))
+         ORDER BY sort_order, id`,
+        [companyId, ...projectIds]
+      ),
+      allDb(
+        "SELECT id, project_id, subproject_id, submitted_at FROM self_check_submissions WHERE company_id = ? AND user_id = ? ORDER BY submitted_at DESC",
+        [companyId, getAuthUserId(req)]
+      ),
+    ]);
+
+    const projectMap = new Map(projects.map((p) => [String(p.id), p.name]));
+    const subprojectMap = new Map(subprojects.map((s) => [String(s.id), s]));
+    const submissionMap = new Map();
+    submissions.forEach((s) => {
+      const key = `${s.project_id}:${s.subproject_id || "none"}`;
+      if (!submissionMap.has(key)) submissionMap.set(key, s);
+    });
+
+    const assignments = requirements.map((reqRow) => {
+      const projectId = reqRow.project_id;
+      const subprojectId = reqRow.subproject_id || null;
+      const key = `${projectId}:${subprojectId || "none"}`;
+      const subproject = subprojectId ? subprojectMap.get(String(subprojectId)) : null;
+      const scopeItems = items.filter((item) => {
+        const isGlobal = !item.project_id && !item.subproject_id;
+        const matchesProject =
+          item.project_id && String(item.project_id) === String(projectId) && !item.subproject_id;
+        const matchesSubproject =
+          subprojectId && item.subproject_id && String(item.subproject_id) === String(subprojectId);
+        return isGlobal || matchesProject || matchesSubproject;
+      });
+      return {
+        project_id: projectId,
+        project_name: projectMap.get(String(projectId)) || "Projekt",
+        subproject_id: subprojectId,
+        subproject_name: subproject ? subproject.name : null,
+        items: scopeItems.map((item) => ({ id: item.id, label: item.label })),
+        submitted_at: submissionMap.get(key)?.submitted_at || null,
+        submission_id: submissionMap.get(key)?.id || null,
+      };
+    });
+
+    res.json({ assignments });
+  } catch (err) {
+    console.error("DB-fel vid GET /self-check/assignments:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.post("/self-check/submissions", requireAuth, async (req, res) => {
+  try {
+    const companyId = req.user?.company_id;
+    const userId = getAuthUserId(req);
+    if (!companyId || !userId) return res.status(400).json({ error: "Company not found" });
+
+    const { project_id, subproject_id, notes, items } = req.body || {};
+    if (!project_id) return res.status(400).json({ error: "project_id required" });
+
+    const project = await getDb("SELECT id FROM projects WHERE id = ? AND company_id = ?", [
+      project_id,
+      companyId,
+    ]);
+    if (!project) return res.status(400).json({ error: "Invalid project_id" });
+
+    if (subproject_id) {
+      const subproject = await getDb(
+        "SELECT id, project_id FROM subprojects WHERE id = ? AND company_id = ?",
+        [subproject_id, companyId]
+      );
+      if (!subproject) return res.status(400).json({ error: "Invalid subproject_id" });
+      if (String(subproject.project_id) !== String(project_id)) {
+        return res.status(400).json({ error: "Subproject does not belong to project" });
+      }
+    }
+
+    const requirement = subproject_id
+      ? await getDb(
+          "SELECT required FROM self_check_requirements WHERE company_id = ? AND project_id = ? AND subproject_id = ?",
+          [companyId, project_id, subproject_id]
+        )
+      : await getDb(
+          "SELECT required FROM self_check_requirements WHERE company_id = ? AND project_id = ? AND subproject_id IS NULL",
+          [companyId, project_id]
+        );
+    if (!requirement || Number(requirement.required) !== 1) {
+      return res.status(400).json({ error: "Egenkontroll krävs inte för detta projekt." });
+    }
+
+    const allItems = await allDb(
+      "SELECT id, project_id, subproject_id, label FROM self_check_items WHERE company_id = ? AND is_active = 1",
+      [companyId]
+    );
+    const allowedItems = allItems.filter((item) => {
+      const isGlobal = !item.project_id && !item.subproject_id;
+      const matchesProject =
+        item.project_id && String(item.project_id) === String(project_id) && !item.subproject_id;
+      const matchesSubproject =
+        subproject_id && item.subproject_id && String(item.subproject_id) === String(subproject_id);
+      return isGlobal || matchesProject || matchesSubproject;
+    });
+
+    const submittedItems = Array.isArray(items) ? items : [];
+    const submittedMap = new Map(
+      submittedItems.map((item) => [
+        String(item?.item_id ?? item?.id ?? ""),
+        {
+          checked: item?.checked === true || Number(item?.checked) === 1,
+          comment: item?.comment || null,
+        },
+      ])
+    );
+
+    const itemRows = allowedItems.map((item) => {
+      const entry = submittedMap.get(String(item.id));
+      return {
+        item_id: item.id,
+        label: item.label,
+        checked: entry?.checked ? 1 : 0,
+        comment: entry?.comment ? String(entry.comment).trim() : null,
+      };
+    });
+
+    await runDb("BEGIN");
+    try {
+      const submission = await runDb(
+        `INSERT INTO self_check_submissions (company_id, project_id, subproject_id, user_id, notes)
+         VALUES (?, ?, ?, ?, ?)`,
+        [companyId, project_id, subproject_id || null, userId, notes ? String(notes).trim() : null]
+      );
+      const submissionId = submission?.lastID;
+
+      for (const row of itemRows) {
+        await runDb(
+          `INSERT INTO self_check_submission_items (submission_id, item_id, label, checked, comment)
+           VALUES (?, ?, ?, ?, ?)`,
+          [submissionId, row.item_id, row.label, row.checked, row.comment]
+        );
+      }
+      await runDb("COMMIT");
+      res.json({ success: true, submission_id: submissionId });
+    } catch (err) {
+      await runDb("ROLLBACK");
+      throw err;
+    }
+  } catch (err) {
+    console.error("DB-fel vid POST /self-check/submissions:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+// ======================
 //   WORK ORDERS
 // ======================
 app.get("/work-orders", requireAuth, requireAdmin, (req, res) => {
@@ -4091,9 +4663,10 @@ app.put("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
 // Ta bort användare (admin)
 app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
   const { id } = req.params;
+  const hardDelete = ["1", "true", "yes"].includes(String(req.query.hard || req.query.permanent || "").toLowerCase());
 
   // Check target user's company
-  db.get(`SELECT company_id, role FROM users WHERE id = ?`, [id], (gErr, row) => {
+  db.get(`SELECT company_id, role, is_active FROM users WHERE id = ?`, [id], (gErr, row) => {
     if (gErr) {
       console.error("DB-fel vid SELECT users for DELETE:", gErr);
       return res.status(500).json({ error: "DB error" });
@@ -4107,6 +4680,67 @@ app.delete("/admin/users/:id", requireAuth, requireAdmin, (req, res) => {
     }
     if (actorRole !== "super_admin" && String(row.role || "").toLowerCase() === "super_admin") {
       return res.status(403).json({ error: "Endast superadmin kan avaktivera superadmin." });
+    }
+    if (hardDelete && Number(row.is_active) !== 0) {
+      return res.status(409).json({ error: "Användaren måste vara avaktiverad innan borttagning." });
+    }
+
+    if (hardDelete) {
+      const runAsync = (sql, params = []) =>
+        new Promise((resolve, reject) => {
+          db.run(sql, params, function (err) {
+            if (err) reject(err);
+            else resolve(this);
+          });
+        });
+      (async () => {
+        try {
+          await runAsync("BEGIN");
+          await runAsync("DELETE FROM push_tokens WHERE user_id = ?", [id]);
+          await runAsync("DELETE FROM work_order_assignees WHERE user_id = ?", [id]);
+          await runAsync("DELETE FROM work_order_comments WHERE user_id = ?", [id]);
+          await runAsync(
+            "DELETE FROM deviation_images WHERE deviation_report_id IN (SELECT id FROM deviation_reports WHERE user_id = ?)",
+            [id]
+          );
+          await runAsync("DELETE FROM deviation_reports WHERE user_id = ?", [id]);
+          await runAsync("DELETE FROM welding_reports WHERE user_id = ?", [id]);
+          await runAsync("DELETE FROM plans WHERE user_id = ?", [id]);
+          await runAsync(
+            "DELETE FROM self_check_submission_items WHERE submission_id IN (SELECT id FROM self_check_submissions WHERE user_id = ?)",
+            [id]
+          );
+          await runAsync("DELETE FROM self_check_submissions WHERE user_id = ?", [id]);
+          await runAsync("DELETE FROM employee_certificates WHERE user_id = ?", [id]);
+          await runAsync("DELETE FROM time_reports WHERE user_id = ?", [id]);
+          const deleteResult = await runAsync("DELETE FROM users WHERE id = ?", [id]);
+          if (!deleteResult || deleteResult.changes === 0) {
+            await runAsync("ROLLBACK");
+            return res.status(404).json({ error: "Användaren hittades inte." });
+          }
+          await runAsync("COMMIT");
+          logAudit({
+            req,
+            companyId: row.company_id,
+            actorUserId: getAuthUserId(req),
+            action: "USER_HARD_DELETED",
+            entityType: "user",
+            entityId: id,
+            metadata: { role: row.role },
+            success: true
+          });
+          return res.json({ success: true, hard_deleted: true });
+        } catch (err) {
+          try {
+            await runAsync("ROLLBACK");
+          } catch (rollbackErr) {
+            console.error("DB-fel vid ROLLBACK /admin/users/:id:", rollbackErr);
+          }
+          console.error("DB-fel vid HARD DELETE /admin/users/:id:", err);
+          return res.status(500).json({ error: "Kunde inte ta bort användare." });
+        }
+      })();
+      return;
     }
 
     db.run(
@@ -4745,9 +5379,13 @@ app.post("/admin/fortnox/connect", requireAuth, requireAdmin, (req, res) => {
   const normalizedScopes = requestedScopes
     .map((scope) => String(scope || "").trim())
     .filter(Boolean);
+  const droppedScopes = normalizedScopes.filter((scope) => !allowedScopes.includes(scope));
   const effectiveScopes = normalizedScopes.length
     ? normalizedScopes.filter((scope) => allowedScopes.includes(scope))
     : allowedScopes;
+  if (droppedScopes.length) {
+    console.warn("Fortnox scope filtered (not allowed by server config):", droppedScopes);
+  }
   const authUrl = buildFortnoxAuthUrl({
     clientId,
     redirectUri: FORTNOX_REDIRECT_URI,
@@ -4760,7 +5398,7 @@ app.post("/admin/fortnox/connect", requireAuth, requireAdmin, (req, res) => {
 });
 
 app.get("/admin/fortnox/scopes", requireAuth, requireAdmin, (req, res) => {
-  res.json({ allowed: getAllowedFortnoxScopes() });
+  res.json({ allowed: getAllowedFortnoxScopes(), available: getAvailableFortnoxScopes() });
 });
 
 app.post("/admin/fortnox/disconnect", requireAuth, requireAdmin, (req, res) => {
@@ -5360,6 +5998,192 @@ app.get("/admin/fortnox/customers", requireAuth, requireAdmin, async (req, res) 
     });
   } catch (err) {
     console.error("Error fetching Fortnox customers:", err);
+    return res.status(500).json({ error: err?.message || "Fortnox fetch failed" });
+  }
+});
+
+app.get("/admin/fortnox/employees", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowAll = req.company_scope_all === true;
+    const targetCompanyId = allowAll && req.query.company_id ? req.query.company_id : getScopedCompanyId(req);
+    if (!targetCompanyId) return res.status(400).json({ error: "company_id required" });
+
+    const connection = await getFortnoxConnection(targetCompanyId);
+    if (!connection?.access_token) {
+      return res.status(409).json({ error: "Fortnox not connected" });
+    }
+    if (!hasFortnoxEmployeeScope(connection.scope)) {
+      return res.status(409).json({
+        error: "Fortnox saknar behörighet för anställda. Koppla om Fortnox med scope: employee eller salary.",
+        missing_scopes: ["employee", "salary"],
+      });
+    }
+
+    const accessToken = await getFortnoxAccessToken(targetCompanyId);
+    if (!accessToken) {
+      return res.status(409).json({ error: "Fortnox not connected" });
+    }
+
+    const employees = await fetchFortnoxEmployees(accessToken);
+    if (!employees.length) {
+      return res.json({ employees: [], imported: 0, updated: 0, skipped: 0, total: 0 });
+    }
+
+    const existingRows = await new Promise((resolve, reject) => {
+      db.all(
+        "SELECT id, email, employee_number FROM users WHERE company_id = ?",
+        [targetCompanyId],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
+        }
+      );
+    });
+    const existingByEmail = new Map();
+    const existingByEmployeeNumber = new Map();
+    existingRows.forEach((row) => {
+      const email = String(row?.email || "").trim().toLowerCase();
+      const employeeNumber = String(row?.employee_number || "").trim();
+      if (email) existingByEmail.set(email, row.id);
+      if (employeeNumber) existingByEmployeeNumber.set(employeeNumber, row.id);
+    });
+
+    const runAsync = (sql, params = []) =>
+      new Promise((resolve, reject) => {
+        db.run(sql, params, function (err) {
+          if (err) reject(err);
+          else resolve(this);
+        });
+      });
+    const generateTempPassword = () => {
+      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let pwd = "";
+      for (let i = 0; i < 10; i += 1) {
+        pwd += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return `${pwd}Aa1`;
+    };
+    const safeName = (value) => {
+      const trimmed = String(value || "").trim();
+      return trimmed || null;
+    };
+    const buildFallbackEmail = (employeeNumber) => {
+      if (!employeeNumber) return null;
+      const token = String(employeeNumber).trim().replace(/[^a-zA-Z0-9._-]/g, "-");
+      return token ? `fortnox-${targetCompanyId}-${token}@opero.local` : null;
+    };
+
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    let skippedMissingIdentifier = 0;
+    let skippedDuplicate = 0;
+
+    await runAsync("BEGIN");
+    try {
+      for (const employee of employees) {
+        const email = employee.email ? String(employee.email).trim().toLowerCase() : null;
+        const employeeNumber = employee.employee_number ? String(employee.employee_number).trim() : null;
+        const fallbackEmail = buildFallbackEmail(employeeNumber);
+        const effectiveEmail = email || fallbackEmail;
+        const existingId =
+          (email && existingByEmail.get(email)) ||
+          (employeeNumber && existingByEmployeeNumber.get(employeeNumber)) ||
+          null;
+
+        if (existingId) {
+          await runAsync(
+            `UPDATE users
+             SET first_name = COALESCE(?, first_name),
+                 last_name = COALESCE(?, last_name),
+                 phone = COALESCE(?, phone),
+                 employee_number = COALESCE(?, employee_number)
+             WHERE id = ? AND company_id = ?`,
+            [
+              safeName(employee.first_name),
+              safeName(employee.last_name),
+              safeName(employee.phone),
+              employeeNumber,
+              existingId,
+              targetCompanyId,
+            ]
+          );
+          updated += 1;
+          continue;
+        }
+
+        if (!effectiveEmail && !employeeNumber) {
+          skipped += 1;
+          skippedMissingIdentifier += 1;
+          continue;
+        }
+
+        const password = generateTempPassword();
+        const hash = bcrypt.hashSync(password, 10);
+        try {
+          const result = await runAsync(
+            `INSERT INTO users
+              (username, email, password, role, company_id, first_name, last_name, phone, employee_number)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              effectiveEmail,
+              effectiveEmail,
+              hash,
+              "user",
+              targetCompanyId || null,
+              safeName(employee.first_name) || "-",
+              safeName(employee.last_name) || "-",
+              safeName(employee.phone),
+              employeeNumber,
+            ]
+          );
+          imported += 1;
+          if (effectiveEmail) existingByEmail.set(effectiveEmail, result.lastID);
+          if (employeeNumber) existingByEmployeeNumber.set(employeeNumber, result.lastID);
+        } catch (err) {
+          const message = String(err?.message || "");
+          if (message.includes("UNIQUE")) {
+            skipped += 1;
+            skippedDuplicate += 1;
+            continue;
+          }
+          throw err;
+        }
+      }
+      await runAsync("COMMIT");
+    } catch (err) {
+      await runAsync("ROLLBACK");
+      throw err;
+    }
+
+    logAudit({
+      req,
+      companyId: targetCompanyId || null,
+      actorUserId: getAuthUserId(req),
+      action: "FORTNOX_EMPLOYEES_SYNC",
+      entityType: "user",
+      metadata: {
+        imported,
+        updated,
+        skipped,
+        skippedMissingIdentifier,
+        skippedDuplicate,
+      },
+      success: true,
+    });
+
+    return res.json({
+      employees,
+      imported,
+      updated,
+      skipped,
+      skipped_missing_email: skippedMissingIdentifier,
+      skipped_missing_identifier: skippedMissingIdentifier,
+      skipped_duplicate: skippedDuplicate,
+      total: employees.length,
+    });
+  } catch (err) {
+    console.error("Error fetching Fortnox employees:", err);
     return res.status(500).json({ error: err?.message || "Fortnox fetch failed" });
   }
 });

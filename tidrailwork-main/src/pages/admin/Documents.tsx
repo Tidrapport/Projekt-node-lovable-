@@ -94,7 +94,7 @@ const AdminDocuments = () => {
       const data = await apiFetch<DocRow[]>("/admin/tdok-docs");
       setDocs(data || []);
     } catch (error: any) {
-      toast.error(error.message || "Kunde inte hämta TDOK-dokument");
+      toast.error(error.message || "Kunde inte hämta dokument");
     } finally {
       setDocsLoading(false);
     }
@@ -444,17 +444,17 @@ const AdminDocuments = () => {
     <div className="container mx-auto space-y-6 p-6">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold">Dokument</h1>
-          <p className="text-muted-foreground">Hantera TDOK-dokument och intyg för kompetensmatris</p>
+          <h1 className="text-2xl font-bold">Dokument & intyg</h1>
+          <p className="text-muted-foreground">Hantera intyg, certifikat och kompetenser för kompetensmatris</p>
         </div>
         <GuideButton
-          title="Guide: Dokumentation"
+          title="Guide: Intyg & dokument"
           steps={[
-            "Lägg upp aktuella TDOK- och styrande dokument.",
+            "Lägg upp aktuella intyg och certifikat.",
             "Använd tydliga filnamn och versioner.",
             "Uppdatera eller ersätt gamla dokument vid förändringar.",
             "Ta bort föråldrade filer för att undvika fel underlag.",
-            "Kontrollera att dokumenten går att ladda ner vid behov.",
+            "Kontrollera att dokumenten går att öppna vid behov.",
           ]}
         />
       </div>
@@ -465,9 +465,9 @@ const AdminDocuments = () => {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
-                TDOK-dokument
+                Dokument
               </CardTitle>
-              <CardDescription>Dokument som TDOK AI använder</CardDescription>
+              <CardDescription>Interna dokument och mallar</CardDescription>
             </div>
             <Button onClick={openCreateDoc} className="gap-2">
               <Plus className="h-4 w-4" />
@@ -535,8 +535,8 @@ const AdminDocuments = () => {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <CardTitle>Intyg och kompetens</CardTitle>
-              <CardDescription>Registrera intyg med giltighet för export</CardDescription>
+              <CardTitle>Intyg och kompetenser</CardTitle>
+              <CardDescription>Registrera intyg/kompetenser, fil är valfri</CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={exportCertificates} className="gap-2">
@@ -545,7 +545,7 @@ const AdminDocuments = () => {
               </Button>
               <Button onClick={openCreateCert} className="gap-2">
                 <Plus className="h-4 w-4" />
-                Lägg till intyg
+                Lägg till intyg/kompetens
               </Button>
             </div>
           </div>
@@ -577,7 +577,7 @@ const AdminDocuments = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Anställd</TableHead>
-                  <TableHead>Intyg</TableHead>
+                  <TableHead>Intyg/kompetens</TableHead>
                   <TableHead>Giltig från</TableHead>
                   <TableHead>Giltig till</TableHead>
                   <TableHead>Status</TableHead>
@@ -647,7 +647,7 @@ const AdminDocuments = () => {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{docEditing ? "Redigera dokument" : "Nytt dokument"}</DialogTitle>
-            <DialogDescription>TDOK AI läser .txt/.md. PDF extraheras till text för AI.</DialogDescription>
+            <DialogDescription>.txt/.md och PDF stöds. PDF extraheras till text vid behov.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
@@ -707,8 +707,8 @@ const AdminDocuments = () => {
       <Dialog open={certDialogOpen} onOpenChange={setCertDialogOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{certEditing ? "Redigera intyg" : "Nytt intyg"}</DialogTitle>
-            <DialogDescription>Lägg in intyg för kompetensmatrisen.</DialogDescription>
+            <DialogTitle>{certEditing ? "Redigera intyg/kompetens" : "Nytt intyg/kompetens"}</DialogTitle>
+            <DialogDescription>Lägg in intyg eller kompetens för kompetensmatrisen.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
@@ -755,7 +755,7 @@ const AdminDocuments = () => {
               <Textarea value={certNotes} onChange={(e) => setCertNotes(e.target.value)} rows={3} />
             </div>
             <div className="space-y-2">
-              <Label>Intygsfil (valfritt)</Label>
+              <Label>Fil (valfritt)</Label>
               <Input type="file" onChange={(e) => handleCertFile(e.target.files?.[0])} />
               {certEditing?.file_url && !certFileName && (
                 <div className="text-xs text-muted-foreground">Nuvarande fil finns sparad.</div>
