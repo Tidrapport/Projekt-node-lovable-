@@ -27,6 +27,8 @@ export const FEATURE_OPTIONS = [
   { key: "menu_settings", label: "Meny inställning" },
   { key: "activity_log", label: "Aktivitetslogg" },
   { key: "admin_hub", label: "AdminHub (Mitt Företag)" },
+  { key: "quality_system_3834_2", label: "Kvalitetssystem 3834-2" },
+  { key: "quality_system_9001", label: "Kvalitetssystem 9001" },
 ];
 
 export const FEATURE_LABELS = FEATURE_OPTIONS.reduce<Record<string, string>>((acc, item) => {

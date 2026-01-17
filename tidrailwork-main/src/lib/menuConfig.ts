@@ -20,6 +20,8 @@ import {
   BadgeCheck,
   Contact,
   Key,
+  ShieldCheck,
+  Shield,
 } from "lucide-react";
 
 export type MenuSectionKey = "user" | "admin_main" | "admin_hub";
@@ -68,6 +70,20 @@ export const ADMIN_MAIN_ITEMS: MenuItem[] = [
   { id: "customers", title: "Kunder", url: "/admin/customers", icon: Users, feature: "customers" },
   { id: "offers", title: "Offerter", url: "/admin/offers", icon: FileText, feature: "offers" },
   { id: "projects", title: "Projekt", url: "/admin/projects", icon: FolderKanban, feature: "projects" },
+  {
+    id: "quality_system_3834_2",
+    title: "Kvalitetssystem 3834-2",
+    url: "/admin/quality-system-3834-2",
+    icon: ShieldCheck,
+    feature: "quality_system_3834_2",
+  },
+  {
+    id: "quality_system_9001",
+    title: "Kvalitetssystem 9001",
+    url: "/admin/quality-system-9001",
+    icon: Shield,
+    feature: "quality_system_9001",
+  },
 ];
 
 export const ADMIN_HUB_ITEMS: MenuItem[] = [

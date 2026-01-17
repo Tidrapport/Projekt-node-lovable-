@@ -1199,6 +1199,8 @@ db.serialize(() => {
       supervisor_phone TEXT,
       deviations TEXT,
       comments TEXT,
+      attested_at TEXT,
+      attested_by INTEGER,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
@@ -1208,6 +1210,25 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_welding_reports_user ON welding_reports(user_id);`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_welding_reports_company ON welding_reports(company_id);`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_welding_reports_year_month ON welding_reports(report_year, report_month);`);
+
+  db.all(`PRAGMA table_info(welding_reports);`, (err, columns) => {
+    if (err) {
+      console.error("Kunde inte läsa schema för welding_reports:", err);
+      return;
+    }
+    const hasAttestedAt = columns.some((col) => col.name === "attested_at");
+    if (!hasAttestedAt) {
+      db.run(`ALTER TABLE welding_reports ADD COLUMN attested_at TEXT;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till attested_at i welding_reports:", alterErr);
+      });
+    }
+    const hasAttestedBy = columns.some((col) => col.name === "attested_by");
+    if (!hasAttestedBy) {
+      db.run(`ALTER TABLE welding_reports ADD COLUMN attested_by INTEGER;`, (alterErr) => {
+        if (alterErr) console.error("Kunde inte lägga till attested_by i welding_reports:", alterErr);
+      });
+    }
+  });
 
   // --- Deviation images ---
   db.run(`

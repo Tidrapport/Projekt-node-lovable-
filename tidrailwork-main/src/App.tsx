@@ -46,6 +46,7 @@ import SuperAdminDashboard from "./pages/superadmin/Dashboard";
 import NotFound from "./pages/NotFound";
 import AdminBilling from "./pages/admin/Billing";
 import AdminInvoiceMarking from "./pages/admin/InvoiceMarking";
+import QualitySystemRedirect from "./pages/admin/QualitySystemRedirect";
 
 const queryClient = new QueryClient();
 
@@ -252,6 +253,30 @@ const App = () => (
                     <FeatureRoute feature="projects">
                       <Layout>
                         <AdminProjects />
+                      </Layout>
+                    </FeatureRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/quality-system-3834-2"
+                element={
+                  <ProtectedRoute>
+                    <FeatureRoute feature="quality_system_3834_2">
+                      <Layout>
+                        <QualitySystemRedirect standard="3834-2" />
+                      </Layout>
+                    </FeatureRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/quality-system-9001"
+                element={
+                  <ProtectedRoute>
+                    <FeatureRoute feature="quality_system_9001">
+                      <Layout>
+                        <QualitySystemRedirect standard="9001" />
                       </Layout>
                     </FeatureRoute>
                   </ProtectedRoute>

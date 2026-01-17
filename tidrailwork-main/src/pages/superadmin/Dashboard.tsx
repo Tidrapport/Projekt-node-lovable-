@@ -97,6 +97,9 @@ const buildPlanDeadline = (value?: string | null) => {
 };
 
 const MAX_DATE = new Date(8640000000000000);
+const QUALITY_SYSTEM_FEATURES = FEATURE_OPTIONS.filter((feature) =>
+  ["quality_system_3834_2", "quality_system_9001"].includes(feature.key)
+);
 
 const buildActiveIntervals = (user: BillingUser) => {
   const createdAt = parseSqlDate(user.created_at);
@@ -166,6 +169,7 @@ const SuperAdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showNewCompanyDialog, setShowNewCompanyDialog] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [companyFeatures, setCompanyFeatures] = useState<string[]>([]);
 
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyBillingEmail, setNewCompanyBillingEmail] = useState("");
@@ -230,6 +234,14 @@ const SuperAdminDashboard = () => {
       return;
     }
     fetchCompanyAdmins(String(editingCompany.id));
+  }, [editingCompany?.id]);
+
+  useEffect(() => {
+    if (!editingCompany) {
+      setCompanyFeatures([]);
+      return;
+    }
+    setCompanyFeatures(Array.isArray(editingCompany.features) ? editingCompany.features : []);
   }, [editingCompany?.id]);
 
   useEffect(() => {
@@ -458,6 +470,7 @@ const SuperAdminDashboard = () => {
           billing_email: editingCompany.billing_email,
           code: editingCompany.code,
           plan: editingCompany.plan || "Bas",
+          features: companyFeatures,
         },
       });
       toast.success("Företag uppdaterat");
@@ -484,6 +497,10 @@ const SuperAdminDashboard = () => {
   const copyCode = (code: string) => {
     navigator.clipboard.writeText(code);
     toast.success("Företagskod kopierad");
+  };
+
+  const toggleCompanyFeature = (key: string) => {
+    setCompanyFeatures((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
 
   const periodDates = useMemo(() => {
@@ -1368,6 +1385,26 @@ const SuperAdminDashboard = () => {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-blue-200">Kvalitetssystem</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {QUALITY_SYSTEM_FEATURES.map((feature) => {
+                    const checked = companyFeatures.includes(feature.key);
+                    return (
+                      <label
+                        key={feature.key}
+                        className="flex items-start gap-3 rounded-xl border border-slate-800/70 bg-slate-950/60 p-3 text-sm"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleCompanyFeature(feature.key)}
+                        />
+                        <span className="text-slate-200">{feature.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label className="text-blue-200">Företagsadmin</Label>

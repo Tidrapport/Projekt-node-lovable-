@@ -175,6 +175,8 @@ const AVAILABLE_FEATURES = [
   "salary_overview",
   "contacts",
   "projects",
+  "quality_system_3834_2",
+  "quality_system_9001",
   "admin_users",
   "attestation",
   "billing",
@@ -10516,6 +10518,10 @@ const mapWeldingRow = (row) => {
     supervisor_phone: row.supervisor_phone || null,
     deviations: row.deviations || null,
     comments: row.comments || null,
+    attested_at: row.attested_at || null,
+    attested_by: row.attested_by ? String(row.attested_by) : null,
+    attested_by_name: row.attested_by_name || null,
+    attested: !!row.attested_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -10641,9 +10647,11 @@ app.get("/welding_reports", requireAuth, (req, res) => {
   const sql = `
     SELECT wr.*,
       (u.first_name || ' ' || u.last_name) AS user_full_name,
-      u.email AS user_email
+      u.email AS user_email,
+      (au.first_name || ' ' || au.last_name) AS attested_by_name
     FROM welding_reports wr
     JOIN users u ON u.id = wr.user_id
+    LEFT JOIN users au ON au.id = wr.attested_by
     WHERE ${where.join(" AND ")}
     ORDER BY datetime(wr.created_at) DESC, wr.id DESC
   `;
@@ -10712,6 +10720,60 @@ app.post("/welding_reports/:id/entries", requireAuth, (req, res) => {
         db.get(`SELECT * FROM welding_reports WHERE id = ?`, [id], (selErr, updated) => {
           if (selErr || !updated) return res.status(500).json({ error: "DB error" });
           res.json(mapWeldingRow(updated));
+        });
+      }
+    );
+  });
+});
+
+// Attest welding report (admin only)
+app.post("/welding_reports/:id/attest", requireAuth, (req, res) => {
+  const companyId = getScopedCompanyId(req);
+  if (!companyId) return res.status(400).json({ error: "Company not found" });
+  if (!isAdminRole(req)) return res.status(403).json({ error: "Forbidden" });
+
+  const id = req.params.id;
+  const { attested } = req.body || {};
+  const shouldAttest = attested !== false;
+  const actorUserId = getAuthUserId(req);
+
+  db.get(`SELECT id, company_id FROM welding_reports WHERE id = ?`, [id], (err, row) => {
+    if (err) return res.status(500).json({ error: "DB error" });
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (String(row.company_id) !== String(companyId)) return res.status(403).json({ error: "Forbidden" });
+
+    const attestedAt = shouldAttest ? new Date().toISOString() : null;
+    const attestedBy = shouldAttest ? actorUserId : null;
+
+    db.run(
+      `UPDATE welding_reports
+       SET attested_at = ?, attested_by = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+      [attestedAt, attestedBy, id],
+      function (updErr) {
+        if (updErr) {
+          console.error("DB-fel vid attest welding_report:", updErr);
+          return res.status(500).json({ error: "DB error" });
+        }
+
+        const detailSql = `
+          SELECT wr.*,
+            (u.first_name || ' ' || u.last_name) AS user_full_name,
+            u.email AS user_email,
+            (au.first_name || ' ' || au.last_name) AS attested_by_name
+          FROM welding_reports wr
+          JOIN users u ON u.id = wr.user_id
+          LEFT JOIN users au ON au.id = wr.attested_by
+          WHERE wr.id = ?
+        `;
+
+        db.get(detailSql, [id], (selErr, updated) => {
+          if (selErr || !updated) return res.status(500).json({ error: "DB error" });
+          const mapped = mapWeldingRow(updated);
+          if (updated.user_full_name) {
+            mapped.profiles = { full_name: updated.user_full_name };
+          }
+          res.json(mapped);
         });
       }
     );

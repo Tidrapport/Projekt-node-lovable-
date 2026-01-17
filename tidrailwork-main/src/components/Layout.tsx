@@ -42,7 +42,7 @@ export const Layout = ({ children }: LayoutProps) => {
             </div>
             {user && (
               <span className="text-sm text-primary-foreground/80 hidden md:block">
-                Välkommen, {fullName || 'Användare'}
+                Välkommen, {fullName || "Användare"}
               </span>
             )}
           </header>

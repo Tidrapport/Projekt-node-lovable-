@@ -26,6 +26,20 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const consumeTokenFromUrl = () => {
+  try {
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get("token") || url.searchParams.get("access_token");
+    if (!token) return;
+    setToken(token);
+    url.searchParams.delete("token");
+    url.searchParams.delete("access_token");
+    window.history.replaceState({}, "", url.toString());
+  } catch {
+    return;
+  }
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<authApi.AuthUser | null>(null);
   const [companyId, setCompanyId] = useState<number | null>(null);
@@ -112,6 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
+        consumeTokenFromUrl();
         await refresh();
       } catch {
         clearToken();
