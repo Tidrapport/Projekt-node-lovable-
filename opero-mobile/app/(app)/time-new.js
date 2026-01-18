@@ -406,18 +406,15 @@ export default function TimeNew() {
       const overtimeWeekdayValue = String(last.overtime_weekday_hours || "");
       const overtimeWeekendValue = String(last.overtime_weekend_hours || "");
       const compSavedValue = String(last.comp_time_saved_hours || "");
-      const compTakenValue = String(last.comp_time_taken_hours || "");
       setOvertimeWeekday(overtimeWeekdayValue);
       setOvertimeWeekend(overtimeWeekendValue);
       setCompTimeSaved(compSavedValue);
-      setCompTimeTaken(compTakenValue);
+      setCompTimeTaken("");
       setOvertimeEnabled(
         Number(overtimeWeekdayValue || 0) > 0 || Number(overtimeWeekendValue || 0) > 0
       );
       setCompEnabled(
-        Number(compSavedValue || 0) > 0 ||
-          Number(compTakenValue || 0) > 0 ||
-          Boolean(last.save_comp_time)
+        Number(compSavedValue || 0) > 0 || Boolean(last.save_comp_time)
       );
       const mats = Array.isArray(last.materials) ? last.materials : [];
       setMaterials(
@@ -453,7 +450,7 @@ export default function TimeNew() {
         <Text style={styles.title}>{isEdit ? "Redigera tidrapport" : "Ny tidrapport"}</Text>
         {!isEdit ? (
           <Pressable style={styles.copyButton} onPress={copyLastReport}>
-            <Text style={styles.copyButtonText}>Kopiera</Text>
+            <Text style={styles.copyButtonText}>Kopiera från föregående</Text>
           </Pressable>
         ) : null}
       </View>
@@ -589,17 +586,10 @@ export default function TimeNew() {
         </View>
         {compEnabled ? (
           <>
-            <Text style={styles.label}>Komptimmar sparade (h)</Text>
+            <Text style={styles.label}>Komptimmar spara (h)</Text>
             <TextInput
               value={compTimeSaved}
               onChangeText={setCompTimeSaved}
-              keyboardType="decimal-pad"
-              style={styles.input}
-            />
-            <Text style={styles.label}>Komptimmar uttagna (h)</Text>
-            <TextInput
-              value={compTimeTaken}
-              onChangeText={setCompTimeTaken}
               keyboardType="decimal-pad"
               style={styles.input}
             />
